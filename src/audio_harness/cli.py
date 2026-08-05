@@ -244,6 +244,12 @@ def report_command(
     language: Annotated[
         str, typer.Option(help="BCP-47 tag driving normalization and metric choice.")
     ] = "en-US",
+    plots: Annotated[
+        bool, typer.Option(help="Render Pareto and latency charts as PNGs.")
+    ] = True,
+    latency_metric: Annotated[
+        str, typer.Option(help="Latency axis for charts: finalize or ttft.")
+    ] = "finalize",
 ) -> None:
     """Re-render a report from saved results, merging several runs if given.
 
@@ -284,6 +290,20 @@ def report_command(
     frame = report.stt_summary_frame(merged, language)
     markdown = report.render_stt_markdown(frame)
     _emit(results[0], "STT", markdown)
+
+    if plots:
+        from . import plot
+
+        charts = plot.render_all(
+            frame, results[0].parent / "charts", metric=latency_metric
+        )
+        for chart in charts:
+            console.print(f"[dim]chart:[/dim]       {chart}")
+        if not charts:
+            console.print(
+                "[yellow]no charts rendered[/yellow] — charts need at least "
+                "two streaming providers with latency and accuracy"
+            )
 
 
 def _emit(results_path: Path, title: str, markdown: str) -> None:
