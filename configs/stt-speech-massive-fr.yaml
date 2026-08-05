@@ -1,0 +1,60 @@
+# Multilingual STT benchmark over Speech-MASSIVE (FBK).
+#
+#   hf download FBK-MT/Speech-MASSIVE --repo-type dataset \
+#     --include 'fr-FR/*' --local-dir data/hf/speech-massive
+#   uv run audio-harness stt configs/stt-speech-massive-fr.yaml
+#
+# Spoken voice-assistant commands in 12 languages: ar-SA, de-DE, es-ES, fr-FR,
+# hu-HU, ko-KR, nl-NL, pl-PL, pt-PT, ru-RU, tr-TR, vi-VN. Human transcripts.
+# This is the closest multilingual analogue to the Pipecat corpus, because the
+# utterances are actual assistant requests rather than read prose.
+#
+# LICENSE: CC-BY-NC-SA-4.0. Non-commercial. Fine for an internal vendor
+# evaluation; check with legal before it informs a shipped product decision or
+# appears in external material. FLEURS (CC-BY-4.0) is the permissive fallback.
+#
+# There is no `test` split — the config uses `validation`, which is the
+# intended held-out set here.
+#
+# Swap the language by changing both `parquet` and `language`. Keep the seed
+# fixed so subsets stay comparable across languages and across days.
+
+stt:
+  - name: deepgram-nova3
+    modes: [batch, stream]
+    options:
+      model: nova-3-multilingual
+      language: multi
+  - name: assemblyai-universal35pro
+    modes: [batch, stream]
+  - name: speechmatics-enhanced
+    modes: [batch, stream]
+  - name: elevenlabs-scribe2
+    modes: [batch, stream]
+  - name: soniox-rt-v5
+    modes: [stream]
+    options:
+      language_hints: [fr]
+  - name: google-chirp3
+    modes: [batch, stream]
+    options:
+      location: us
+
+dataset:
+  parquet: data/hf/speech-massive/fr-FR/validation/0000.parquet
+  id_column: id
+  audio_column: audio
+  text_column: utt
+  language: fr-FR
+  limit: 30
+  sample_seed: 20260805
+
+run:
+  repeats: 1
+  warmup: 1
+  chunk_ms: 20
+  realtime: true
+  provider_concurrency: 6
+  vendor_concurrency: 1
+  timeout_s: 180
+  output_dir: results
