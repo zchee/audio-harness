@@ -207,6 +207,42 @@ class TestPerLanguageScoring:
             "a mixed run scores each language by its own appropriate metric"
         )
 
+    def test_overview_chart_needs_two_languages(self, tmp_path: Path) -> None:
+        from audio_harness.plot import plot_overview
+
+        single = stt_summary_frame(
+            [_result("p", "fr-FR", "bonjour", "bonjour")], "en-US"
+        )
+        assert plot_overview(single, tmp_path / "single.png") is None, (
+            "one language has its own per-language charts; an overview of it "
+            "would just be a worse table"
+        )
+
+    def test_overview_chart_renders_a_mixed_metric_run(self, tmp_path: Path) -> None:
+        """The overview must survive WER and CER side by side plus gaps."""
+        from audio_harness.plot import plot_overview
+
+        results = []
+        for provider, err in [("p", ""), ("q", "x ")]:
+            for language, ref in [
+                ("fr-FR", "bonjour le monde entier"),
+                ("ja-JP", "今日は良い天気です"),
+                ("de-DE", "guten tag mein freund"),
+            ]:
+                if provider == "q" and language == "de-DE":
+                    continue  # missing lane must render as a gap, not a crash
+                result = _result(provider, language, ref, err + ref)
+                result.finalize_s = 0.4 if provider == "p" else 0.9
+                results.append(result)
+
+        frame = stt_summary_frame(results, "en-US")
+        output = plot_overview(frame, tmp_path / "overview.png")
+
+        assert output is not None
+        assert output.is_file() and output.stat().st_size > 10_000, (
+            "the chart should be a real render, not an empty canvas"
+        )
+
     def test_report_has_one_row_per_language(self) -> None:
         results = [
             _result("p", "fr-FR", "bonjour", "bonjour"),

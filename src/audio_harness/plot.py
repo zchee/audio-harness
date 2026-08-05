@@ -540,6 +540,266 @@ def plot_language_grid(
     return output
 
 
+AMBER = "#c9822b"
+"""Hue for the latency panel of the overview, kept apart from the data blue."""
+
+
+@dataclass(slots=True, frozen=True)
+class _Cell:
+    """One provider/language cell of the overview matrix."""
+
+    value: float | None
+    display: str
+    shade: float
+
+
+def _overview_matrix(
+    rows: list[dict[str, object]],
+    providers: list[str],
+    languages: list[str],
+    *,
+    value_key: str,
+    per_language_shading: bool,
+    fmt: str,
+    scale: float = 1.0,
+) -> list[list[_Cell]]:
+    """Build the cell matrix for one overview panel.
+
+    Shading is where the honesty lives. Accuracy shades within each language
+    column, because a Japanese CER and a French WER share no scale — a cell's
+    darkness may only rank providers against each other on the same corpus.
+    Latency shades globally, because a second is a second in every language and
+    cross-language comparison is exactly what that panel is for.
+
+    Args:
+        rows: Summary rows for one mode.
+        providers: Row order.
+        languages: Column order.
+        value_key: Summary column to plot.
+        per_language_shading: Normalize shading per column instead of globally.
+        fmt: ``format()`` spec for the annotated value.
+        scale: Multiplier applied before display, e.g. 100 for percentages.
+
+    Returns:
+        ``matrix[row][column]`` cells; missing lanes yield an em-dash cell.
+    """
+    lookup: dict[tuple[str, str], dict[str, object]] = {
+        (str(row["provider"]), str(row["language"])): row for row in rows
+    }
+
+    def value_of(provider: str, language: str) -> float | None:
+        row = lookup.get((provider, language))
+        if row is None:
+            return None
+        value = row.get(value_key)
+        return float(value) * scale if value is not None else None
+
+    def shades(values: list[float | None]) -> list[float]:
+        present = [v for v in values if v is not None]
+        low, high = (min(present), max(present)) if present else (0.0, 0.0)
+        span = high - low
+        return [0.0 if v is None or span <= 0 else (v - low) / span for v in values]
+
+    columns: list[list[float | None]] = [
+        [value_of(p, language) for p in providers] for language in languages
+    ]
+    if per_language_shading:
+        column_shades = [shades(column) for column in columns]
+    else:
+        flat = shades([v for column in columns for v in column])
+        column_shades = [
+            flat[i * len(providers) : (i + 1) * len(providers)]
+            for i in range(len(languages))
+        ]
+
+    matrix: list[list[_Cell]] = []
+    for row_index, provider in enumerate(providers):
+        cells: list[_Cell] = []
+        for col_index, language in enumerate(languages):
+            value = columns[col_index][row_index]
+            row = lookup.get((provider, language))
+            failed = bool(row and row.get("failures"))
+            display = (
+                "—" if value is None else format(value, fmt) + ("*" if failed else "")
+            )
+            cells.append(
+                _Cell(
+                    value=value,
+                    display=display,
+                    shade=column_shades[col_index][row_index],
+                )
+            )
+        matrix.append(cells)
+    return matrix
+
+
+def _draw_overview_panel(
+    ax: object,
+    matrix: list[list[_Cell]],
+    *,
+    hue: str,
+    columns: list[str],
+    providers: list[str] | None,
+    title: str,
+) -> None:
+    """Paint one heatmap panel of the overview figure."""
+    from matplotlib.patches import Rectangle
+
+    for y, row in enumerate(matrix):
+        for x, cell in enumerate(row):
+            if cell.value is None:
+                face = _mix(GRID, SURFACE, 0.55)
+                text_color = MUTED
+            else:
+                face = _mix(SURFACE, hue, 0.10 + 0.78 * cell.shade)
+                text_color = SURFACE if cell.shade > 0.62 else INK
+            ax.add_patch(  # type: ignore[attr-defined]
+                Rectangle((x, y), 0.94, 0.88, facecolor=face, edgecolor=SURFACE, lw=1.5)
+            )
+            ax.text(  # type: ignore[attr-defined]
+                x + 0.47,
+                y + 0.44,
+                cell.display,
+                ha="center",
+                va="center",
+                fontsize=8.6,
+                color=text_color,
+            )
+
+    ax.set_xlim(0, len(columns))  # type: ignore[attr-defined]
+    ax.set_ylim(len(matrix), -0.6)  # type: ignore[attr-defined]
+    ax.set_xticks([x + 0.47 for x in range(len(columns))])  # type: ignore[attr-defined]
+    ax.set_xticklabels(columns, fontsize=8.6, color=INK_2)  # type: ignore[attr-defined]
+    if providers is None:
+        ax.set_yticks([])  # type: ignore[attr-defined]
+    else:
+        ax.set_yticks([y + 0.44 for y in range(len(providers))])  # type: ignore[attr-defined]
+        ax.set_yticklabels(providers, fontsize=9.5, color=INK)  # type: ignore[attr-defined]
+    for side in ("top", "right", "left", "bottom"):
+        ax.spines[side].set_visible(False)  # type: ignore[attr-defined]
+    ax.tick_params(length=0)  # type: ignore[attr-defined]
+    ax.set_title(title, fontsize=11, color=INK, pad=10, loc="left")  # type: ignore[attr-defined]
+
+
+def plot_overview(
+    frame: pl.DataFrame, output: Path, *, mode: str = "stream"
+) -> Path | None:
+    """Render the whole multilingual run as one figure.
+
+    Two aligned matrices share the provider rows: error rate on the left,
+    finalize latency on the right. Rows are ordered by mean within-language
+    accuracy rank, so the vertical order *is* the composite verdict, while the
+    cells keep the per-language magnitudes that a composite hides.
+
+    Args:
+        frame: Summary frame from :func:`audio_harness.report.stt_summary_frame`.
+        output: PNG path to write.
+        mode: Transport mode to plot.
+
+    Returns:
+        The written path, or ``None`` with fewer than two languages.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    rows = [
+        row
+        for row in frame.iter_rows(named=True)
+        if row.get("mode") == mode and row.get("error_rate") is not None
+    ]
+    languages = sorted({str(row["language"]) for row in rows})
+    if len(languages) < 2:
+        return None
+
+    # Mean within-language rank orders the rows; missing lanes simply do not
+    # contribute rather than counting for or against a provider.
+    ranks: dict[str, list[int]] = {}
+    for language in languages:
+        ordered = sorted(
+            (row for row in rows if row["language"] == language),
+            key=lambda row: float(row["error_rate"]),  # type: ignore[arg-type]
+        )
+        for position, row in enumerate(ordered, start=1):
+            ranks.setdefault(str(row["provider"]), []).append(position)
+    providers = sorted(ranks, key=lambda p: sum(ranks[p]) / len(ranks[p]))
+
+    metric_by_language = {
+        str(row["language"]): str(row.get("metric", "WER")) for row in rows
+    }
+    accuracy = _overview_matrix(
+        rows,
+        providers,
+        languages,
+        value_key="error_rate",
+        per_language_shading=True,
+        fmt=".1f",
+        scale=100.0,
+    )
+    latency = _overview_matrix(
+        rows,
+        providers,
+        languages,
+        value_key="finalize_p50_s",
+        per_language_shading=False,
+        fmt=".2f",
+    )
+
+    width = max(11.0, 1.02 * len(languages) * 2 + 3.4)
+    height = 2.6 + 0.58 * len(providers)
+    fig, (left, right) = plt.subplots(
+        1,
+        2,
+        figsize=(width, height),
+        dpi=150,
+        sharey=False,
+        gridspec_kw={"wspace": 0.04},
+    )
+    fig.patch.set_facecolor(SURFACE)
+    for ax in (left, right):
+        ax.set_facecolor(SURFACE)
+
+    _draw_overview_panel(
+        left,
+        accuracy,
+        hue=DOT,
+        columns=[f"{lang}\n{metric_by_language[lang]}" for lang in languages],
+        providers=providers,
+        title="Error rate (%) — shaded within each language",
+    )
+    _draw_overview_panel(
+        right,
+        latency,
+        hue=AMBER,
+        columns=list(languages),
+        providers=None,
+        title="Finalize p50 (s) — one scale across languages",
+    )
+
+    fig.suptitle(
+        f"STT multilingual overview — {mode}",
+        fontsize=14,
+        fontweight="bold",
+        color=INK,
+        x=0.125,
+        ha="left",
+    )
+    fig.text(
+        0.125,
+        0.015,
+        "rows ordered by mean within-language accuracy rank · "
+        "darker = worse · * = lane had failures · — = not run",
+        fontsize=8.6,
+        color=MUTED,
+    )
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output, bbox_inches="tight", facecolor=SURFACE)
+    plt.close(fig)
+    return output
+
+
 def render_all(
     frame: pl.DataFrame, output_dir: Path, *, metric: str = "finalize"
 ) -> list[Path]:
@@ -589,6 +849,9 @@ def render_all(
     grid = plot_language_grid(frame, output_dir / "error_by_language.png")
     if grid is not None:
         written.append(grid)
+    overview = plot_overview(frame, output_dir / "overview.png")
+    if overview is not None:
+        written.append(overview)
     return written
 
 
