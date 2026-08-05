@@ -1,8 +1,15 @@
 """Credential and connectivity checks.
 
-Each check is the cheapest authenticated request the vendor exposes — listing
-projects, voices or models. No audio is sent, so running ``doctor`` costs
-essentially nothing and can be repeated freely before a long benchmark.
+Each check is the cheapest request that proves a credential will actually work
+— usually listing projects, voices or models. No audio is ever sent, so running
+``doctor`` costs essentially nothing and can be repeated freely.
+
+"Authenticates" is not the same as "can spend", and the difference is what
+turns up halfway through a long benchmark. Two vendors need more than a read:
+xAI answers its identity endpoint for a key with no credit, and Soniox answers
+every REST endpoint for an organization with an empty balance. Both are probed
+for spending capability as well — xAI with a second request, Soniox by opening
+a realtime session and sending no audio.
 """
 
 from __future__ import annotations
@@ -12,6 +19,8 @@ import os
 from dataclasses import dataclass
 
 import httpx
+import orjson
+from websockets.asyncio.client import connect
 
 TIMEOUT_S = 20.0
 
@@ -87,13 +96,8 @@ _CHECKS: tuple[_HttpCheck, ...] = (
         header="Authorization",
         template="Bearer {key}",
     ),
-    _HttpCheck(
-        provider="Soniox",
-        env_var="SONIOX_API_KEY",
-        url="https://api.soniox.com/v1/models",
-        header="Authorization",
-        template="Bearer {key}",
-    ),
+    # Soniox is checked by opening a realtime session instead; see
+    # _check_soniox_session for why its REST endpoints cannot reveal the problem.
     _HttpCheck(
         provider="xAI",
         env_var="XAI_API_KEY",
@@ -217,6 +221,76 @@ async def _check_quota(
     )
 
 
+SONIOX_STREAM_URL = "wss://stt-rt.soniox.com/transcribe-websocket"
+
+
+async def _check_soniox_session() -> CheckResult:
+    """Open a Soniox realtime session without sending any audio.
+
+    Soniox's REST endpoints answer 200 for a key whose organization has no
+    balance — ``/v1/models`` and ``/v1/transcriptions`` both succeed — so an
+    HTTP probe reports a healthy credential and the refusal only appears once
+    a benchmark is already running. Opening a session surfaces it up front,
+    and since no audio is sent there is nothing to bill.
+    """
+    key = os.environ.get("SONIOX_API_KEY")
+    if not key:
+        return CheckResult(
+            provider="Soniox",
+            env_var="SONIOX_API_KEY",
+            ok=False,
+            detail="not set — see docs/ACCOUNTS.md",
+            skipped=True,
+        )
+
+    try:
+        async with connect(SONIOX_STREAM_URL, open_timeout=15.0) as socket:
+            await socket.send(
+                orjson.dumps(
+                    {
+                        "api_key": key,
+                        "model": "stt-rt-v5",
+                        "audio_format": "pcm_s16le",
+                        "sample_rate": 16000,
+                        "num_channels": 1,
+                    }
+                ).decode()
+            )
+            try:
+                raw = await asyncio.wait_for(socket.recv(), timeout=10.0)
+            except TimeoutError:
+                # Silence after configuration means the session was accepted.
+                return CheckResult(
+                    provider="Soniox",
+                    env_var="SONIOX_API_KEY",
+                    ok=True,
+                    detail="realtime session accepted",
+                )
+            payload = orjson.loads(raw)
+    except Exception as exc:
+        return CheckResult(
+            provider="Soniox",
+            env_var="SONIOX_API_KEY",
+            ok=False,
+            detail=f"session refused: {type(exc).__name__}: {exc}",
+        )
+
+    code = payload.get("error_code")
+    if code:
+        return CheckResult(
+            provider="Soniox",
+            env_var="SONIOX_API_KEY",
+            ok=False,
+            detail=f"{code}: {payload.get('error_message', 'session refused')}",
+        )
+    return CheckResult(
+        provider="Soniox",
+        env_var="SONIOX_API_KEY",
+        ok=True,
+        detail="realtime session accepted",
+    )
+
+
 def _check_google_cloud() -> CheckResult:
     """Verify application default credentials and a configured project."""
     project = os.environ.get("GOOGLE_CLOUD_PROJECT")
@@ -269,4 +343,5 @@ async def run_checks() -> list[CheckResult]:
         http_results = await asyncio.gather(
             *(_run_http_check(client, check) for check in _CHECKS)
         )
-    return [*http_results, _check_google_cloud()]
+    soniox = await _check_soniox_session()
+    return [*http_results, soniox, _check_google_cloud()]
