@@ -38,6 +38,10 @@ stt:
     modes: [stream]
   - name: soniox-rt-v5
     modes: [stream]
+  - name: google-chirp3
+    modes: [stream]
+    options:
+      location: us
 
 dataset:
   # Shared columns and subsetting, stated once. Validation is the held-out
