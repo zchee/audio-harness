@@ -72,6 +72,7 @@ def _stt_row(summary: ProviderSummary) -> dict[str, object]:
         "finalize_p95_s": percentile(summary.finalize_s, 95),
         "rtf_p50": percentile(summary.rtf, 50),
         "churn_p50": percentile(summary.instability, 50),
+        "interim_per_s": percentile(summary.interim_rate, 50),
         "chunk_ms": summary.chunk_ms,
         "usd_per_hour": rate,
         "audio_hours": audio_hours,
@@ -175,6 +176,7 @@ _STT_COLUMNS = [
     Column("Finalize p95", "finalize_p95_s", lambda v: _fmt(v, 3, "s")),
     Column("RTF p50", "rtf_p50", lambda v: _fmt(v, 2, "x")),
     Column("Churn p50", "churn_p50", _pct),
+    Column("Interim/s", "interim_per_s", lambda v: _fmt(v, 1)),
     Column("Frame", "chunk_ms", lambda v: "—" if v is None else f"{v}ms"),
     Column("USD/hr", "usd_per_hour", lambda v: _fmt(v, 3)),
     Column("Est. USD", "est_usd", lambda v: _fmt(v, 4)),
@@ -239,6 +241,10 @@ LEGEND = """
   audio; above 1.0x falls behind and will drift on long sessions.
 - **Churn** — share of interim hypotheses that rewrote already-shown text.
   High churn means visible flicker and retracted phrases.
+- **Interim/s** — interim hypotheses per second of audio. Read churn against
+  this, never alone: 40% churn over 0.7 updates/s is three rewrites out of
+  seven, while 0% over 4.0 updates/s is a provider that revises constantly and
+  never contradicts itself. The percentages are not comparable without it.
 - **Round-trip err** — synthesized audio transcribed by one fixed recognizer
   and scored against the prompt. An intelligibility proxy, not naturalness;
   only comparisons between rows are meaningful.

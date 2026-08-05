@@ -160,6 +160,10 @@ class ProviderSummary:
         finalize_s: End-of-audio to final-transcript latencies.
         rtf: Real-time factors.
         instability: Per-clip partial churn values.
+        interim_rate: Interim hypotheses emitted per second of audio. Churn is
+            a ratio, so it is only interpretable next to this: three rewrites
+            out of seven updates and zero out of forty-four are very different
+            behaviours that a percentage alone flattens.
         audio_s: Total audio submitted, for cost estimation.
     """
 
@@ -173,6 +177,7 @@ class ProviderSummary:
     finalize_s: list[float] = field(default_factory=list)
     rtf: list[float] = field(default_factory=list)
     instability: list[float] = field(default_factory=list)
+    interim_rate: list[float] = field(default_factory=list)
     audio_s: float = 0.0
     chunk_ms: int | None = None
 
@@ -231,6 +236,9 @@ def summarize(results: list[SttResult], language: str) -> list[ProviderSummary]:
         churn = partial_instability(result.partials)
         if churn is not None:
             summary.instability.append(churn)
+        if result.audio_s > 0 and result.partials:
+            interim = sum(1 for p in result.partials if not p.is_final)
+            summary.interim_rate.append(interim / result.audio_s)
 
         reference = result.raw.get("reference")
         if isinstance(reference, str) and reference:
