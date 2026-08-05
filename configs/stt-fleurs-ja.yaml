@@ -1,0 +1,57 @@
+# Japanese STT benchmark over FLEURS (Google), scored as CER.
+#
+#   hf download google/fleurs --repo-type dataset --include 'ja_jp/test/*' \
+#     --local-dir data/hf/fleurs
+#   uv run audio-harness stt configs/stt-fleurs-ja.yaml
+#
+# 650 test clips, ~10-14s, 16 kHz, human transcripts, CC-BY-4.0.
+#
+# What this measures and what it does not: FLEURS is read speech from news and
+# Wikipedia text, so it is a clean-audio, formal-register baseline. It does not
+# contain the disfluency, hesitation or turn-taking of a live voice agent, and a
+# provider that wins here can still lose on spontaneous speech. Treat it as the
+# multilingual floor, not as a substitute for your own production audio.
+#
+# `transcription` is the normalized field; `raw_transcription` keeps the
+# original punctuation. The harness normalizes both sides anyway, so either
+# works — the normalized field just starts closer.
+
+stt:
+  - name: deepgram-nova3
+    modes: [batch, stream]
+    options:
+      model: nova-3-multilingual   # nova-3 monolingual is English-only
+      language: multi
+  - name: assemblyai-universal35pro
+    modes: [batch, stream]
+  - name: speechmatics-enhanced
+    modes: [batch, stream]
+  - name: elevenlabs-scribe2
+    modes: [batch, stream]
+  - name: soniox-rt-v5
+    modes: [stream]
+    options:
+      language_hints: [ja]
+  - name: google-chirp3
+    modes: [batch, stream]
+    options:
+      location: us
+
+dataset:
+  parquet: data/hf/fleurs/ja_jp/test/0000.parquet
+  id_column: id
+  audio_column: audio
+  text_column: transcription
+  language: ja-JP            # drives CER instead of WER, and NFKC folding
+  limit: 30
+  sample_seed: 20260805
+
+run:
+  repeats: 1
+  warmup: 1
+  chunk_ms: 20
+  realtime: true
+  provider_concurrency: 6
+  vendor_concurrency: 1
+  timeout_s: 180
+  output_dir: results

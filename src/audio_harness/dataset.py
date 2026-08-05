@@ -80,19 +80,12 @@ def load_clips_from_parquet(
             f"available: {', '.join(sorted(available))}"
         )
 
-    selected = frame.select(
+    projected = frame.select(
         pl.col(config.id_column).alias("id"),
         pl.col(config.audio_column).alias("audio"),
         pl.col(config.text_column).alias("text"),
-    ).collect()
-
-    if config.limit is not None and config.limit < selected.height:
-        if config.sample_seed is None:
-            selected = selected.head(config.limit)
-        else:
-            selected = selected.sample(
-                n=config.limit, seed=config.sample_seed, shuffle=True
-            )
+    )
+    selected = _select_rows(projected, limit=config.limit, seed=config.sample_seed)
 
     clips: list[AudioClip] = []
     failures: list[str] = []
@@ -122,6 +115,44 @@ def load_clips_from_parquet(
             f"provider failure, so the corpus is rejected instead."
         )
     return clips
+
+
+def _select_rows(
+    frame: pl.LazyFrame, *, limit: int | None, seed: int | None
+) -> pl.DataFrame:
+    """Materialize only the rows a run will actually use.
+
+    Audio is the overwhelming majority of a speech corpus by bytes, so
+    collecting the whole table and slicing afterwards pulls gigabytes through
+    memory to benchmark thirty clips. Row selection happens against the id
+    column alone, and only the chosen rows are then decoded.
+
+    Args:
+        frame: Projected lazy frame with ``id``, ``audio`` and ``text``.
+        limit: Maximum rows to take, or ``None`` for all of them.
+        seed: When set, take a reproducible random sample instead of the head.
+
+    Returns:
+        The selected rows, in corpus order.
+    """
+    if limit is None:
+        return frame.collect()
+    if seed is None:
+        return frame.head(limit).collect()
+
+    total = frame.select(pl.len()).collect().item()
+    if limit >= total:
+        return frame.collect()
+
+    chosen = (
+        pl.int_range(total, eager=True).sample(n=limit, seed=seed, shuffle=False).sort()
+    )
+    return (
+        frame.with_row_index("__row")
+        .filter(pl.col("__row").is_in(chosen))
+        .drop("__row")
+        .collect()
+    )
 
 
 def _audio_bytes(value: object, clip_id: str) -> bytes:
