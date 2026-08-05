@@ -1,0 +1,58 @@
+# STT benchmark over the Pipecat STT benchmark corpus.
+#
+#   hf download pipecat-ai/stt-benchmark-data --repo-type dataset \
+#     --local-dir data/hf/stt-benchmark-data
+#   uv run audio-harness stt configs/stt-pipecat.yaml
+#
+# 1,000 clips of conversational voice-agent speech, 1-16s, 16 kHz, mean 9.6s.
+# Real recorded audio with human references — the thing synthesized audio
+# cannot substitute for.
+#
+# Corpus caveat: 51 of 1,000 clips sit exactly at a 16.0s ceiling and appear to
+# be cut there. Every provider sees the same truncation, so the ranking holds,
+# but the absolute error rate carries a small floor from those clips.
+
+stt:
+  - name: deepgram-nova3
+    modes: [batch, stream]
+  - name: assemblyai-universal35pro
+    modes: [batch, stream]
+  - name: speechmatics-enhanced
+    modes: [batch, stream]
+  - name: speechmatics-standard
+    modes: [batch, stream]
+  - name: elevenlabs-scribe2
+    modes: [batch, stream]
+
+  # Blocked until the account is topped up (see `audio-harness doctor`):
+  # - name: soniox-rt-v5
+  #   modes: [stream]
+  # - name: xai-grok-stt
+  #   modes: [batch, stream]
+
+  # Needs: gcloud services enable speech.googleapis.com --project <project>
+  # - name: google-chirp3
+  #   modes: [batch, stream]
+  #   options:
+  #     location: us
+
+dataset:
+  parquet: data/hf/stt-benchmark-data/data/train-00000-of-00001.parquet
+  id_column: sample_id
+  audio_column: audio
+  text_column: transcription
+  language: en-US
+  # The corpus is not shuffled on disk, so a bare head() would bias the subset.
+  # Pin the seed to keep runs comparable across providers and across days.
+  limit: 30
+  sample_seed: 20260805
+
+run:
+  repeats: 1                 # 30 clips already gives p50/p95 enough samples
+  warmup: 1
+  chunk_ms: 20
+  realtime: true
+  provider_concurrency: 6
+  vendor_concurrency: 1      # Speechmatics Standard and Enhanced share a plan
+  timeout_s: 180
+  output_dir: results

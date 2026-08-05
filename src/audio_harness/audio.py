@@ -52,10 +52,70 @@ def load_clip(
     path = Path(path)
     if not path.is_file():
         raise FileNotFoundError(f"audio file not found: {path}")
+    return _decode(
+        path,
+        clip_id=clip_id,
+        reference=reference,
+        language=language,
+        target_sample_rate=target_sample_rate,
+        source_path=str(path),
+    )
 
-    data, source_rate = sf.read(path, dtype="float32", always_2d=True)
+
+def load_clip_bytes(
+    payload: bytes,
+    *,
+    clip_id: str,
+    reference: str | None,
+    language: str,
+    target_sample_rate: int = 16000,
+    source_path: str = "<embedded>",
+) -> AudioClip:
+    """Decode in-memory audio to mono 16-bit PCM at ``target_sample_rate``.
+
+    Corpora distributed as parquet embed the audio in the table rather than as
+    files on disk. Decoding straight from those bytes avoids materializing a
+    second copy of the corpus just to hand it back to the same process.
+
+    Args:
+        payload: Encoded audio in any format libsndfile can read.
+        clip_id: Stable identifier for the resulting clip.
+        reference: Ground-truth transcript, or ``None`` for latency-only clips.
+        language: BCP-47 language tag for the clip.
+        target_sample_rate: Sample rate every provider will receive.
+        source_path: Provenance label recorded on the clip.
+
+    Returns:
+        The decoded clip.
+
+    Raises:
+        ValueError: If the payload is empty or decodes to zero samples.
+    """
+    if not payload:
+        raise ValueError(f"clip {clip_id}: audio payload is empty")
+    return _decode(
+        BytesIO(payload),
+        clip_id=clip_id,
+        reference=reference,
+        language=language,
+        target_sample_rate=target_sample_rate,
+        source_path=source_path,
+    )
+
+
+def _decode(
+    source: Path | BytesIO,
+    *,
+    clip_id: str,
+    reference: str | None,
+    language: str,
+    target_sample_rate: int,
+    source_path: str,
+) -> AudioClip:
+    """Decode, downmix and resample audio from a path or an in-memory buffer."""
+    data, source_rate = sf.read(source, dtype="float32", always_2d=True)
     if data.shape[0] == 0:
-        raise ValueError(f"audio file decoded to zero samples: {path}")
+        raise ValueError(f"clip {clip_id}: audio decoded to zero samples")
 
     mono = data.mean(axis=1)
     if source_rate != target_sample_rate:
@@ -69,7 +129,7 @@ def load_clip(
         duration_s=len(pcm) / (target_sample_rate * BYTES_PER_SAMPLE),
         reference=reference,
         language=language,
-        source_path=str(path),
+        source_path=source_path,
     )
 
 

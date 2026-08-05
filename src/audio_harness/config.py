@@ -119,17 +119,34 @@ class ProviderConfig:
 class DatasetConfig:
     """Where the harness reads evaluation material from.
 
+    Exactly one of ``manifest`` or ``parquet`` supplies the STT clips.
+
     Attributes:
         manifest: JSONL file with one record per clip. Each record needs an
             ``audio`` path and, for accuracy scoring, a ``text`` reference.
+        parquet: Parquet file with embedded audio, as distributed by Hugging
+            Face audio datasets. Column names are configurable below.
+        id_column: Parquet column holding the clip identifier.
+        audio_column: Parquet column holding the audio. Either raw encoded
+            bytes or a ``{bytes, path}`` struct, which is how the Hugging Face
+            ``Audio`` feature serializes.
+        text_column: Parquet column holding the reference transcript.
         language: BCP-47 tag applied to every clip lacking its own.
-        limit: Maximum clips to evaluate, or ``None`` for the whole manifest.
+        limit: Maximum clips to evaluate, or ``None`` for the whole corpus.
+        sample_seed: When set alongside ``limit``, take a random sample with
+            this seed instead of the first N rows. Corpora are often ordered by
+            length or source, so the head is not a representative subset.
         prompts: Text file with one TTS prompt per line.
     """
 
     manifest: str | None = None
+    parquet: str | None = None
+    id_column: str = "sample_id"
+    audio_column: str = "audio"
+    text_column: str = "transcription"
     language: str = "en-US"
     limit: int | None = None
+    sample_seed: int | None = None
     prompts: str | None = None
 
 

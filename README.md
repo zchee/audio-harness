@@ -61,9 +61,37 @@ Each run writes `stt-results.jsonl` (including every interim hypothesis), a
 markdown report, and — for TTS — the synthesized WAVs, under a timestamped
 directory in `results/`.
 
-## Dataset format
+## Datasets
 
-STT input is a JSONL manifest, one clip per line:
+### Pipecat STT benchmark corpus (default)
+
+1,000 clips of real conversational voice-agent speech — support calls,
+scheduling, product questions — 1–16 s, 16 kHz, mean 9.6 s, with human
+references. Fetch it once:
+
+```bash
+hf download pipecat-ai/stt-benchmark-data --repo-type dataset --local-dir data/hf/stt-benchmark-data
+```
+
+```bash
+uv run audio-harness stt configs/stt-pipecat.yaml
+```
+
+The parquet is read directly — audio is decoded from the embedded bytes rather
+than exploded into a second copy of the corpus on disk.
+
+`limit` with `sample_seed` takes a reproducible random subset. Use the seed:
+corpora are rarely shuffled on disk, so a bare `limit` biases toward whatever
+the first N rows happen to be.
+
+*Corpus caveat:* 51 of the 1,000 clips sit exactly at a 16.0 s ceiling and
+appear to be cut there. Every provider sees the same truncation, so the ranking
+is unaffected, but the absolute error rate carries a small floor from them.
+
+### Your own audio
+
+Either point `dataset.parquet` at any parquet with embedded audio (column names
+are configurable), or use a JSONL manifest, one clip per line:
 
 ```json
 {"id": "utt-001", "audio": "clips/utt-001.wav", "text": "the reference transcript", "language": "en-US"}
@@ -78,9 +106,9 @@ TTS input is a plain text file, one prompt per line — see
 [data/prompts-ja.txt](data/prompts-ja.txt).
 
 **Use real recorded speech.** Synthesized audio is unrealistically clean and
-every provider scores near 0% on it. LibriSpeech test-clean/test-other for
-English, Common Voice or ReazonSpeech for Japanese, plus a sample of your own
-production audio, is the combination that actually predicts behaviour.
+every provider scores near 0% on it. For Japanese, Common Voice ja or
+ReazonSpeech plus a sample of your own production audio is the combination that
+actually predicts behaviour.
 
 ## What is measured
 

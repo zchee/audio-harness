@@ -224,3 +224,7 @@ __marimo__/
 .streamlit/secrets.toml
 
 .secrets-signup.json
+
+# Downloaded evaluation corpora (re-fetch with `hf download`)
+data/hf/
+results/
