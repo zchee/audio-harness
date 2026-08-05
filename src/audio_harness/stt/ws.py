@@ -40,6 +40,9 @@ DEFAULT_FINALIZE_TIMEOUT_S = 15.0
 _CONNECT_SLACK_S = 30.0
 """Extra budget covering handshake and non-realtime upload time."""
 
+CLOSE_TIMEOUT_S = 5.0
+"""How long to wait for the closing handshake before abandoning the socket."""
+
 
 class StreamProtocolError(RuntimeError):
     """Raised when a vendor reports an error over the WebSocket."""
@@ -120,6 +123,12 @@ async def run_stream(
             sender.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await sender
+            # Complete the closing handshake before returning. Vendors count a
+            # session as open until they see it, so returning early makes the
+            # next clip in the same lane collide with a session that is still
+            # winding down and get refused for excess concurrency.
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(socket.close(), timeout=CLOSE_TIMEOUT_S)
 
 
 async def _send_audio(

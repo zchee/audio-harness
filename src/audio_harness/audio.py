@@ -130,6 +130,7 @@ def _decode(
         reference=reference,
         language=language,
         source_path=source_path,
+        speech_end_s=detect_speech_end_s(mono, target_sample_rate),
     )
 
 
@@ -137,6 +138,44 @@ def _float_to_pcm16(samples: np.ndarray) -> bytes:
     """Convert float samples in [-1, 1] to little-endian 16-bit PCM bytes."""
     clipped = np.clip(samples, -1.0, 1.0)
     return (clipped * 32767.0).astype("<i2").tobytes()
+
+
+SPEECH_FRAME_MS = 20
+SPEECH_THRESHOLD = 0.02
+"""Frame energy, relative to the clip's loudest frame, counted as speech."""
+
+
+def detect_speech_end_s(
+    samples: np.ndarray, sample_rate: int, *, frame_ms: int = SPEECH_FRAME_MS
+) -> float:
+    """Return the offset of the last voiced frame, in seconds.
+
+    Uses per-frame RMS against a threshold relative to the clip's own peak, so
+    it adapts to recording level instead of assuming a fixed noise floor. This
+    is deliberately simple: it locates the end of speech for latency
+    accounting, it is not a VAD for segmentation.
+
+    Args:
+        samples: Mono float samples in [-1, 1].
+        sample_rate: Sample rate of ``samples``.
+        frame_ms: Analysis frame size in milliseconds.
+
+    Returns:
+        Seconds from the start of the clip to the end of the last voiced
+        frame, or the full duration when no frame clears the threshold.
+    """
+    step = int(sample_rate * frame_ms / 1000)
+    usable = len(samples) // step * step
+    if step <= 0 or usable == 0:
+        return len(samples) / sample_rate
+
+    frames = samples[:usable].reshape(-1, step)
+    rms = np.sqrt((frames**2).mean(axis=1))
+    threshold = max(float(rms.max()) * SPEECH_THRESHOLD, 1e-4)
+    voiced = np.nonzero(rms > threshold)[0]
+    if len(voiced) == 0:
+        return len(samples) / sample_rate
+    return float((voiced[-1] + 1) * frame_ms / 1000)
 
 
 def chunk_pcm(clip: AudioClip, chunk_ms: int) -> Iterator[bytes]:

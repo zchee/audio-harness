@@ -29,6 +29,11 @@ class AudioClip:
         reference: Ground-truth transcript, or ``None`` for latency-only clips.
         language: BCP-47 language tag (e.g. ``en-US``, ``ja-JP``).
         source_path: Original file the clip was decoded from.
+        speech_end_s: Offset of the last voiced audio. Recorded clips carry
+            trailing silence — a median of 0.78 s in the Pipecat corpus — and a
+            provider that endpoints during it finalizes before the file ends.
+            Turn latency measured from end-of-file would score that as zero, so
+            this is the reference point the metric actually uses.
     """
 
     clip_id: str
@@ -38,6 +43,7 @@ class AudioClip:
     reference: str | None
     language: str
     source_path: str
+    speech_end_s: float = 0.0
 
 
 @dataclass(slots=True, frozen=True)

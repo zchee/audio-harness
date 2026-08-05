@@ -167,6 +167,13 @@ class RunConfig:
             two, and entries like Speechmatics Standard and Enhanced share one
             account, so raising this trades quota errors for wall-clock time.
         timeout_s: Per-clip ceiling before a run is recorded as a failure.
+        transient_retries: Extra attempts for capacity refusals — concurrency
+            caps and rate limits. These say nothing about a provider's quality,
+            so retrying them keeps the harness' own scheduling out of the
+            failure column. Genuine errors are never retried.
+        retry_backoff_s: Base delay before a retry; doubles per attempt.
+        settle_ms: Pause between streaming clips in one lane, giving the vendor
+            time to release the finished session before the next one opens.
         output_dir: Directory receiving result JSONL and reports.
     """
 
@@ -177,6 +184,9 @@ class RunConfig:
     provider_concurrency: int = 4
     vendor_concurrency: int = 1
     timeout_s: float = 300.0
+    transient_retries: int = 2
+    retry_backoff_s: float = 1.5
+    settle_ms: int = 250
     output_dir: str = "results"
 
 

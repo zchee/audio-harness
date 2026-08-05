@@ -116,6 +116,10 @@ async def _stt_lane(
                     results.append(result)
                     if progress is not None:
                         progress.result(entry.name, mode, result.ok)
+                    # Let the vendor release the finished session before the
+                    # next one opens; without this the lane races itself.
+                    if transport is Mode.STREAM and run.settle_ms > 0:
+                        await asyncio.sleep(run.settle_ms / 1000)
         finally:
             await provider.aclose()
         return results
@@ -139,25 +143,95 @@ async def _one_stt(
     is visible in the report rather than silently penalised on latency.
     """
     chunk_ms = provider.effective_chunk_ms(run.chunk_ms)
-    try:
-        async with asyncio.timeout(run.timeout_s):
-            if mode is Mode.STREAM:
-                result = await provider.transcribe_stream(
-                    clip, chunk_ms=chunk_ms, realtime=run.realtime
-                )
-                result.raw["chunk_ms"] = chunk_ms
-                return result
-            return await provider.transcribe_batch(clip)
-    except TimeoutError, asyncio.CancelledError:
-        result = SttResult(provider=provider.key, clip_id=clip.clip_id, mode=mode)
-        result.audio_s = clip.duration_s
-        result.error = f"timeout after {run.timeout_s}s"
-        return result
-    except Exception as exc:
-        result = SttResult(provider=provider.key, clip_id=clip.clip_id, mode=mode)
-        result.audio_s = clip.duration_s
-        result.error = f"{type(exc).__name__}: {exc}"
-        return result
+    attempts = max(1, run.transient_retries + 1)
+
+    for attempt in range(attempts):
+        try:
+            async with asyncio.timeout(run.timeout_s):
+                if mode is Mode.STREAM:
+                    result = await provider.transcribe_stream(
+                        clip, chunk_ms=chunk_ms, realtime=run.realtime
+                    )
+                    result.raw["chunk_ms"] = chunk_ms
+                    _rebase_finalize(result, clip, realtime=run.realtime)
+                    if attempt:
+                        result.raw["retries"] = attempt
+                    return result
+                return await provider.transcribe_batch(clip)
+        except TimeoutError, asyncio.CancelledError:
+            result = SttResult(provider=provider.key, clip_id=clip.clip_id, mode=mode)
+            result.audio_s = clip.duration_s
+            result.error = f"timeout after {run.timeout_s}s"
+            return result
+        except Exception as exc:
+            if attempt + 1 < attempts and _is_transient(exc):
+                await asyncio.sleep(run.retry_backoff_s * (2**attempt))
+                continue
+            result = SttResult(provider=provider.key, clip_id=clip.clip_id, mode=mode)
+            result.audio_s = clip.duration_s
+            result.error = f"{type(exc).__name__}: {exc}"
+            return result
+
+    raise AssertionError("unreachable: the retry loop always returns")
+
+
+_TRANSIENT_MARKERS = (
+    "concurrent",
+    "concurrency",
+    "too many",
+    "rate limit",
+    "rate_limit",
+    "429",
+    "503",
+    "temporarily unavailable",
+)
+
+
+def _is_transient(exc: Exception) -> bool:
+    """Whether a failure is a capacity refusal rather than a real error.
+
+    Serializing lanes per account is not always enough: a vendor can still
+    refuse a session while the previous one finishes winding down. Those
+    refusals say nothing about the provider's accuracy or latency, and
+    recording them as failures would blame the vendor for the harness'
+    scheduling. Genuine errors — bad audio, auth, malformed requests — do not
+    match and are reported as-is.
+    """
+    message = str(exc).lower()
+    return any(marker in message for marker in _TRANSIENT_MARKERS)
+
+
+def _rebase_finalize(result: SttResult, clip: AudioClip, *, realtime: bool) -> None:
+    """Re-measure finalization latency from end of speech, not end of file.
+
+    Recorded clips carry trailing silence. A provider that endpoints during it
+    emits its final transcript before the file runs out, which reads as zero —
+    or negative — latency when measured from the last audio byte. Ranking
+    providers on that number rewards whoever ignores the tail of the clip.
+
+    Timing from the last voiced frame instead answers the question a voice
+    agent actually asks: once the user stopped talking, how long until the
+    transcript was final.
+
+    Only valid under real-time pacing, where elapsed stream time equals
+    playback position. The end-of-file figure is preserved in ``raw`` so the
+    two can be compared.
+
+    Args:
+        result: Streaming result to adjust in place.
+        clip: Clip that was streamed, carrying its speech-end offset.
+        realtime: Whether audio was paced at playback speed.
+    """
+    result.raw["finalize_from_eof_s"] = result.finalize_s
+    result.raw["speech_end_s"] = clip.speech_end_s
+    if not realtime or clip.speech_end_s <= 0:
+        return
+
+    finals = [p for p in result.partials if p.is_final]
+    if not finals:
+        result.finalize_s = None
+        return
+    result.finalize_s = max(0.0, finals[-1].t_s - clip.speech_end_s)
 
 
 async def run_tts(
