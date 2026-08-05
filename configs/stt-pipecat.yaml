@@ -23,10 +23,10 @@ stt:
     modes: [batch, stream]
   - name: elevenlabs-scribe2
     modes: [batch, stream]
+  - name: soniox-rt-v5
+    modes: [stream]          # Soniox is realtime-only in this harness
 
   # Blocked until the account is topped up (see `audio-harness doctor`):
-  # - name: soniox-rt-v5
-  #   modes: [stream]
   # - name: xai-grok-stt
   #   modes: [batch, stream]
 

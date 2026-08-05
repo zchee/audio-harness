@@ -236,6 +236,40 @@ def tts_command(
     _emit(path, "TTS", markdown)
 
 
+@app.command("report")
+def report_command(
+    results: Annotated[
+        list[Path], typer.Argument(help="One or more stt-results.jsonl files.")
+    ],
+    language: Annotated[
+        str, typer.Option(help="BCP-47 tag driving normalization and metric choice.")
+    ] = "en-US",
+) -> None:
+    """Re-render a report from saved results, merging several runs if given.
+
+    The API calls are the expensive part of a benchmark. This re-scores what
+    is already on disk, so a normalization change or a provider added in a
+    later run costs nothing to fold in.
+    """
+    merged: list[object] = []
+    for path in results:
+        try:
+            loaded = runner.read_stt_results(path)
+        except (FileNotFoundError, ValueError) as exc:
+            console.print(f"[red]results error:[/red] {exc}")
+            raise typer.Exit(code=2) from exc
+        console.print(f"[dim]loaded[/dim] {len(loaded):4d} runs from {path}")
+        merged.extend(loaded)
+
+    if not merged:
+        console.print("[red]no results to report[/red]")
+        raise typer.Exit(code=2)
+
+    frame = report.stt_summary_frame(merged, language)
+    markdown = report.render_stt_markdown(frame)
+    _emit(results[0], "STT", markdown)
+
+
 def _emit(results_path: Path, title: str, markdown: str) -> None:
     """Print a report and write it next to the raw results."""
     console.print()

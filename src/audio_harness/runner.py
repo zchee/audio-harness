@@ -21,7 +21,7 @@ import orjson
 from . import stt, tts
 from .audio import decode_audio_duration, wrap_wav
 from .config import BenchmarkConfig, ProviderConfig, RunConfig
-from .types import AudioClip, Mode, SttResult, TtsPrompt, TtsResult
+from .types import AudioClip, Mode, Partial, SttResult, TtsPrompt, TtsResult
 
 
 @dataclass(slots=True)
@@ -448,6 +448,59 @@ def write_tts_results(
             )
             handle.write(b"\n")
     return path
+
+
+def read_stt_results(path: str | Path) -> list[SttResult]:
+    """Load STT results back from a saved JSONL file.
+
+    Re-scoring saved runs is the point: the expensive part of a benchmark is
+    the API calls, so a normalization fix or a merge of two runs should not
+    require paying for them again. Interim hypotheses are restored too, which
+    is what makes churn re-computable after the fact.
+
+    Args:
+        path: JSONL file written by :func:`write_stt_results`.
+
+    Returns:
+        The reconstructed results.
+
+    Raises:
+        FileNotFoundError: If the file does not exist.
+        ValueError: If a line is not valid JSON.
+    """
+    file = Path(path)
+    if not file.is_file():
+        raise FileNotFoundError(f"results file not found: {file}")
+
+    results: list[SttResult] = []
+    for number, line in enumerate(file.read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip():
+            continue
+        try:
+            record = orjson.loads(line)
+        except orjson.JSONDecodeError as exc:
+            raise ValueError(f"{file}:{number}: invalid JSON") from exc
+
+        result = SttResult(
+            provider=record["provider"],
+            clip_id=record["clip_id"],
+            mode=Mode(record["mode"]),
+            text=record.get("text", ""),
+            audio_s=float(record.get("audio_s") or 0.0),
+            total_s=float(record.get("total_s") or 0.0),
+            ttft_s=record.get("ttft_s"),
+            finalize_s=record.get("finalize_s"),
+            error=record.get("error"),
+        )
+        result.partials = [
+            Partial(t_s=p["t_s"], text=p["text"], is_final=p["is_final"])
+            for p in record.get("partials", [])
+        ]
+        result.raw["reference"] = record.get("reference", "")
+        if record.get("chunk_ms") is not None:
+            result.raw["chunk_ms"] = record["chunk_ms"]
+        results.append(result)
+    return results
 
 
 def _prepare(output_dir: str | Path, filename: str) -> Path:
