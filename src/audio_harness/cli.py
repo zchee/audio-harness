@@ -250,17 +250,33 @@ def report_command(
     The API calls are the expensive part of a benchmark. This re-scores what
     is already on disk, so a normalization change or a provider added in a
     later run costs nothing to fold in.
+
+    When the same provider and mode appears in more than one file, the later
+    file wins. That is what makes "re-run the one provider that failed, then
+    merge" work: without it the superseded run would be averaged back in and
+    the fix would look half-effective.
     """
-    merged: list[object] = []
+    by_lane: dict[tuple[str, str], list[object]] = {}
     for path in results:
         try:
             loaded = runner.read_stt_results(path)
         except (FileNotFoundError, ValueError) as exc:
             console.print(f"[red]results error:[/red] {exc}")
             raise typer.Exit(code=2) from exc
-        console.print(f"[dim]loaded[/dim] {len(loaded):4d} runs from {path}")
-        merged.extend(loaded)
 
+        lanes: dict[tuple[str, str], list[object]] = {}
+        for item in loaded:
+            lanes.setdefault((item.provider, str(item.mode)), []).append(item)
+        for lane, runs in lanes.items():
+            if lane in by_lane:
+                console.print(
+                    f"[yellow]superseded[/yellow] {lane[0]} {lane[1]}"
+                    f" — {len(by_lane[lane])} earlier runs replaced by {len(runs)}"
+                )
+            by_lane[lane] = runs
+        console.print(f"[dim]loaded[/dim] {len(loaded):4d} runs from {path}")
+
+    merged = [item for runs in by_lane.values() for item in runs]
     if not merged:
         console.print("[red]no results to report[/red]")
         raise typer.Exit(code=2)
