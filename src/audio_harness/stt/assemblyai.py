@@ -28,6 +28,15 @@ class AssemblyAIUniversal35Pro(SttProvider):
     Options:
         model: Speech model identifier; defaults to ``universal-3-5-pro``.
         format_turns: Whether streaming turns arrive punctuated and cased.
+        language: Streaming language pin; defaults to the clip's language.
+
+    The v3 socket accepts (as of 2026-08): en, es, de, fr, it, pt, tr, nl,
+    sv, no, da, fi, hi, vi, ar, he, ja, ur, zh, ru, ko, multi. Anything else
+    is refused at the handshake with a validation error — which is the honest
+    outcome. Left unpinned, the socket auto-detects per utterance instead and
+    produced Hebrew, Japanese and Arabic transcripts for one Hungarian lane,
+    scoring 90-120% WER that reads as terrible accuracy rather than as the
+    coverage gap it actually is.
     """
 
     key = "assemblyai-universal35pro"
@@ -106,6 +115,10 @@ class AssemblyAIUniversal35Pro(SttProvider):
             "encoding": "pcm_s16le",
             "speech_model": self._model(),
             "format_turns": str(self.options.get("format_turns", True)).lower(),
+            # Without this the socket auto-detects per utterance; on Hungarian
+            # audio it produced Hebrew, Japanese and Arabic transcripts in one
+            # lane. The batch endpoint already pins language_code — parity.
+            "language": str(self.options.get("language", clip.language.split("-")[0])),
         }
 
         async def terminate(socket: ClientConnection) -> None:

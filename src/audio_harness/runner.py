@@ -184,6 +184,7 @@ _TRANSIENT_MARKERS = (
     "too many",
     "rate limit",
     "rate_limit",
+    "quota",
     "429",
     "503",
     "temporarily unavailable",

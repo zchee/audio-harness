@@ -18,7 +18,9 @@
 # runs at 1x real time; the 5 vendor lanes run in parallel, and AssemblyAI's
 # 3s per-clip settle makes it the slowest lane) and roughly a dollar of spend.
 #
-# Deepgram nova-3-multilingual covers: en, es, fr, de, hi, ru, pt, ja, it, nl.
+# Deepgram multilingual is model=nova-3 with language=multi — there is no
+# "nova-3-multilingual" model id, and the streaming handshake rejects it with
+# a bare 403. Multi mode covers: en, es, fr, de, hi, ru, pt, ja, it, nl.
 # Languages outside that list (ar, hu, ko, pl, tr, vi) will fail or degrade on
 # Deepgram — that is a finding about coverage, not an error in the harness.
 
@@ -26,7 +28,7 @@ stt:
   - name: deepgram-nova3
     modes: [stream]
     options:
-      model: nova-3-multilingual
+      model: nova-3
       language: multi
   - name: assemblyai-universal35pro
     modes: [stream]
