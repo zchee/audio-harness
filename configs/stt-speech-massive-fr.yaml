@@ -21,22 +21,22 @@
 
 stt:
   - name: deepgram-nova3
-    modes: [batch, stream]
+    modes: [stream]
     options:
       model: nova-3-multilingual
       language: multi
   - name: assemblyai-universal35pro
-    modes: [batch, stream]
+    modes: [stream]
   - name: speechmatics-enhanced
-    modes: [batch, stream]
+    modes: [stream]
   - name: elevenlabs-scribe2
-    modes: [batch, stream]
+    modes: [stream]
   - name: soniox-rt-v5
     modes: [stream]
     options:
       language_hints: [fr]
   - name: google-chirp3
-    modes: [batch, stream]
+    modes: [stream]
     options:
       location: us
 

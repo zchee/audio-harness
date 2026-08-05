@@ -12,10 +12,11 @@
 # LICENSE: CC-BY-NC-SA-4.0. Internal evaluation use; legal review before any
 # external claim rests on it.
 #
-# Cost/time note: 12 languages x 30 clips x 2 modes across 5 vendors is
-# ~2 hours wall-clock (streaming runs at 1x real time, vendor lanes serialize
-# per account) and a few dollars of API spend. Trim `sources` or modes for a
-# quicker pass.
+# Cost/time note: batch mode is deliberately deferred — streaming is the mode
+# that matters for a voice agent, and stream-only halves the lane count.
+# 12 languages x 30 clips across 5 vendors is ~45 min wall-clock (streaming
+# runs at 1x real time; the 5 vendor lanes run in parallel, and AssemblyAI's
+# 3s per-clip settle makes it the slowest lane) and roughly a dollar of spend.
 #
 # Deepgram nova-3-multilingual covers: en, es, fr, de, hi, ru, pt, ja, it, nl.
 # Languages outside that list (ar, hu, ko, pl, tr, vi) will fail or degrade on
@@ -23,16 +24,16 @@
 
 stt:
   - name: deepgram-nova3
-    modes: [batch, stream]
+    modes: [stream]
     options:
       model: nova-3-multilingual
       language: multi
   - name: assemblyai-universal35pro
-    modes: [batch, stream]
+    modes: [stream]
   - name: speechmatics-enhanced
-    modes: [batch, stream]
+    modes: [stream]
   - name: elevenlabs-scribe2
-    modes: [batch, stream]
+    modes: [stream]
   - name: soniox-rt-v5
     modes: [stream]
 
