@@ -184,8 +184,8 @@ class RunConfig:
     provider_concurrency: int = 4
     vendor_concurrency: int = 1
     timeout_s: float = 300.0
-    transient_retries: int = 2
-    retry_backoff_s: float = 1.5
+    transient_retries: int = 3
+    retry_backoff_s: float = 3.0
     settle_ms: int = 250
     output_dir: str = "results"
 

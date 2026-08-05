@@ -118,8 +118,9 @@ async def _stt_lane(
                         progress.result(entry.name, mode, result.ok)
                     # Let the vendor release the finished session before the
                     # next one opens; without this the lane races itself.
-                    if transport is Mode.STREAM and run.settle_ms > 0:
-                        await asyncio.sleep(run.settle_ms / 1000)
+                    settle_ms = provider.settle_ms or run.settle_ms
+                    if transport is Mode.STREAM and settle_ms > 0:
+                        await asyncio.sleep(settle_ms / 1000)
         finally:
             await provider.aclose()
         return results

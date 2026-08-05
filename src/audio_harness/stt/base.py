@@ -143,6 +143,9 @@ class SttProvider(abc.ABC):
         supports_stream: Whether :meth:`transcribe_stream` is implemented.
         min_chunk_ms: Smallest audio frame the vendor accepts.
         max_chunk_ms: Largest audio frame the vendor accepts, or ``None``.
+        settle_ms: Vendor-specific pause between streaming sessions, overriding
+            the run default. Raise it for vendors that keep counting a session
+            against the concurrency limit after the socket has closed.
     """
 
     key: ClassVar[str]
@@ -151,6 +154,7 @@ class SttProvider(abc.ABC):
     supports_stream: ClassVar[bool] = False
     min_chunk_ms: ClassVar[int] = 0
     max_chunk_ms: ClassVar[int | None] = None
+    settle_ms: ClassVar[int] = 0
 
     def effective_chunk_ms(self, requested: int) -> int:
         """Clamp a requested frame size into the vendor's accepted range.

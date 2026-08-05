@@ -38,6 +38,11 @@ class AssemblyAIUniversal35Pro(SttProvider):
     # Violation, so the 20 ms telephony default has to be widened here.
     min_chunk_ms = 50
     max_chunk_ms = 1000
+    # AssemblyAI keeps counting a session against the concurrency limit for a
+    # while after the socket closes. With a short gap the refusals cascade: a
+    # refused clip returns immediately instead of spending its audio duration
+    # streaming, so the next attempt lands even deeper inside the window.
+    settle_ms = 3000
 
     def _model(self) -> str:
         return str(self.options.get("model", "universal-3-5-pro"))
