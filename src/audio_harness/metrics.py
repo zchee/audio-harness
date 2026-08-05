@@ -152,6 +152,7 @@ class ProviderSummary:
     Attributes:
         provider: Registry key of the adapter.
         mode: Transport mode the runs used.
+        language: BCP-47 tag these runs were scored under.
         clips: Number of clips attempted.
         failures: Number of clips that errored.
         counts: Summed edit operations across successful clips.
@@ -169,6 +170,7 @@ class ProviderSummary:
 
     provider: str
     mode: str
+    language: str = ""
     clips: int = 0
     failures: int = 0
     counts: ErrorCounts = ZERO_COUNTS
@@ -195,26 +197,35 @@ class ProviderSummary:
 
 
 def summarize(results: list[SttResult], language: str) -> list[ProviderSummary]:
-    """Aggregate per-clip STT results into one summary per provider and mode.
+    """Aggregate per-clip STT results into one summary per provider, mode and
+    language.
+
+    Language is part of the key, never averaged over. A 2% error rate on French
+    and 8% on Vietnamese say something specific about a provider; pooling them
+    into 5% describes no system anyone can deploy, and the mix would shift
+    whenever the corpus mix did. Each result is scored with its own language's
+    normalizer, so a run may legitimately mix per-word and per-character rates.
 
     Args:
         results: Every run to aggregate; failures are counted, not scored.
-        language: BCP-47 tag of the evaluated corpus.
+        language: Fallback BCP-47 tag for results that recorded none.
 
     Returns:
-        Summaries keyed by provider and mode, ordered by first appearance.
+        Summaries keyed by provider, mode and language.
     """
-    character_metric = uses_character_metric(language)
-    summaries: dict[tuple[str, str], ProviderSummary] = {}
+    summaries: dict[tuple[str, str, str], ProviderSummary] = {}
 
     for result in results:
-        key = (result.provider, str(result.mode))
+        recorded = result.raw.get("language")
+        clip_language = recorded if isinstance(recorded, str) and recorded else language
+        key = (result.provider, str(result.mode), clip_language)
         summary = summaries.setdefault(
             key,
             ProviderSummary(
                 provider=result.provider,
                 mode=str(result.mode),
-                character_metric=character_metric,
+                language=clip_language,
+                character_metric=uses_character_metric(clip_language),
             ),
         )
         summary.clips += 1
@@ -243,7 +254,7 @@ def summarize(results: list[SttResult], language: str) -> list[ProviderSummary]:
         reference = result.raw.get("reference")
         if isinstance(reference, str) and reference:
             summary.counts = summary.counts + score_pair(
-                reference, result.text, language
+                reference, result.text, clip_language
             )
 
     return list(summaries.values())

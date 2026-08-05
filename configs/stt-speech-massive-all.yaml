@@ -1,0 +1,69 @@
+# All 12 Speech-MASSIVE languages in one run.
+#
+#   hf download FBK-MT/Speech-MASSIVE --repo-type dataset \
+#     --local-dir data/hf/speech-massive
+#   uv run audio-harness stt configs/stt-speech-massive-all.yaml
+#
+# Spoken voice-assistant commands with human transcripts. Results are grouped
+# per language — error rates in different languages are never pooled, because a
+# 2% French rate and an 8% Vietnamese rate averaged into 5% describe no system
+# anyone can deploy.
+#
+# LICENSE: CC-BY-NC-SA-4.0. Internal evaluation use; legal review before any
+# external claim rests on it.
+#
+# Cost/time note: 12 languages x 30 clips x 2 modes across 5 vendors is
+# ~2 hours wall-clock (streaming runs at 1x real time, vendor lanes serialize
+# per account) and a few dollars of API spend. Trim `sources` or modes for a
+# quicker pass.
+#
+# Deepgram nova-3-multilingual covers: en, es, fr, de, hi, ru, pt, ja, it, nl.
+# Languages outside that list (ar, hu, ko, pl, tr, vi) will fail or degrade on
+# Deepgram — that is a finding about coverage, not an error in the harness.
+
+stt:
+  - name: deepgram-nova3
+    modes: [batch, stream]
+    options:
+      model: nova-3-multilingual
+      language: multi
+  - name: assemblyai-universal35pro
+    modes: [batch, stream]
+  - name: speechmatics-enhanced
+    modes: [batch, stream]
+  - name: elevenlabs-scribe2
+    modes: [batch, stream]
+  - name: soniox-rt-v5
+    modes: [stream]
+
+dataset:
+  # Shared columns and subsetting, stated once. Validation is the held-out
+  # split (Speech-MASSIVE has no test split). Shards are matched by glob.
+  id_column: id
+  audio_column: audio
+  text_column: utt
+  limit: 30
+  sample_seed: 20260805
+  sources:
+    - { parquet: "data/hf/speech-massive/ar-SA/validation-*.parquet", language: ar-SA }
+    - { parquet: "data/hf/speech-massive/de-DE/validation-*.parquet", language: de-DE }
+    - { parquet: "data/hf/speech-massive/es-ES/validation-*.parquet", language: es-ES }
+    - { parquet: "data/hf/speech-massive/fr-FR/validation-*.parquet", language: fr-FR }
+    - { parquet: "data/hf/speech-massive/hu-HU/validation-*.parquet", language: hu-HU }
+    - { parquet: "data/hf/speech-massive/ko-KR/validation-*.parquet", language: ko-KR }
+    - { parquet: "data/hf/speech-massive/nl-NL/validation-*.parquet", language: nl-NL }
+    - { parquet: "data/hf/speech-massive/pl-PL/validation-*.parquet", language: pl-PL }
+    - { parquet: "data/hf/speech-massive/pt-PT/validation-*.parquet", language: pt-PT }
+    - { parquet: "data/hf/speech-massive/ru-RU/validation-*.parquet", language: ru-RU }
+    - { parquet: "data/hf/speech-massive/tr-TR/validation-*.parquet", language: tr-TR }
+    - { parquet: "data/hf/speech-massive/vi-VN/validation-*.parquet", language: vi-VN }
+
+run:
+  repeats: 1
+  warmup: 1
+  chunk_ms: 20
+  realtime: true
+  provider_concurrency: 6
+  vendor_concurrency: 1
+  timeout_s: 180
+  output_dir: results

@@ -14,7 +14,7 @@ import polars as pl
 import soundfile as sf
 
 from .audio import load_clip, load_clip_bytes
-from .config import DatasetConfig
+from .config import DatasetConfig, SourceConfig
 from .types import AudioClip, TtsPrompt
 
 
@@ -23,30 +23,47 @@ class DatasetError(RuntimeError):
 
 
 def load_clips(config: DatasetConfig, *, sample_rate: int = 16000) -> list[AudioClip]:
-    """Load evaluation clips from whichever source the config names.
+    """Load evaluation clips from every source the config names.
+
+    Clips from different languages are returned together; each carries its own
+    language tag, so the metrics layer scores them separately rather than
+    pooling error rates that are not comparable.
 
     Args:
         config: Dataset section of the benchmark configuration.
         sample_rate: Rate every clip is resampled to.
 
     Returns:
-        The decoded clips.
+        The decoded clips, in source order.
 
     Raises:
-        DatasetError: If neither or both of ``manifest`` and ``parquet`` are
-            set, or the named source cannot be read.
+        DatasetError: If a source names neither or both of ``manifest`` and
+            ``parquet``, or cannot be read.
     """
-    if config.manifest and config.parquet:
+    clips: list[AudioClip] = []
+    for source in config.resolved_sources():
+        clips.extend(load_source(source, sample_rate=sample_rate))
+    return clips
+
+
+def load_source(source: SourceConfig, *, sample_rate: int = 16000) -> list[AudioClip]:
+    """Load one corpus in one language.
+
+    Raises:
+        DatasetError: If the source names neither or both of ``manifest`` and
+            ``parquet``, or cannot be read.
+    """
+    if source.manifest and source.parquet:
         raise DatasetError(
             "set only one of dataset.manifest or dataset.parquet, not both"
         )
-    if config.parquet:
-        return load_clips_from_parquet(config, sample_rate=sample_rate)
-    return load_clips_from_manifest(config, sample_rate=sample_rate)
+    if source.parquet:
+        return load_clips_from_parquet(source, sample_rate=sample_rate)
+    return load_clips_from_manifest(source, sample_rate=sample_rate)
 
 
 def load_clips_from_parquet(
-    config: DatasetConfig, *, sample_rate: int = 16000
+    config: SourceConfig, *, sample_rate: int = 16000
 ) -> list[AudioClip]:
     """Load clips from a parquet corpus with embedded audio.
 
@@ -66,11 +83,16 @@ def load_clips_from_parquet(
         DatasetError: If the file is missing, a configured column is absent, or
             no clip could be decoded.
     """
-    path = Path(config.parquet or "")
-    if not path.is_file():
-        raise DatasetError(f"parquet file not found: {path}")
+    spec = config.parquet or ""
+    path = Path(spec)
+    # Corpora are often sharded (validation-00000-of-00002.parquet, ...). A
+    # glob keeps the config a single line instead of a shard list, and polars
+    # scans all matches as one table.
+    is_glob = "*" in spec or "?" in spec
+    if not path.is_file() and (not is_glob or not sorted(path.parent.glob(path.name))):
+        raise DatasetError(f"parquet file not found: {spec}")
 
-    frame = pl.scan_parquet(path)
+    frame = pl.scan_parquet(spec)
     available = set(frame.collect_schema().names())
     required = {config.id_column, config.audio_column, config.text_column}
     missing = sorted(required - available)
@@ -174,7 +196,7 @@ def _audio_bytes(value: object, clip_id: str) -> bytes:
 
 
 def load_clips_from_manifest(
-    config: DatasetConfig, *, sample_rate: int = 16000
+    config: SourceConfig, *, sample_rate: int = 16000
 ) -> list[AudioClip]:
     """Load audio clips listed in a JSONL manifest.
 

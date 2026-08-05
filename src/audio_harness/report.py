@@ -44,7 +44,9 @@ def stt_summary_frame(results: list[SttResult], language: str) -> pl.DataFrame:
     if not rows:
         return pl.DataFrame()
     frame = pl.DataFrame(rows)
-    return frame.sort(["error_rate", "finalize_p50_s"], nulls_last=True)
+    # Language first: rows from different languages are not a ranking, so
+    # sorting them together would invite reading one as beating another.
+    return frame.sort(["language", "error_rate", "finalize_p50_s"], nulls_last=True)
 
 
 def _stt_row(summary: ProviderSummary) -> dict[str, object]:
@@ -62,6 +64,7 @@ def _stt_row(summary: ProviderSummary) -> dict[str, object]:
     return {
         "provider": summary.provider,
         "mode": summary.mode,
+        "language": summary.language,
         "metric": summary.metric_name,
         "clips": summary.clips,
         "failures": summary.failures,
@@ -168,6 +171,7 @@ class Column:
 _STT_COLUMNS = [
     Column("Provider", "provider", str),
     Column("Mode", "mode", str),
+    Column("Lang", "language", str),
     Column("Metric", "metric", str),
     Column("Error rate", "error_rate", _pct),
     Column("TTFT p50", "ttft_p50_s", lambda v: _fmt(v, 3, "s")),

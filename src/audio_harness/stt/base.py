@@ -247,7 +247,7 @@ class SttProvider(abc.ABC):
             clip_id=clip.clip_id,
             mode=mode,
             audio_s=clip.duration_s,
-            raw={"reference": clip.reference or ""},
+            raw={"reference": clip.reference or "", "language": clip.language},
         )
 
 

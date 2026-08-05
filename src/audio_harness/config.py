@@ -8,7 +8,7 @@ re-verify against the vendor's pricing page before quoting a cost figure.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
@@ -116,8 +116,40 @@ class ProviderConfig:
 
 
 @dataclass(slots=True)
+class SourceConfig:
+    """One corpus in one language.
+
+    A multilingual benchmark is several of these. Language lives here rather
+    than on the run because it decides normalization and whether accuracy is
+    scored per word or per character, which differ within a single run.
+
+    Attributes:
+        parquet: Parquet file with embedded audio.
+        manifest: JSONL manifest, as an alternative to ``parquet``.
+        language: BCP-47 tag for every clip from this source.
+        id_column: Parquet column holding the clip identifier.
+        audio_column: Parquet column holding the audio.
+        text_column: Parquet column holding the reference transcript.
+        limit: Maximum clips from this source.
+        sample_seed: Seed for a reproducible random subset.
+    """
+
+    parquet: str | None = None
+    manifest: str | None = None
+    language: str = "en-US"
+    id_column: str = "sample_id"
+    audio_column: str = "audio"
+    text_column: str = "transcription"
+    limit: int | None = None
+    sample_seed: int | None = None
+
+
+@dataclass(slots=True)
 class DatasetConfig:
     """Where the harness reads evaluation material from.
+
+    Either name a single corpus with the fields below, or list several under
+    ``sources`` to benchmark more than one language in one run.
 
     Exactly one of ``manifest`` or ``parquet`` supplies the STT clips.
 
@@ -148,6 +180,28 @@ class DatasetConfig:
     limit: int | None = None
     sample_seed: int | None = None
     prompts: str | None = None
+    sources: list[SourceConfig] = field(default_factory=list)
+
+    def resolved_sources(self) -> list[SourceConfig]:
+        """Return the corpora to load, however the config expressed them.
+
+        An explicit ``sources`` list wins; otherwise the top-level fields are
+        treated as a single source, so single-language configs stay unchanged.
+        """
+        if self.sources:
+            return self.sources
+        return [
+            SourceConfig(
+                parquet=self.parquet,
+                manifest=self.manifest,
+                language=self.language,
+                id_column=self.id_column,
+                audio_column=self.audio_column,
+                text_column=self.text_column,
+                limit=self.limit,
+                sample_seed=self.sample_seed,
+            )
+        ]
 
 
 @dataclass(slots=True)
@@ -256,10 +310,47 @@ class BenchmarkConfig:
         return cls(
             stt=[_provider(entry) for entry in raw.get("stt", [])],
             tts=[_provider(entry) for entry in raw.get("tts", [])],
-            dataset=DatasetConfig(**(raw.get("dataset") or {})),
+            dataset=_dataset(raw.get("dataset") or {}),
             run=RunConfig(**(raw.get("run") or {})),
             roundtrip_stt=None if roundtrip is None else _provider(roundtrip),
         )
+
+
+def _dataset(raw: dict[str, Any]) -> DatasetConfig:
+    """Build a dataset config, expanding a ``sources`` list if present.
+
+    Fields set alongside ``sources`` act as defaults for every entry, so a
+    twelve-language config states the shared column names and limit once
+    instead of repeating them per language.
+
+    Raises:
+        ConfigError: If a source entry is not a mapping or names no corpus.
+    """
+    entries = raw.get("sources")
+    if not entries:
+        return DatasetConfig(**raw)
+
+    shared = {k: v for k, v in raw.items() if k != "sources"}
+    known = {f.name for f in fields(SourceConfig)}
+    defaults = {k: v for k, v in shared.items() if k in known}
+
+    sources: list[SourceConfig] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ConfigError(f"dataset.sources entry must be a mapping: {entry!r}")
+        merged = {**defaults, **entry}
+        unknown = sorted(set(merged) - known)
+        if unknown:
+            raise ConfigError(
+                f"dataset.sources entry has unknown key(s): {', '.join(unknown)}"
+            )
+        if not merged.get("parquet") and not merged.get("manifest"):
+            raise ConfigError(
+                f"dataset.sources entry needs a parquet or manifest: {entry!r}"
+            )
+        sources.append(SourceConfig(**merged))
+
+    return DatasetConfig(**{**shared, "sources": sources})
 
 
 def _provider(entry: Any) -> ProviderConfig:

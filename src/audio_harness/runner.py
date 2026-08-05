@@ -161,6 +161,7 @@ async def _one_stt(
                 return await provider.transcribe_batch(clip)
         except TimeoutError, asyncio.CancelledError:
             result = SttResult(provider=provider.key, clip_id=clip.clip_id, mode=mode)
+            result.raw["language"] = clip.language
             result.audio_s = clip.duration_s
             result.error = f"timeout after {run.timeout_s}s"
             return result
@@ -169,6 +170,7 @@ async def _one_stt(
                 await asyncio.sleep(run.retry_backoff_s * (2**attempt))
                 continue
             result = SttResult(provider=provider.key, clip_id=clip.clip_id, mode=mode)
+            result.raw["language"] = clip.language
             result.audio_s = clip.duration_s
             result.error = f"{type(exc).__name__}: {exc}"
             return result
@@ -392,6 +394,7 @@ def write_stt_results(results: list[SttResult], output_dir: str | Path) -> Path:
                         "mode": str(result.mode),
                         "text": result.text,
                         "reference": result.raw.get("reference", ""),
+                        "language": result.raw.get("language", ""),
                         "audio_s": result.audio_s,
                         "total_s": result.total_s,
                         "ttft_s": result.ttft_s,
@@ -498,6 +501,7 @@ def read_stt_results(path: str | Path) -> list[SttResult]:
             for p in record.get("partials", [])
         ]
         result.raw["reference"] = record.get("reference", "")
+        result.raw["language"] = record.get("language", "")
         if record.get("chunk_ms") is not None:
             result.raw["chunk_ms"] = record["chunk_ms"]
         results.append(result)
