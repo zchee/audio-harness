@@ -1,17 +1,56 @@
 [project]
 name = "audio-harness"
 version = "0.1.0"
-description = "Add your description here"
+description = "Cross-vendor STT/TTS benchmark harness: accuracy, streaming latency, and cost"
 readme = "README.md"
 authors = [
     { name = "Koichi Shiraishi", email = "zchee.io@gmail.com" }
 ]
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "httpx[http2]>=0.28",
+    "websockets>=14.0",
+    "jiwer>=3.1",
+    "numpy>=2.1",
+    "soundfile>=0.13",
+    "soxr>=0.5",
+    "polars>=1.20",
+    "orjson>=3.10",
+    "rich>=13.9",
+    "typer>=0.15",
+    "pyyaml>=6.0",
+    "google-auth>=2.37",
+    "google-cloud-speech>=2.31",
+    "google-genai>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.25",
+    "ruff>=0.9",
+    "mypy>=1.14",
+]
 
 [project.scripts]
-audio-harness = "audio_harness:main"
+audio-harness = "audio_harness.cli:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 88
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "SIM", "RUF"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.14"
+strict = true
+warn_return_any = true

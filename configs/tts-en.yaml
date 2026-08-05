@@ -1,0 +1,37 @@
+# English TTS benchmark across every configured provider.
+#
+#   uv run audio-harness tts configs/tts-en.yaml
+#
+# roundtrip_stt transcribes each synthesized clip with one fixed recognizer to
+# estimate intelligibility. Hold it constant across runs — changing it changes
+# every score.
+
+tts:
+  - name: cartesia-sonic35
+    modes: [batch, stream]
+  - name: cartesia-sonic3
+    modes: [batch, stream]
+  - name: deepgram-aura2
+    modes: [batch, stream]
+  - name: gemini-tts
+    modes: [batch, stream]
+
+dataset:
+  prompts: data/prompts-en.txt
+  language: en-US
+  limit: null
+
+# Text formatting MUST stay off here. With smart_format on, the recognizer
+# rewrites "four hundred and twenty dollars" as "$420" for every engine alike,
+# and the score stops discriminating between voices entirely.
+roundtrip_stt:
+  name: deepgram-nova3
+  options:
+    smart_format: false
+
+run:
+  repeats: 3
+  warmup: 1
+  provider_concurrency: 4
+  timeout_s: 300
+  output_dir: results

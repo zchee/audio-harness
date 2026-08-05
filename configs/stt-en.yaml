@@ -1,0 +1,40 @@
+# English STT benchmark across every configured provider.
+#
+#   uv run audio-harness stt configs/stt-en.yaml
+#
+# Providers run concurrently; clips within a provider run sequentially so the
+# latency figures are not self-inflicted.
+
+stt:
+  - name: deepgram-nova3
+    modes: [batch, stream]
+  - name: assemblyai-universal35pro
+    modes: [batch, stream]
+  - name: speechmatics-enhanced
+    modes: [batch, stream]
+  - name: speechmatics-standard
+    modes: [batch, stream]
+  - name: elevenlabs-scribe2
+    modes: [batch, stream]
+  - name: soniox-rt-v5
+    modes: [stream]          # Soniox is realtime-only in this harness
+  - name: google-chirp3
+    modes: [batch, stream]
+    options:
+      location: us
+  - name: xai-grok-stt
+    modes: [batch, stream]
+
+dataset:
+  manifest: data/manifests/en.jsonl
+  language: en-US
+  limit: null                # null runs the whole manifest
+
+run:
+  repeats: 3                 # 3 samples per clip so p50/p95 mean something
+  warmup: 1                  # discard the first run: TLS and cold start
+  chunk_ms: 20               # matches WebRTC / telephony framing
+  realtime: true             # NEVER set false when reporting latency
+  provider_concurrency: 4
+  timeout_s: 300
+  output_dir: results
