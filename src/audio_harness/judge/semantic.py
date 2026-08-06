@@ -591,7 +591,7 @@ def semascore(
 def _cosine(left: np.ndarray, right: np.ndarray) -> float:
     """Cosine similarity clipped to [0, 1]; zero vectors score 0."""
     norms = float(np.linalg.norm(left)) * float(np.linalg.norm(right))
-    if norms == 0.0:
+    if norms <= 0.0:
         return 0.0
     return float(np.clip(np.dot(left, right) / norms, 0.0, 1.0))
 
@@ -694,12 +694,16 @@ def cohens_kappa(pairs: Sequence[tuple[str, str]]) -> float | None:
     if not pairs:
         return None
     n = len(pairs)
-    observed = sum(1 for human, judge in pairs if human == judge) / n
+    matches = sum(1 for human, judge in pairs if human == judge)
+    observed = matches / n
     human_marginal = Counter(human for human, _ in pairs)
     judge_marginal = Counter(judge for _, judge in pairs)
-    expected = sum(human_marginal[label] * judge_marginal[label] for label in RUBRIC) / (n * n)
-    if expected == 1.0:
-        return 1.0 if observed == 1.0 else 0.0
+    # Degeneracy is decided in exact integer arithmetic: expected agreement
+    # is 1 iff the marginal product mass equals n^2, observed iff all match.
+    expected_mass = sum(human_marginal[label] * judge_marginal[label] for label in RUBRIC)
+    if expected_mass == n * n:
+        return 1.0 if matches == n else 0.0
+    expected = expected_mass / (n * n)
     return (observed - expected) / (1.0 - expected)
 
 

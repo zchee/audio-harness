@@ -53,6 +53,7 @@ class StreamTimeline:
     __slots__ = ("_audio_end_s", "_start", "partials", "ws_rtt_s")
 
     def __init__(self) -> None:
+        """Create an unanchored timeline; :meth:`start` arms the clock."""
         self._start: float | None = None
         self._audio_end_s: float | None = None
         self.partials: list[Partial] = []

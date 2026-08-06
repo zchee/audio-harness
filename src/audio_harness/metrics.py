@@ -218,8 +218,7 @@ class ProviderSummary:
 
 
 def summarize(results: list[SttResult], language: str) -> list[ProviderSummary]:
-    """Aggregate per-clip STT results into one summary per provider, mode and
-    language.
+    """Aggregate per-clip STT results into one summary per provider, mode and language.
 
     Language is part of the key, never averaged over. A 2% error rate on French
     and 8% on Vietnamese say something specific about a provider; pooling them
@@ -497,8 +496,7 @@ class HallucinationSummary:
 
 
 def summarize_hallucination(results: list[SttResult], language: str) -> list[HallucinationSummary]:
-    """Aggregate hallucination counters per provider, mode, language and
-    condition.
+    """Aggregate hallucination counters per provider, mode, language and condition.
 
     Designed to run over saved results JSONL: every input it reads —
     reference, transcript, partials, audio duration, clip id — survives

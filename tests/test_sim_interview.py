@@ -421,7 +421,7 @@ _FACT_RE = re.compile(r"clearly state .*?: (?P<spoken>.+?)\nAnswer", re.DOTALL)
 _RETRY_RE = re.compile(r"word for word: (?P<spoken>.+)$", re.DOTALL)
 
 
-async def _stub_llm(system: str, prompt: str, temperature: float) -> str:
+async def _stub_llm(system: str, prompt: str, temperature: float) -> str:  # ruff: ignore[unused-async] -- awaited through the LLM callable contract
     """Local dialogue stub: interviewer echoes the script, persona answers
     with the required spoken value woven into a disfluent sentence."""
     if "interviewer" in system:
@@ -442,7 +442,7 @@ def _stub_tts(text: str, voice: str) -> np.ndarray:
 def _fake_run_stt(perfect: str, corrupted: str):
     """Fake executor: one vendor echoes the reference, one loses digits."""
 
-    async def run(bench, clips, progress=None):
+    async def run(bench, clips, progress=None):  # ruff: ignore[unused-async] -- stands in for runner.run_stt, which callers await
         results = []
         for entry in bench.stt:
             for clip in clips:
@@ -531,7 +531,7 @@ class TestPipelineDryRun:
         assert "Task success" in report_path.read_text(encoding="utf-8")
 
     async def test_unverified_turns_are_not_voiced(self) -> None:
-        async def hopeless_llm(system: str, prompt: str, temperature: float) -> str:
+        async def hopeless_llm(system: str, prompt: str, temperature: float) -> str:  # ruff: ignore[unused-async] -- awaited through the LLM callable contract
             return "question?" if "interviewer" in system else "no comment."
 
         scenario = load_scenarios(SCENARIOS_EN)[0]

@@ -212,9 +212,8 @@ class TestPerLanguageScoring:
         output = plot_overview(frame, tmp_path / "overview.png")
 
         assert output is not None
-        assert output.is_file() and output.stat().st_size > 10_000, (
-            "the chart should be a real render, not an empty canvas"
-        )
+        assert output.is_file(), "plot_overview must write the file it returns"
+        assert output.stat().st_size > 10_000, "the chart should be a real render, not an empty canvas"
 
     def test_report_has_one_row_per_language(self) -> None:
         results = [

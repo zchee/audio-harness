@@ -109,7 +109,9 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["ANN", "ARG", "D", "private-member-access", "implicit-namespace-package"]
+# float-equality-comparison: metric assertions here are deterministic by
+# construction; exact equality is the point and approx would weaken it.
+"tests/**" = ["ANN", "ARG", "D", "private-member-access", "implicit-namespace-package", "float-equality-comparison"]
 "tools/**" = ["implicit-namespace-package", "print", "D", "ANN"]
 
 [tool.ruff.lint.pydocstyle]

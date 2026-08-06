@@ -119,7 +119,7 @@ def synthesize_source(source: SourceConfig, *, sample_rate: int = 16000) -> list
 
     if kind == "noise":
         duration = source.duration_s or DEFAULT_DURATION_S
-        files = _noise_files(source.noise_dir)
+        files = noise_files(source.noise_dir)
         return [
             noise_clip(
                 index,
@@ -135,15 +135,15 @@ def synthesize_source(source: SourceConfig, *, sample_rate: int = 16000) -> list
     if kind == "trailing_silence":
         trailing = source.trailing_silence_s or DEFAULT_TRAILING_SILENCE_S
         return [
-            trailing_silence_clip(base, trailing_s=trailing) for base in _base_clips(source, sample_rate=sample_rate)
+            trailing_silence_clip(base, trailing_s=trailing) for base in base_clips(source, sample_rate=sample_rate)
         ]
 
     if kind == "low_snr":
         snr_db = source.snr_db if source.snr_db is not None else DEFAULT_SNR_DB
-        files = _noise_files(source.noise_dir)
+        files = noise_files(source.noise_dir)
         return [
             low_snr_clip(base, index, files, snr_db=snr_db, seed=seed)
-            for index, base in enumerate(_base_clips(source, sample_rate=sample_rate))
+            for index, base in enumerate(base_clips(source, sample_rate=sample_rate))
         ]
 
     raise DatasetError(f"unknown synthetic source kind {kind!r}; expected one of {', '.join(CONDITIONS)}")
@@ -166,7 +166,7 @@ def silence_clip(index: int, *, duration_s: float, sample_rate: int, language: s
         The generated clip.
     """
     samples = np.zeros(int(sample_rate * duration_s), dtype=np.float32)
-    return _to_clip(
+    return to_clip(
         samples,
         clip_id=f"silence-{index:03d}",
         reference="",
@@ -206,8 +206,8 @@ def noise_clip(
     """
     rng = np.random.default_rng([seed, index])
     path = noise_files[int(rng.integers(len(noise_files)))]
-    samples = _load_noise(path, sample_rate)
-    segment = _segment(samples, int(sample_rate * duration_s), rng)
+    samples = load_noise(path, sample_rate)
+    segment = noise_segment(samples, int(sample_rate * duration_s), rng)
 
     rms = float(np.sqrt(np.mean(segment**2)))
     if rms <= 0.0:
@@ -215,7 +215,7 @@ def noise_clip(
     target = 10.0 ** (NOISE_LEVEL_DBFS / 20.0)
     segment = np.clip(segment * (target / rms), -1.0, 1.0)
 
-    return _to_clip(
+    return to_clip(
         segment,
         clip_id=f"noise-{index:03d}",
         reference="",
@@ -240,10 +240,10 @@ def trailing_silence_clip(base: AudioClip, *, trailing_s: float) -> AudioClip:
         The extended clip; ``speech_end_s`` still marks the original speech.
     """
     samples = np.concatenate([
-        _pcm_to_float(base.pcm),
+        pcm_to_float(base.pcm),
         np.zeros(int(base.sample_rate * trailing_s), dtype=np.float32),
     ])
-    return _to_clip(
+    return to_clip(
         samples,
         clip_id=f"trailsil-{base.clip_id}",
         reference=base.reference,
@@ -279,13 +279,13 @@ def low_snr_clip(
     """
     rng = np.random.default_rng([seed, index])
     path = noise_files[int(rng.integers(len(noise_files)))]
-    speech = _pcm_to_float(base.pcm)
-    noise = _segment(_load_noise(path, base.sample_rate), len(speech), rng)
+    speech = pcm_to_float(base.pcm)
+    noise = noise_segment(load_noise(path, base.sample_rate), len(speech), rng)
     if float(np.sqrt(np.mean(noise**2))) <= 0.0:
         raise DatasetError(f"noise file decodes to silence: {path}")
 
     mixed = mix_at_snr(speech, noise, snr_db=snr_db, sample_rate=base.sample_rate)
-    return _to_clip(
+    return to_clip(
         mixed,
         clip_id=f"lowsnr-{base.clip_id}",
         reference=base.reference,
@@ -341,14 +341,14 @@ def _active_rms(samples: np.ndarray, sample_rate: int) -> float:
     return float(np.sqrt(np.mean(active**2)))
 
 
-def _base_clips(source: SourceConfig, *, sample_rate: int) -> list[AudioClip]:
+def base_clips(source: SourceConfig, *, sample_rate: int) -> list[AudioClip]:
     """Load the real utterances a derived condition builds on."""
     if not source.parquet and not source.manifest:
         raise DatasetError(f"synthetic source {source.synthetic!r} needs a parquet or manifest of base utterances")
     return load_source(replace(source, synthetic=None), sample_rate=sample_rate)
 
 
-def _noise_files(noise_dir: str | None) -> list[Path]:
+def noise_files(noise_dir: str | None) -> list[Path]:
     """Collect noise recordings in a deterministic order."""
     if not noise_dir:
         raise DatasetError(f"synthetic source needs noise_dir; {_MUSAN_HINT}")
@@ -361,7 +361,7 @@ def _noise_files(noise_dir: str | None) -> list[Path]:
     return files
 
 
-def _load_noise(path: Path, sample_rate: int) -> np.ndarray:
+def load_noise(path: Path, sample_rate: int) -> np.ndarray:
     """Decode a noise file to mono float samples at ``sample_rate``."""
     try:
         data, source_rate = sf.read(path, dtype="float32", always_2d=True)
@@ -375,7 +375,7 @@ def _load_noise(path: Path, sample_rate: int) -> np.ndarray:
     return mono.astype(np.float32)
 
 
-def _segment(samples: np.ndarray, length: int, rng: np.random.Generator) -> np.ndarray:
+def noise_segment(samples: np.ndarray, length: int, rng: np.random.Generator) -> np.ndarray:
     """Cut a segment of ``length`` samples, looping the material if short."""
     if len(samples) < length:
         samples = np.resize(samples, length)
@@ -385,12 +385,12 @@ def _segment(samples: np.ndarray, length: int, rng: np.random.Generator) -> np.n
     return samples[offset : offset + length].copy()
 
 
-def _pcm_to_float(pcm: bytes) -> np.ndarray:
+def pcm_to_float(pcm: bytes) -> np.ndarray:
     """Convert little-endian 16-bit PCM bytes back to float samples."""
     return np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32767.0
 
 
-def _to_clip(
+def to_clip(
     samples: np.ndarray,
     *,
     clip_id: str,

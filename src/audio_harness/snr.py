@@ -37,8 +37,9 @@ import re
 import numpy as np
 import soxr
 
+from .config import SourceConfig
 from .metrics import ErrorCounts, percentile, score_pair
-from .types import SttResult
+from .types import AudioClip, SttResult
 
 
 SNR_LEVELS = (20.0, 10.0, 5.0, 0.0, -5.0)
@@ -64,7 +65,7 @@ def is_telephony(clip_id: str) -> bool:
     return clip_id.startswith(_TELEPHONY_PREFIX)
 
 
-def synthesize_snr_source(source, *, sample_rate: int = 16000):
+def synthesize_snr_source(source: SourceConfig, *, sample_rate: int = 16000) -> list[AudioClip]:
     """Generate the clips an SNR-matrix or telephony source describes.
 
     Args:
@@ -91,24 +92,24 @@ def synthesize_snr_source(source, *, sample_rate: int = 16000):
     if kind not in SNR_KINDS:
         raise DatasetError(f"unknown SNR source kind {kind!r}; expected one of {', '.join(SNR_KINDS)}")
 
-    bases = synthetic._base_clips(source, sample_rate=sample_rate)
+    bases = synthetic.base_clips(source, sample_rate=sample_rate)
     if kind == "telephony":
-        return [_telephony_clip(base, synthetic) for base in bases]
+        return [_telephony_clip(base) for base in bases]
 
     seed = source.sample_seed if source.sample_seed is not None else synthetic.DEFAULT_SEED
-    files = synthetic._noise_files(source.noise_dir)
-    clips = []
+    files = synthetic.noise_files(source.noise_dir)
+    clips: list[AudioClip] = []
     for index, base in enumerate(bases):
         rng = np.random.default_rng([seed, index])
         path = files[int(rng.integers(len(files)))]
-        speech = synthetic._pcm_to_float(base.pcm)
-        noise = synthetic._segment(synthetic._load_noise(path, base.sample_rate), len(speech), rng)
+        speech = synthetic.pcm_to_float(base.pcm)
+        noise = synthetic.noise_segment(synthetic.load_noise(path, base.sample_rate), len(speech), rng)
         if float(np.sqrt(np.mean(noise**2))) <= 0.0:
             raise DatasetError(f"noise file decodes to silence: {path}")
         for level in SNR_LEVELS:
             mixed = synthetic.mix_at_snr(speech, noise, snr_db=level, sample_rate=base.sample_rate)
             clips.append(
-                synthetic._to_clip(
+                synthetic.to_clip(
                     mixed,
                     clip_id=f"snr{int(level):+03d}-{base.clip_id}",
                     reference=base.reference,
@@ -120,12 +121,15 @@ def synthesize_snr_source(source, *, sample_rate: int = 16000):
     return clips
 
 
-def _telephony_clip(base, synthetic):
+def _telephony_clip(base: AudioClip) -> AudioClip:
     """Round-trip one clip through the 8 kHz telephony band."""
-    samples = synthetic._pcm_to_float(base.pcm)
+    # Same circularity as above: synthetic.py reaches back into this module.
+    from . import synthetic
+
+    samples = synthetic.pcm_to_float(base.pcm)
     narrow = soxr.resample(samples, base.sample_rate, TELEPHONY_RATE, quality="HQ")
     restored = soxr.resample(narrow, TELEPHONY_RATE, base.sample_rate, quality="HQ")
-    return synthetic._to_clip(
+    return synthetic.to_clip(
         restored.astype(np.float32),
         clip_id=f"{_TELEPHONY_PREFIX}{base.clip_id}",
         reference=base.reference,

@@ -560,6 +560,12 @@ occupies a concurrency slot; eight hung calls deadlock the whole run — a
 timed-out attempt instead retries and, failing that, records an error."""
 
 
+def _append_cache_record(path: Path, payload: bytes) -> None:
+    """Append one serialized verdict line to the on-disk judge cache."""
+    with path.open("ab") as handle:
+        handle.write(payload)
+
+
 async def run_arena(
     *,
     audio_dir: str | Path,
@@ -689,23 +695,22 @@ async def run_arena(
                     await asyncio.sleep(_RETRY_BASE_S * 2**attempt)
 
         if verdict.ok:
+            payload = orjson.dumps({
+                "key": key,
+                "aspect": verdict.aspect,
+                "prompt_id": verdict.prompt_id,
+                "first": verdict.first,
+                "second": verdict.second,
+                "winner": verdict.winner,
+                "model": verdict.model,
+                "prompt_tokens": verdict.prompt_tokens,
+                "output_tokens": verdict.output_tokens,
+                "raw_text": verdict.raw_text,
+            })
             async with write_lock:
-                with cache_file.open("ab") as handle:
-                    handle.write(
-                        orjson.dumps({
-                            "key": key,
-                            "aspect": verdict.aspect,
-                            "prompt_id": verdict.prompt_id,
-                            "first": verdict.first,
-                            "second": verdict.second,
-                            "winner": verdict.winner,
-                            "model": verdict.model,
-                            "prompt_tokens": verdict.prompt_tokens,
-                            "output_tokens": verdict.output_tokens,
-                            "raw_text": verdict.raw_text,
-                        })
-                    )
-                    handle.write(b"\n")
+                # Off-loop append: a blocking write here would stall every
+                # in-flight judge call's asyncio.wait_for timeout clock.
+                await asyncio.to_thread(_append_cache_record, cache_file, payload + b"\n")
         else:
             run.error_calls += 1
         done += 1

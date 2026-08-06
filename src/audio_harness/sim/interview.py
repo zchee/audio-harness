@@ -947,7 +947,7 @@ def clips_from_turns(
         wav16 = soxr.resample(wav24, KOKORO_SAMPLE_RATE, STT_SAMPLE_RATE, quality="HQ").astype(np.float32)
         degraded = degrade_tel8k(wav16, STT_SAMPLE_RATE)
         clips.append(
-            synthetic._to_clip(
+            synthetic.to_clip(
                 degraded,
                 clip_id=turn.clip_id,
                 reference=turn.answer,
@@ -1148,7 +1148,7 @@ def spearman_rho(a: dict[str, float], b: dict[str, float]) -> float:
     xd = xs - xs.mean()
     yd = ys - ys.mean()
     denom = math.sqrt(float((xd**2).sum()) * float((yd**2).sum()))
-    if denom == 0.0:
+    if denom <= 0.0:
         return math.nan
     return float((xd * yd).sum()) / denom
 

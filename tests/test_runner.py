@@ -312,7 +312,7 @@ async def _wait_for_snapshot(root: Path, name: str) -> Path:
     loop = asyncio.get_running_loop()
     deadline = loop.time() + 10.0
     while loop.time() < deadline:
-        found = [p for p in root.glob(f"*/{name}") if p.stat().st_size > 0]
+        found = [p for p in root.glob(f"*/{name}") if p.stat().st_size > 0]  # ruff: ignore[blocking-path-method-in-async-function] -- tmp-file poll at 10 ms cadence; blocking stat is negligible
         if found:
             return found[0]
         await asyncio.sleep(0.01)
@@ -437,13 +437,13 @@ class TestSttLanePersistence:
         config = _stt_config(["fake-persist-slow-stt", "fake-persist-stt"], tmp_path, repeats=2)
 
         results = await runner.run_stt(config, clips)
-        snapshot = next(tmp_path.glob("*/stt-results.jsonl"))
+        snapshot = next(tmp_path.glob("*/stt-results.jsonl"))  # ruff: ignore[blocking-path-method-in-async-function] -- assertion-phase tmp_path I/O; the run under test has finished
         snapshot_lines = sorted(snapshot.read_bytes().splitlines())
 
         path = runner.write_stt_results(results, str(tmp_path))
 
         assert path == snapshot, "the canonical file replaces the lane snapshots"
-        assert len(list(tmp_path.iterdir())) == 1, (
+        assert len(list(tmp_path.iterdir())) == 1, (  # ruff: ignore[blocking-path-method-in-async-function] -- assertion-phase tmp_path I/O; the run under test has finished
             "the end-of-run write must reuse the run's directory, not open a second timestamped one"
         )
         assert results[0].provider == "fake-persist-slow-stt", (
@@ -453,7 +453,7 @@ class TestSttLanePersistence:
         assert sorted(path.read_bytes().splitlines()) == snapshot_lines, (
             "snapshots hold the same records; only lane order may differ"
         )
-        assert not list(tmp_path.glob("*/*.tmp")), "no flush leftovers"
+        assert not list(tmp_path.glob("*/*.tmp")), "no flush leftovers"  # ruff: ignore[blocking-path-method-in-async-function] -- assertion-phase tmp_path I/O; the run under test has finished
 
 
 class TestTtsLanePersistence:
@@ -487,13 +487,13 @@ class TestTtsLanePersistence:
         config = _tts_config(["fake-persist-slow-tts", "fake-persist-tts"], tmp_path, warmup=1)
 
         results = await runner.run_tts(config, prompts)
-        snapshot = next(tmp_path.glob("*/tts-results.jsonl"))
+        snapshot = next(tmp_path.glob("*/tts-results.jsonl"))  # ruff: ignore[blocking-path-method-in-async-function] -- assertion-phase tmp_path I/O; the run under test has finished
         snapshot_lines = sorted(snapshot.read_bytes().splitlines())
 
         path = runner.write_tts_results(results, str(tmp_path), save_audio=False)
 
         assert path == snapshot, "the canonical file replaces the lane snapshots"
-        assert len(list(tmp_path.iterdir())) == 1, (
+        assert len(list(tmp_path.iterdir())) == 1, (  # ruff: ignore[blocking-path-method-in-async-function] -- assertion-phase tmp_path I/O; the run under test has finished
             "the end-of-run write must reuse the run's directory, not open a second timestamped one"
         )
         assert any(r.cold for r in results), (
@@ -503,4 +503,4 @@ class TestTtsLanePersistence:
         assert sorted(path.read_bytes().splitlines()) == snapshot_lines, (
             "snapshots hold the same records; only lane order may differ"
         )
-        assert not list(tmp_path.glob("*/*.tmp")), "no flush leftovers"
+        assert not list(tmp_path.glob("*/*.tmp")), "no flush leftovers"  # ruff: ignore[blocking-path-method-in-async-function] -- assertion-phase tmp_path I/O; the run under test has finished

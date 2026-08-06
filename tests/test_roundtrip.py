@@ -115,7 +115,7 @@ class TestRoundtripConfig:
         assert config.roundtrip_stt[0].options == {"smart_format": False}
 
     def test_legacy_bare_name_parses_with_deprecation(self) -> None:
-        with pytest.warns(DeprecationWarning):
+        with pytest.warns(DeprecationWarning, match="scalar form is deprecated"):
             config = BenchmarkConfig.from_dict({"roundtrip_stt": "deepgram-nova3"})
         assert [judge.name for judge in config.roundtrip_stt] == ["deepgram-nova3"]
 
@@ -136,7 +136,7 @@ class TestCrossFamilyValidation:
     """Every TTS lane needs at least one judge outside its own family."""
 
     def test_legacy_scalar_judge_is_accepted_for_other_families(self) -> None:
-        with pytest.warns(DeprecationWarning):
+        with pytest.warns(DeprecationWarning, match="scalar form is deprecated"):
             config = _config(["cartesia-sonic35"], {"name": "deepgram-nova3"})
         validate_roundtrip_judges(config)
 
