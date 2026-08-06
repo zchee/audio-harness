@@ -26,6 +26,7 @@ from audio_harness.synthetic import (
     synthesize_source,
 )
 
+
 RATE = 16000
 
 
@@ -47,15 +48,11 @@ def _tone_wav(seconds: float) -> bytes:
 
 def _speech_corpus(path: Path, rows: int = 4) -> Path:
     """Write a tiny parquet corpus of tone 'utterances' with references."""
-    pl.DataFrame(
-        {
-            "sample_id": [f"clip-{i:03d}" for i in range(rows)],
-            "audio": [
-                {"bytes": _tone_wav(0.4 + i * 0.1), "path": None} for i in range(rows)
-            ],
-            "transcription": [f"utterance number {i}" for i in range(rows)],
-        }
-    ).write_parquet(path)
+    pl.DataFrame({
+        "sample_id": [f"clip-{i:03d}" for i in range(rows)],
+        "audio": [{"bytes": _tone_wav(0.4 + i * 0.1), "path": None} for i in range(rows)],
+        "transcription": [f"utterance number {i}" for i in range(rows)],
+    }).write_parquet(path)
     return path
 
 
@@ -110,9 +107,7 @@ class TestNoise:
         second = [c.pcm for c in synthesize_source(source, sample_rate=RATE)]
 
         assert first == second, "a pinned seed must give byte-identical clips"
-        assert len({bytes(pcm) for pcm in first}) > 1, (
-            "different indices must cut different segments"
-        )
+        assert len({bytes(pcm) for pcm in first}) > 1, "different indices must cut different segments"
 
     def test_clips_are_normalized_to_the_documented_level(self, tmp_path: Path) -> None:
         source = SourceConfig(
@@ -137,21 +132,15 @@ class TestNoise:
                 "match": "fetch_musan",
             },
             "nonexistent directory": {
-                "source": SourceConfig(
-                    synthetic="noise", limit=2, noise_dir=str(tmp_path / "gone")
-                ),
+                "source": SourceConfig(synthetic="noise", limit=2, noise_dir=str(tmp_path / "gone")),
                 "match": "noise_dir not found",
             },
             "directory without audio": {
-                "source": SourceConfig(
-                    synthetic="noise", limit=2, noise_dir=str(empty)
-                ),
+                "source": SourceConfig(synthetic="noise", limit=2, noise_dir=str(empty)),
                 "match": "no audio files",
             },
             "missing limit": {
-                "source": SourceConfig(
-                    synthetic="noise", noise_dir=str(tmp_path / "noise")
-                ),
+                "source": SourceConfig(synthetic="noise", noise_dir=str(tmp_path / "noise")),
                 "match": "positive limit",
             },
             "unknown kind": {
@@ -159,7 +148,7 @@ class TestNoise:
                 "match": "unknown synthetic source kind",
             },
         }
-        for _name, case in tests.items():
+        for case in tests.values():
             with pytest.raises(DatasetError, match=case["match"]):
                 synthesize_source(case["source"], sample_rate=RATE)
 
@@ -174,17 +163,13 @@ class TestTrailingSilence:
             limit=3,
             trailing_silence_s=2.0,
         )
-        bases = load_source(
-            SourceConfig(parquet=source.parquet, limit=3), sample_rate=RATE
-        )
+        bases = load_source(SourceConfig(parquet=source.parquet, limit=3), sample_rate=RATE)
         clips = synthesize_source(source, sample_rate=RATE)
 
         assert [c.clip_id for c in clips] == [f"trailsil-{b.clip_id}" for b in bases]
         for base, clip in zip(bases, clips, strict=True):
             assert clip.duration_s == pytest.approx(base.duration_s + 2.0, abs=0.01)
-            assert clip.reference == base.reference, (
-                "any text beyond the base reference must count as insertion"
-            )
+            assert clip.reference == base.reference, "any text beyond the base reference must count as insertion"
             tail = clip.pcm[-int(RATE * 1.5) * 2 :]
             assert set(tail) == {0}, "the appended tail must be digital silence"
             assert clip.speech_end_s <= base.duration_s + 0.05, (
@@ -193,9 +178,7 @@ class TestTrailingSilence:
 
     def test_requires_a_base_corpus(self) -> None:
         with pytest.raises(DatasetError, match="base utterances"):
-            synthesize_source(
-                SourceConfig(synthetic="trailing_silence", limit=3), sample_rate=RATE
-            )
+            synthesize_source(SourceConfig(synthetic="trailing_silence", limit=3), sample_rate=RATE)
 
 
 class TestLowSnr:
@@ -221,9 +204,7 @@ class TestLowSnr:
         mixed = mix_at_snr(speech, noise, snr_db=-10.0, sample_rate=RATE)
         assert float(np.max(np.abs(mixed))) <= 1.0
 
-    def test_end_to_end_is_deterministic_and_keeps_references(
-        self, tmp_path: Path
-    ) -> None:
+    def test_end_to_end_is_deterministic_and_keeps_references(self, tmp_path: Path) -> None:
         source = SourceConfig(
             synthetic="low_snr",
             parquet=str(_speech_corpus(tmp_path / "c.parquet", rows=2)),
@@ -238,12 +219,9 @@ class TestLowSnr:
         assert [c.pcm for c in first] == [c.pcm for c in second]
         assert [c.clip_id for c in first] == ["lowsnr-clip-000", "lowsnr-clip-001"]
         assert first[0].reference == "utterance number 0"
-        assert (
-            first[0].pcm
-            != load_source(
-                SourceConfig(parquet=source.parquet, limit=1), sample_rate=RATE
-            )[0].pcm
-        ), "the mix must actually change the audio"
+        assert first[0].pcm != load_source(SourceConfig(parquet=source.parquet, limit=1), sample_rate=RATE)[0].pcm, (
+            "the mix must actually change the audio"
+        )
 
 
 class TestConditionOf:
@@ -265,26 +243,22 @@ class TestConditionOf:
 class TestConfigWiring:
     """Synthetic sources ride the existing dataset/config machinery."""
 
-    def test_load_clips_mixes_synthetic_and_corpus_sources(
-        self, tmp_path: Path
-    ) -> None:
+    def test_load_clips_mixes_synthetic_and_corpus_sources(self, tmp_path: Path) -> None:
         corpus = _speech_corpus(tmp_path / "c.parquet", rows=2)
-        config = BenchmarkConfig.from_dict(
-            {
-                "dataset": {
-                    "language": "en-US",
-                    "sources": [
-                        {"synthetic": "silence", "limit": 2, "duration_s": 0.5},
-                        {
-                            "synthetic": "trailing_silence",
-                            "limit": 2,
-                            "trailing_silence_s": 1.0,
-                            "parquet": str(corpus),
-                        },
-                    ],
-                }
+        config = BenchmarkConfig.from_dict({
+            "dataset": {
+                "language": "en-US",
+                "sources": [
+                    {"synthetic": "silence", "limit": 2, "duration_s": 0.5},
+                    {
+                        "synthetic": "trailing_silence",
+                        "limit": 2,
+                        "trailing_silence_s": 1.0,
+                        "parquet": str(corpus),
+                    },
+                ],
             }
-        )
+        })
         clips = load_clips(config.dataset)
         assert [condition_of(c.clip_id) for c in clips] == [
             "silence",

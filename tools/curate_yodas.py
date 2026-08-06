@@ -29,6 +29,7 @@ from audio_harness.curate import (
     sample_candidates,
 )
 
+
 YODAS_BASE = "https://huggingface.co/datasets/espnet/yodas2/resolve/main"
 GRANARY_BASE = "https://huggingface.co/datasets/nvidia/Granary/resolve/main"
 
@@ -73,9 +74,7 @@ GRANARY_SLICE_BYTES = 4_000_000
 candidates without pulling files that can reach hundreds of MB."""
 
 
-def fetch_yodas_candidates(
-    client: httpx.Client, language: str, subset: str, shard: str
-) -> list | None:
+def fetch_yodas_candidates(client: httpx.Client, language: str, subset: str, shard: str) -> list | None:
     """Download one text shard and return its filtered candidates.
 
     Returns ``None`` when the shard does not exist, which is how a small
@@ -86,9 +85,7 @@ def fetch_yodas_candidates(
     if response.status_code == 404:
         return None
     response.raise_for_status()
-    return parse_yodas_text_shard(
-        orjson.loads(response.content), subset=subset, shard=shard, language=language
-    )
+    return parse_yodas_text_shard(orjson.loads(response.content), subset=subset, shard=shard, language=language)
 
 
 def fetch_granary_candidates(client: httpx.Client, language: str, code: str) -> list:
@@ -104,9 +101,7 @@ def fetch_granary_candidates(client: httpx.Client, language: str, code: str) -> 
         # is the manually subtitled slice, matching the YODAS2 lane's choice.
         for name in (f"{code}_asr.jsonl", f"{code}_asr_{code}000.jsonl"):
             url = f"{GRANARY_BASE}/{code}/{source}/{name}"
-            response = client.get(
-                url, headers={"Range": f"bytes=0-{GRANARY_SLICE_BYTES - 1}"}
-            )
+            response = client.get(url, headers={"Range": f"bytes=0-{GRANARY_SLICE_BYTES - 1}"})
             if response.status_code == 404:
                 continue
             response.raise_for_status()
@@ -133,9 +128,7 @@ def main() -> None:
 
     args.out.mkdir(parents=True, exist_ok=True)
     shortfalls: list[str] = []
-    with httpx.Client(
-        timeout=httpx.Timeout(120.0, connect=15.0), follow_redirects=True
-    ) as client:
+    with httpx.Client(timeout=httpx.Timeout(120.0, connect=15.0), follow_redirects=True) as client:
         for language, subset in YODAS_LANGUAGES.items():
             candidates: list = []
             chosen: list = []
@@ -144,30 +137,20 @@ def main() -> None:
                 if shard is None:
                     break
                 candidates.extend(shard)
-                chosen = sample_candidates(
-                    candidates, count=args.per_language, seed=args.seed
-                )
+                chosen = sample_candidates(candidates, count=args.per_language, seed=args.seed)
                 if len(chosen) >= args.per_language:
                     break
             path = _write(args.out / f"yodas2-{language}.jsonl", chosen)
-            print(
-                f"yodas2 {language}: {len(candidates)} candidates "
-                f"-> {len(chosen)} curated -> {path}"
-            )
+            print(f"yodas2 {language}: {len(candidates)} candidates -> {len(chosen)} curated -> {path}")
             if len(chosen) < 30:
                 shortfalls.append(f"yodas2 {language}: {len(chosen)} < 30")
 
         for language, code in GRANARY_LANGUAGES.items():
             candidates = fetch_granary_candidates(client, language, code)
-            chosen = sample_candidates(
-                candidates, count=args.per_language, seed=args.seed
-            )
+            chosen = sample_candidates(candidates, count=args.per_language, seed=args.seed)
             source = candidates[0].subset if candidates else "none"
             path = _write(args.out / f"granary-{language}.jsonl", chosen)
-            print(
-                f"granary/{source} {language}: {len(candidates)} candidates "
-                f"-> {len(chosen)} curated -> {path}"
-            )
+            print(f"granary/{source} {language}: {len(candidates)} candidates -> {len(chosen)} curated -> {path}")
             if len(chosen) < 30:
                 shortfalls.append(f"granary {language}: {len(chosen)} < 30")
 

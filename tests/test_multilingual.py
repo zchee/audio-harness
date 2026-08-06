@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import wave
 from io import BytesIO
 from pathlib import Path
+import wave
 
 import polars as pl
 import pytest
@@ -27,13 +27,11 @@ def _wav(seconds: float = 0.4, rate: int = 16000) -> bytes:
 
 
 def _corpus(path: Path, prefix: str, texts: list[str]) -> Path:
-    pl.DataFrame(
-        {
-            "id": [f"{prefix}-{i}" for i in range(len(texts))],
-            "audio": [{"bytes": _wav(), "path": None} for _ in texts],
-            "utt": texts,
-        }
-    ).write_parquet(path)
+    pl.DataFrame({
+        "id": [f"{prefix}-{i}" for i in range(len(texts))],
+        "audio": [{"bytes": _wav(), "path": None} for _ in texts],
+        "utt": texts,
+    }).write_parquet(path)
     return path
 
 
@@ -49,21 +47,19 @@ class TestMultiSourceConfig:
     """A multilingual benchmark is several sources in one config."""
 
     def test_sources_inherit_shared_defaults(self) -> None:
-        config = BenchmarkConfig.from_dict(
-            {
-                "dataset": {
-                    "id_column": "id",
-                    "audio_column": "audio",
-                    "text_column": "utt",
-                    "limit": 5,
-                    "sample_seed": 42,
-                    "sources": [
-                        {"parquet": "a.parquet", "language": "fr-FR"},
-                        {"parquet": "b.parquet", "language": "de-DE"},
-                    ],
-                }
+        config = BenchmarkConfig.from_dict({
+            "dataset": {
+                "id_column": "id",
+                "audio_column": "audio",
+                "text_column": "utt",
+                "limit": 5,
+                "sample_seed": 42,
+                "sources": [
+                    {"parquet": "a.parquet", "language": "fr-FR"},
+                    {"parquet": "b.parquet", "language": "de-DE"},
+                ],
             }
-        )
+        })
         sources = config.dataset.resolved_sources()
 
         assert [s.language for s in sources] == ["fr-FR", "de-DE"]
@@ -73,23 +69,19 @@ class TestMultiSourceConfig:
         assert all(s.limit == 5 and s.sample_seed == 42 for s in sources)
 
     def test_per_source_override_wins(self) -> None:
-        config = BenchmarkConfig.from_dict(
-            {
-                "dataset": {
-                    "limit": 5,
-                    "sources": [
-                        {"parquet": "a.parquet", "language": "fr-FR"},
-                        {"parquet": "b.parquet", "language": "ko-KR", "limit": 2},
-                    ],
-                }
+        config = BenchmarkConfig.from_dict({
+            "dataset": {
+                "limit": 5,
+                "sources": [
+                    {"parquet": "a.parquet", "language": "fr-FR"},
+                    {"parquet": "b.parquet", "language": "ko-KR", "limit": 2},
+                ],
             }
-        )
+        })
         assert [s.limit for s in config.dataset.resolved_sources()] == [5, 2]
 
     def test_single_source_config_still_works(self) -> None:
-        config = BenchmarkConfig.from_dict(
-            {"dataset": {"parquet": "a.parquet", "language": "en-US"}}
-        )
+        config = BenchmarkConfig.from_dict({"dataset": {"parquet": "a.parquet", "language": "en-US"}})
         sources = config.dataset.resolved_sources()
 
         assert len(sources) == 1
@@ -102,13 +94,7 @@ class TestMultiSourceConfig:
 
     def test_unknown_source_key_is_rejected(self) -> None:
         with pytest.raises(ConfigError, match="unknown key"):
-            BenchmarkConfig.from_dict(
-                {
-                    "dataset": {
-                        "sources": [{"parquet": "a.parquet", "langauge": "fr-FR"}]
-                    }
-                }
-            )
+            BenchmarkConfig.from_dict({"dataset": {"sources": [{"parquet": "a.parquet", "langauge": "fr-FR"}]}})
 
 
 class TestMultiSourceLoading:
@@ -117,18 +103,16 @@ class TestMultiSourceLoading:
     def test_clips_from_all_sources_are_tagged(self, tmp_path: Path) -> None:
         fr = _corpus(tmp_path / "fr.parquet", "fr", ["bonjour le monde", "merci"])
         de = _corpus(tmp_path / "de.parquet", "de", ["guten tag"])
-        config = BenchmarkConfig.from_dict(
-            {
-                "dataset": {
-                    "id_column": "id",
-                    "text_column": "utt",
-                    "sources": [
-                        {"parquet": str(fr), "language": "fr-FR"},
-                        {"parquet": str(de), "language": "de-DE"},
-                    ],
-                }
+        config = BenchmarkConfig.from_dict({
+            "dataset": {
+                "id_column": "id",
+                "text_column": "utt",
+                "sources": [
+                    {"parquet": str(fr), "language": "fr-FR"},
+                    {"parquet": str(de), "language": "de-DE"},
+                ],
             }
-        ).dataset
+        }).dataset
 
         clips = load_clips(config)
 
@@ -142,22 +126,19 @@ class TestMultiSourceLoading:
         config = DatasetConfig(
             id_column="id",
             text_column="utt",
-            sources=[
-                s
-                for s in BenchmarkConfig.from_dict(
-                    {
-                        "dataset": {
-                            "id_column": "id",
-                            "text_column": "utt",
-                            "limit": 3,
-                            "sources": [
-                                {"parquet": str(fr), "language": "fr-FR"},
-                                {"parquet": str(de), "language": "de-DE"},
-                            ],
-                        }
+            sources=list(
+                BenchmarkConfig.from_dict({
+                    "dataset": {
+                        "id_column": "id",
+                        "text_column": "utt",
+                        "limit": 3,
+                        "sources": [
+                            {"parquet": str(fr), "language": "fr-FR"},
+                            {"parquet": str(de), "language": "de-DE"},
+                        ],
                     }
-                ).dataset.resolved_sources()
-            ],
+                }).dataset.resolved_sources()
+            ),
         )
         clips = load_clips(config)
 
@@ -182,10 +163,7 @@ class TestPerLanguageScoring:
     def test_pooling_would_have_hidden_a_bad_language(self) -> None:
         """The whole point: one weak language must stay visible."""
         results = [
-            *[
-                _result("p", "fr-FR", "un deux trois", "un deux trois")
-                for _ in range(9)
-            ],
+            *[_result("p", "fr-FR", "un deux trois", "un deux trois") for _ in range(9)],
             _result("p", "vi-VN", "xin chao ban", "hoan toan sai"),
         ]
         summaries = {s.language: s for s in summarize(results, "en-US")}
@@ -203,19 +181,14 @@ class TestPerLanguageScoring:
         summaries = {s.language: s for s in summarize(results, "en-US")}
 
         assert summaries["en-US"].metric_name == "WER"
-        assert summaries["ja-JP"].metric_name == "CER", (
-            "a mixed run scores each language by its own appropriate metric"
-        )
+        assert summaries["ja-JP"].metric_name == "CER", "a mixed run scores each language by its own appropriate metric"
 
     def test_overview_chart_needs_two_languages(self, tmp_path: Path) -> None:
         from audio_harness.plot import plot_overview
 
-        single = stt_summary_frame(
-            [_result("p", "fr-FR", "bonjour", "bonjour")], "en-US"
-        )
+        single = stt_summary_frame([_result("p", "fr-FR", "bonjour", "bonjour")], "en-US")
         assert plot_overview(single, tmp_path / "single.png") is None, (
-            "one language has its own per-language charts; an overview of it "
-            "would just be a worse table"
+            "one language has its own per-language charts; an overview of it would just be a worse table"
         )
 
     def test_overview_chart_renders_a_mixed_metric_run(self, tmp_path: Path) -> None:

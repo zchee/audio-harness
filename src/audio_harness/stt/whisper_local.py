@@ -15,15 +15,17 @@ with no latency story to measure.
 from __future__ import annotations
 
 import asyncio
-import time
 from functools import cache
+import time
 from typing import Any
 
 import numpy as np
 import soxr
 
-from ..types import AudioClip, Mode, SttResult
+from audio_harness.types import AudioClip, Mode, SttResult
+
 from .base import SttProvider, register
+
 
 DEFAULT_MODEL = "mlx-community/whisper-large-v3-mlx"
 DEFAULT_REVISION = "49e6aa286ad60c14352c404340ded53710378a11"
@@ -80,9 +82,7 @@ class WhisperLocal(SttProvider):
         mlx_whisper = _import_mlx_whisper()
         samples = np.frombuffer(clip.pcm, dtype="<i2").astype(np.float32) / 32768.0
         if clip.sample_rate != WHISPER_SAMPLE_RATE:
-            samples = soxr.resample(
-                samples, clip.sample_rate, WHISPER_SAMPLE_RATE, quality="HQ"
-            )
+            samples = soxr.resample(samples, clip.sample_rate, WHISPER_SAMPLE_RATE, quality="HQ")
         language = clip.language.split("-", 1)[0].lower()
         transcription: dict[str, Any] = mlx_whisper.transcribe(
             samples,

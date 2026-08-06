@@ -15,6 +15,7 @@ from pathlib import Path
 
 from .prompt_suite import LOCALES, SuitePrompt, flatten_to_prompts_txt, write_jsonl
 
+
 CATEGORY = "interview"
 LICENSE = "own-IP"
 SOURCE = "hand-authored 2026-08-06 (audio-harness interview-agent domain)"
@@ -120,8 +121,6 @@ def generate(out_dir: Path) -> tuple[Path, list[Path]]:
     for subtag, language in LOCALES.items():
         if subtag == "en":
             continue
-        marker = write_pending_marker(
-            out_dir / f"prompts-{subtag}" / f"{CATEGORY}.PENDING.md", language
-        )
+        marker = write_pending_marker(out_dir / f"prompts-{subtag}" / f"{CATEGORY}.PENDING.md", language)
         pending.append(marker)
     return jsonl_path, pending

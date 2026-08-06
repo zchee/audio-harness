@@ -10,10 +10,12 @@ from typing import Any
 from google import genai
 from google.genai import types as genai_types
 
-from ..audio import decode_audio_duration
-from ..config import require_env
-from ..types import Mode, TtsPrompt, TtsResult
+from audio_harness.audio import decode_audio_duration
+from audio_harness.config import require_env
+from audio_harness.types import Mode, TtsPrompt, TtsResult
+
 from .base import ChunkTimeline, TtsProvider, register, stamp_stream_timing
+
 
 GEMINI_SAMPLE_RATE = 24000
 """Gemini TTS emits 24 kHz mono 16-bit PCM regardless of what is requested."""
@@ -49,16 +51,12 @@ class GeminiTts(TtsProvider):
         return str(self.options.get("model", "gemini-2.5-flash-preview-tts"))
 
     def _config(self) -> genai_types.GenerateContentConfig:
-        voice = str(
-            self.options.get("voice") or os.environ.get("GEMINI_TTS_VOICE", "Kore")
-        )
+        voice = str(self.options.get("voice") or os.environ.get("GEMINI_TTS_VOICE", "Kore"))
         return genai_types.GenerateContentConfig(
             response_modalities=["AUDIO"],
             speech_config=genai_types.SpeechConfig(
                 voice_config=genai_types.VoiceConfig(
-                    prebuilt_voice_config=genai_types.PrebuiltVoiceConfig(
-                        voice_name=voice
-                    )
+                    prebuilt_voice_config=genai_types.PrebuiltVoiceConfig(voice_name=voice)
                 )
             ),
         )
@@ -115,7 +113,5 @@ def _finish(result: TtsResult, audio: bytes) -> TtsResult:
     result.audio = audio
     result.encoding = "pcm_s16le"
     result.sample_rate = GEMINI_SAMPLE_RATE
-    result.audio_s = decode_audio_duration(
-        audio, encoding=result.encoding, sample_rate=GEMINI_SAMPLE_RATE
-    )
+    result.audio_s = decode_audio_duration(audio, encoding=result.encoding, sample_rate=GEMINI_SAMPLE_RATE)
     return result

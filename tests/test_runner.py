@@ -58,9 +58,7 @@ class TestSpeechEndDetection:
     def _tone_then_silence(self, tone_s: float, silence_s: float) -> np.ndarray:
         rate = 16000
         t = np.linspace(0, tone_s, int(rate * tone_s), endpoint=False)
-        return np.concatenate(
-            [0.5 * np.sin(2 * np.pi * 220 * t), np.zeros(int(rate * silence_s))]
-        ).astype("float32")
+        return np.concatenate([0.5 * np.sin(2 * np.pi * 220 * t), np.zeros(int(rate * silence_s))]).astype("float32")
 
     def test_finds_the_end_of_speech_before_trailing_silence(self) -> None:
         samples = self._tone_then_silence(1.0, 0.8)
@@ -165,9 +163,7 @@ class TestTransientClassification:
 
     def test_billing_exhaustion_is_not_mistaken_for_capacity(self) -> None:
         """An empty balance never resolves by waiting, so retrying wastes time."""
-        assert not _is_transient(
-            StreamProtocolError("soniox: 402: Organization balance exhausted")
-        )
+        assert not _is_transient(StreamProtocolError("soniox: 402: Organization balance exhausted"))
 
 
 class _SimulatedCrash(BaseException):
@@ -297,25 +293,17 @@ def _bench_clip(clip_id: str) -> AudioClip:
     )
 
 
-def _stt_config(
-    providers: list[str], output_dir: Path, repeats: int = 1
-) -> BenchmarkConfig:
+def _stt_config(providers: list[str], output_dir: Path, repeats: int = 1) -> BenchmarkConfig:
     return BenchmarkConfig(
         stt=[ProviderConfig(name=name, modes=["batch"]) for name in providers],
-        run=RunConfig(
-            repeats=repeats, warmup=0, settle_ms=0, output_dir=str(output_dir)
-        ),
+        run=RunConfig(repeats=repeats, warmup=0, settle_ms=0, output_dir=str(output_dir)),
     )
 
 
-def _tts_config(
-    providers: list[str], output_dir: Path, warmup: int = 0
-) -> BenchmarkConfig:
+def _tts_config(providers: list[str], output_dir: Path, warmup: int = 0) -> BenchmarkConfig:
     return BenchmarkConfig(
         tts=[ProviderConfig(name=name, modes=["batch"]) for name in providers],
-        run=RunConfig(
-            repeats=1, warmup=warmup, settle_ms=0, output_dir=str(output_dir)
-        ),
+        run=RunConfig(repeats=1, warmup=warmup, settle_ms=0, output_dir=str(output_dir)),
     )
 
 
@@ -339,43 +327,35 @@ def _legacy_stt_file(results: list[SttResult]) -> bytes:
     """
     lines: list[bytes] = []
     for result in results:
-        lines.append(
-            orjson.dumps(
-                {
-                    "provider": result.provider,
-                    "clip_id": result.clip_id,
-                    "mode": str(result.mode),
-                    "text": result.text,
-                    "reference": result.raw.get("reference", ""),
-                    "reference_annotated": result.raw.get("reference_annotated"),
-                    "license": result.raw.get("license"),
-                    "gold_status": result.raw.get("gold_status"),
-                    "language": result.raw.get("language", ""),
-                    "audio_s": result.audio_s,
-                    "total_s": result.total_s,
-                    "ttft_s": result.ttft_s,
-                    "finalize_s": result.finalize_s,
-                    "rtf": result.rtf,
-                    "chunk_ms": result.raw.get("chunk_ms"),
-                    "speech_end_s": result.raw.get("speech_end_s"),
-                    "pauses": result.raw.get("pauses"),
-                    "ws_rtt_s": result.raw.get("ws_rtt_s"),
-                    "eou_source": result.raw.get("eou_source"),
-                    "endpoint_config": result.raw.get("endpoint_config"),
-                    "error": result.error,
-                    "partials": [
-                        {
-                            "t_s": p.t_s,
-                            "text": p.text,
-                            "is_final": p.is_final,
-                            "kind": p.kind,
-                        }
-                        for p in result.partials
-                    ],
-                }
-            )
-        )
-        lines.append(b"\n")
+        lines.extend((
+            orjson.dumps({
+                "provider": result.provider,
+                "clip_id": result.clip_id,
+                "mode": str(result.mode),
+                "text": result.text,
+                "reference": result.raw.get("reference", ""),
+                "reference_annotated": result.raw.get("reference_annotated"),
+                "license": result.raw.get("license"),
+                "gold_status": result.raw.get("gold_status"),
+                "language": result.raw.get("language", ""),
+                "audio_s": result.audio_s,
+                "total_s": result.total_s,
+                "ttft_s": result.ttft_s,
+                "finalize_s": result.finalize_s,
+                "rtf": result.rtf,
+                "chunk_ms": result.raw.get("chunk_ms"),
+                "speech_end_s": result.raw.get("speech_end_s"),
+                "pauses": result.raw.get("pauses"),
+                "ws_rtt_s": result.raw.get("ws_rtt_s"),
+                "eou_source": result.raw.get("eou_source"),
+                "endpoint_config": result.raw.get("endpoint_config"),
+                "error": result.error,
+                "partials": [
+                    {"t_s": p.t_s, "text": p.text, "is_final": p.is_final, "kind": p.kind} for p in result.partials
+                ],
+            }),
+            b"\n",
+        ))
     return b"".join(lines)
 
 
@@ -387,31 +367,29 @@ def _legacy_tts_file(results: list[TtsResult]) -> bytes:
     """
     lines: list[bytes] = []
     for result in results:
-        lines.append(
-            orjson.dumps(
-                {
-                    "provider": result.provider,
-                    "prompt_id": result.prompt_id,
-                    "mode": str(result.mode),
-                    "chars": result.chars,
-                    "audio_s": result.audio_s,
-                    "ttfb_s": result.ttfb_s,
-                    "ttfa_s": result.ttfa_s,
-                    "gap_p99_s": result.gap_p99_s,
-                    "cold": result.cold,
-                    "chunk_t_s": result.chunk_t_s,
-                    "total_s": result.total_s,
-                    "rtf": result.rtf,
-                    "load": result.raw.get("load"),
-                    "input_streaming": result.raw.get("input_streaming"),
-                    "error": result.error,
-                    "text": result.raw.get("text", ""),
-                    "roundtrip": result.raw.get("roundtrip"),
-                    "audio_path": None,
-                }
-            )
-        )
-        lines.append(b"\n")
+        lines.extend((
+            orjson.dumps({
+                "provider": result.provider,
+                "prompt_id": result.prompt_id,
+                "mode": str(result.mode),
+                "chars": result.chars,
+                "audio_s": result.audio_s,
+                "ttfb_s": result.ttfb_s,
+                "ttfa_s": result.ttfa_s,
+                "gap_p99_s": result.gap_p99_s,
+                "cold": result.cold,
+                "chunk_t_s": result.chunk_t_s,
+                "total_s": result.total_s,
+                "rtf": result.rtf,
+                "load": result.raw.get("load"),
+                "input_streaming": result.raw.get("input_streaming"),
+                "error": result.error,
+                "text": result.raw.get("text", ""),
+                "roundtrip": result.raw.get("roundtrip"),
+                "audio_path": None,
+            }),
+            b"\n",
+        ))
     return b"".join(lines)
 
 
@@ -437,9 +415,7 @@ class TestSttLanePersistence:
         assert loaded[0].text == "transcript of c1"
         assert loaded[0].raw["reference"] == "reference for c1"
 
-    async def test_an_interrupted_file_renders_through_the_report(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_an_interrupted_file_renders_through_the_report(self, tmp_path: Path) -> None:
         _CrashingStt.gate = asyncio.Event()
         config = _stt_config(["fake-persist-stt", "fake-crash-stt"], tmp_path)
 
@@ -455,14 +431,10 @@ class TestSttLanePersistence:
             "through the same report path as a completed one"
         )
 
-    async def test_completed_run_matches_the_legacy_file_exactly(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_completed_run_matches_the_legacy_file_exactly(self, tmp_path: Path) -> None:
         """Byte-for-byte compatibility with the pre-persistence writer."""
         clips = [_bench_clip("c1"), _bench_clip("c2")]
-        config = _stt_config(
-            ["fake-persist-slow-stt", "fake-persist-stt"], tmp_path, repeats=2
-        )
+        config = _stt_config(["fake-persist-slow-stt", "fake-persist-stt"], tmp_path, repeats=2)
 
         results = await runner.run_stt(config, clips)
         snapshot = next(tmp_path.glob("*/stt-results.jsonl"))
@@ -472,8 +444,7 @@ class TestSttLanePersistence:
 
         assert path == snapshot, "the canonical file replaces the lane snapshots"
         assert len(list(tmp_path.iterdir())) == 1, (
-            "the end-of-run write must reuse the run's directory, not open a "
-            "second timestamped one"
+            "the end-of-run write must reuse the run's directory, not open a second timestamped one"
         )
         assert results[0].provider == "fake-persist-slow-stt", (
             "results stay in config order even when that lane finished last"
@@ -507,17 +478,13 @@ class TestTtsLanePersistence:
         frame = report.tts_summary_frame(loaded, "en-US")
         assert not frame.is_empty()
 
-    async def test_completed_run_matches_the_legacy_file_exactly(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_completed_run_matches_the_legacy_file_exactly(self, tmp_path: Path) -> None:
         """Byte-for-byte compatibility with the pre-persistence writer."""
         prompts = [
             TtsPrompt(prompt_id="p1", text="hello there", language="en-US"),
             TtsPrompt(prompt_id="p2", text="general kenobi", language="en-US"),
         ]
-        config = _tts_config(
-            ["fake-persist-slow-tts", "fake-persist-tts"], tmp_path, warmup=1
-        )
+        config = _tts_config(["fake-persist-slow-tts", "fake-persist-tts"], tmp_path, warmup=1)
 
         results = await runner.run_tts(config, prompts)
         snapshot = next(tmp_path.glob("*/tts-results.jsonl"))
@@ -527,12 +494,10 @@ class TestTtsLanePersistence:
 
         assert path == snapshot, "the canonical file replaces the lane snapshots"
         assert len(list(tmp_path.iterdir())) == 1, (
-            "the end-of-run write must reuse the run's directory, not open a "
-            "second timestamped one"
+            "the end-of-run write must reuse the run's directory, not open a second timestamped one"
         )
         assert any(r.cold for r in results), (
-            "warmup runs are recorded, so the snapshot must carry the cold "
-            "flag through unchanged"
+            "warmup runs are recorded, so the snapshot must carry the cold flag through unchanged"
         )
         assert path.read_bytes() == _legacy_tts_file(results)
         assert sorted(path.read_bytes().splitlines()) == snapshot_lines, (

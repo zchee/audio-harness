@@ -7,13 +7,14 @@ re-verify against the vendor's pricing page before quoting a cost figure.
 
 from __future__ import annotations
 
-import os
-import warnings
 from dataclasses import dataclass, field, fields
+import os
 from pathlib import Path
 from typing import Any
+import warnings
 
 import yaml
+
 
 DEFAULT_SAMPLE_RATE = 16000
 DEFAULT_CHUNK_MS = 20
@@ -73,12 +74,8 @@ STT_PRICING: dict[str, SttPricing] = {
     ),
     "xai-grok-stt": SttPricing(batch_per_hour=0.10, stream_per_hour=0.20),
     "assemblyai-universal35pro": SttPricing(batch_per_hour=0.21, stream_per_hour=0.45),
-    "speechmatics-standard": SttPricing(
-        batch_per_hour=0.24, stream_per_hour=0.24, note="20 free hours/month"
-    ),
-    "speechmatics-enhanced": SttPricing(
-        batch_per_hour=0.43, stream_per_hour=0.43, note="20 free hours/month"
-    ),
+    "speechmatics-standard": SttPricing(batch_per_hour=0.24, stream_per_hour=0.24, note="20 free hours/month"),
+    "speechmatics-enhanced": SttPricing(batch_per_hour=0.43, stream_per_hour=0.43, note="20 free hours/month"),
     "soniox-rt-v5": SttPricing(
         batch_per_hour=0.12,
         stream_per_hour=0.12,
@@ -392,17 +389,10 @@ def _dataset(raw: dict[str, Any]) -> DatasetConfig:
         merged = {**defaults, **entry}
         unknown = sorted(set(merged) - known)
         if unknown:
+            raise ConfigError(f"dataset.sources entry has unknown key(s): {', '.join(unknown)}")
+        if not merged.get("parquet") and not merged.get("manifest") and not merged.get("synthetic"):
             raise ConfigError(
-                f"dataset.sources entry has unknown key(s): {', '.join(unknown)}"
-            )
-        if (
-            not merged.get("parquet")
-            and not merged.get("manifest")
-            and not merged.get("synthetic")
-        ):
-            raise ConfigError(
-                f"dataset.sources entry needs a parquet or manifest corpus, "
-                f"or a synthetic kind: {entry!r}"
+                f"dataset.sources entry needs a parquet or manifest corpus, or a synthetic kind: {entry!r}"
             )
         sources.append(SourceConfig(**merged))
 

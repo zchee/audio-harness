@@ -35,9 +35,7 @@ class TestBuildPrompts:
 
     def test_english_set_has_around_30_varied_questions(self) -> None:
         assert 25 <= len(INTERVIEW_QUESTIONS_EN) <= 35
-        assert len(set(INTERVIEW_QUESTIONS_EN)) == len(INTERVIEW_QUESTIONS_EN), (
-            "no duplicate questions"
-        )
+        assert len(set(INTERVIEW_QUESTIONS_EN)) == len(INTERVIEW_QUESTIONS_EN), "no duplicate questions"
         assert all(q.strip().endswith(("?", ".")) for q in INTERVIEW_QUESTIONS_EN)
 
     def test_no_stray_entity_tags_leak_into_hand_authored_text(self) -> None:
@@ -60,9 +58,7 @@ class TestGenerate:
         flat = (tmp_path / "prompts-en" / "interview.txt").read_text(encoding="utf-8")
         assert len(flat.splitlines()) == len(INTERVIEW_QUESTIONS_EN)
 
-    def test_every_non_english_locale_gets_a_pending_marker(
-        self, tmp_path: Path
-    ) -> None:
+    def test_every_non_english_locale_gets_a_pending_marker(self, tmp_path: Path) -> None:
         _jsonl_path, pending = generate(tmp_path)
 
         assert len(pending) == len(LOCALES) - 1

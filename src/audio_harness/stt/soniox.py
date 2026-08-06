@@ -7,10 +7,12 @@ from typing import Any
 import orjson
 from websockets.asyncio.client import ClientConnection
 
-from ..config import require_env
-from ..types import AudioClip, EventKind, Mode, SttResult
+from audio_harness.config import require_env
+from audio_harness.types import AudioClip, EventKind, Mode, SttResult
+
 from .base import StreamTimeline, SttProvider, register
 from .ws import StreamProtocolError, run_stream
+
 
 STREAM_URL = "wss://stt-rt.soniox.com/transcribe-websocket"
 
@@ -39,9 +41,7 @@ class SonioxRealtimeV5(SttProvider):
     vendor = "soniox"
     supports_stream = True
 
-    async def transcribe_stream(
-        self, clip: AudioClip, *, chunk_ms: int, realtime: bool
-    ) -> SttResult:
+    async def transcribe_stream(self, clip: AudioClip, *, chunk_ms: int, realtime: bool) -> SttResult:
         """Stream PCM and reassemble the token stream into a transcript."""
         result = self._result(clip, Mode.STREAM)
         timeline = StreamTimeline()
@@ -59,17 +59,15 @@ class SonioxRealtimeV5(SttProvider):
 
         async def configure(socket: ClientConnection) -> None:
             await socket.send(
-                orjson.dumps(
-                    {
-                        "api_key": require_env("SONIOX_API_KEY", self.key),
-                        "model": str(self.options.get("model", "stt-rt-v5")),
-                        "audio_format": "pcm_s16le",
-                        "sample_rate": clip.sample_rate,
-                        "num_channels": 1,
-                        "language_hints": list(hints),
-                        **knobs,
-                    }
-                ).decode()
+                orjson.dumps({
+                    "api_key": require_env("SONIOX_API_KEY", self.key),
+                    "model": str(self.options.get("model", "stt-rt-v5")),
+                    "audio_format": "pcm_s16le",
+                    "sample_rate": clip.sample_rate,
+                    "num_channels": 1,
+                    "language_hints": list(hints),
+                    **knobs,
+                }).decode()
             )
 
         async def end_of_audio(socket: ClientConnection) -> None:
@@ -118,9 +116,7 @@ class _TokenAccumulator:
         if not isinstance(payload, dict):
             return False
         if payload.get("error_code") or payload.get("error_message"):
-            raise StreamProtocolError(
-                f"soniox: {payload.get('error_code')}: {payload.get('error_message')}"
-            )
+            raise StreamProtocolError(f"soniox: {payload.get('error_code')}: {payload.get('error_message')}")
 
         tail = ""
         endpoints = 0

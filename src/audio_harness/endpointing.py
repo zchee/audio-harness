@@ -21,8 +21,8 @@ gap between vendors can be read honestly.
 from __future__ import annotations
 
 import contextlib
-import statistics
 from dataclasses import dataclass, field
+import statistics
 from typing import Any
 
 import orjson
@@ -30,6 +30,7 @@ from websockets.asyncio.server import ServerConnection, serve
 
 from .metrics import percentile
 from .types import AudioClip, EventKind, SttResult
+
 
 LATENCY_BUDGETS_S = (0.3, 0.6)
 """Endpoint-latency budgets the report scores against, in seconds."""
@@ -103,9 +104,7 @@ class EndpointSummary:
         """Fraction of measured endpoint latencies within ``budget_s``."""
         if not self.eou_latency_s:
             return None
-        return sum(1 for v in self.eou_latency_s if v <= budget_s) / len(
-            self.eou_latency_s
-        )
+        return sum(1 for v in self.eou_latency_s if v <= budget_s) / len(self.eou_latency_s)
 
     @property
     def rtt_p50_s(self) -> float | None:
@@ -113,9 +112,7 @@ class EndpointSummary:
         return percentile(self.ws_rtt_s, 50)
 
 
-def summarize_endpointing(
-    results: list[SttResult], language: str
-) -> list[EndpointSummary]:
+def summarize_endpointing(results: list[SttResult], language: str) -> list[EndpointSummary]:
     """Aggregate endpointing behaviour per provider, mode and language.
 
     Designed to run over saved results JSONL: pause labels, speech end, EOU
@@ -164,9 +161,7 @@ def summarize_endpointing(
 
         pauses = _pauses_of(result)
         eou_times = [p.t_s for p in result.partials if p.kind == EventKind.EOU]
-        final_times = [
-            p.t_s for p in result.partials if p.is_final and p.kind != EventKind.EOU
-        ]
+        final_times = [p.t_s for p in result.partials if p.is_final and p.kind != EventKind.EOU]
 
         summary.hold_pauses += len(pauses)
         for start, end in pauses:
@@ -190,16 +185,13 @@ def _pauses_of(result: SttResult) -> list[tuple[float, float]]:
     raw = result.raw.get("pauses")
     if not isinstance(raw, list):
         return []
-    spans: list[tuple[float, float]] = []
-    for span in raw:
-        if isinstance(span, list | tuple) and len(span) == 2:
-            spans.append((float(span[0]), float(span[1])))
+    spans: list[tuple[float, float]] = [
+        (float(span[0]), float(span[1])) for span in raw if isinstance(span, list | tuple) and len(span) == 2
+    ]
     return spans
 
 
-async def measure_loopback_floor(
-    chunk_ms: int, *, clip_s: float = 0.5, rounds: int = 3
-) -> float:
+async def measure_loopback_floor(chunk_ms: int, *, clip_s: float = 0.5, rounds: int = 3) -> float:
     """Measure the client stack's own event-latency floor for one chunk size.
 
     A local WebSocket server answers the end-of-input signal with a final
@@ -244,11 +236,7 @@ async def measure_loopback_floor(
         except Exception:
             return
         with contextlib.suppress(Exception):
-            await socket.send(
-                orjson.dumps(
-                    {"type": "transcript", "text": "floor", "final": True}
-                ).decode()
-            )
+            await socket.send(orjson.dumps({"type": "transcript", "text": "floor", "final": True}).decode())
             await socket.send(orjson.dumps({"type": "done"}).decode())
 
     def handle(payload: Any, timeline: StreamTimeline) -> bool:
@@ -364,8 +352,7 @@ def render_endpointing_markdown(
         "- **Floor / RTT** — the harness' own contribution (chunk pacing, "
         "loopback scheduling) and the network path. Published, not "
         "subtracted: read vendor gaps against them.",
-        "- Segment finals never count as cutoffs; they are decoding "
-        "boundaries, not turn-taking decisions.",
+        "- Segment finals never count as cutoffs; they are decoding boundaries, not turn-taking decisions.",
     ]
     return "\n".join(lines)
 

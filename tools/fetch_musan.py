@@ -20,10 +20,11 @@ Usage:
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 import sys
 import tarfile
 import urllib.request
-from pathlib import Path
+
 
 MUSAN_URL = "https://www.openslr.org/resources/17/musan.tar.gz"
 
@@ -96,8 +97,7 @@ def _write_attribution(dest: Path) -> None:
 def main() -> int:
     """Parse arguments and run the download."""
     parser = argparse.ArgumentParser(
-        description="Download the MUSAN corpus (CC BY 4.0) for the "
-        "hallucination/silence lane."
+        description="Download the MUSAN corpus (CC BY 4.0) for the hallucination/silence lane."
     )
     parser.add_argument(
         "--dest",

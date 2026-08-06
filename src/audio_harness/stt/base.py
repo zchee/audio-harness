@@ -13,7 +13,7 @@ from typing import Any, ClassVar
 
 import httpx
 
-from ..types import AudioClip, EventKind, Mode, Partial, SttResult
+from audio_harness.types import AudioClip, EventKind, Mode, Partial, SttResult
 
 
 class ProviderHttpError(RuntimeError):
@@ -39,8 +39,7 @@ def raise_for_status(response: httpx.Response, provider: str) -> None:
         return
     body = response.text.strip().replace("\n", " ")
     raise ProviderHttpError(
-        f"{provider}: HTTP {response.status_code} from {response.request.url}: "
-        f"{body[:500] or '<empty body>'}"
+        f"{provider}: HTTP {response.status_code} from {response.request.url}: {body[:500] or '<empty body>'}"
     )
 
 
@@ -90,9 +89,7 @@ class StreamTimeline:
         """
         if not text and kind != EventKind.EOU:
             return
-        self.partials.append(
-            Partial(t_s=self.elapsed(), text=text, is_final=is_final, kind=kind)
-        )
+        self.partials.append(Partial(t_s=self.elapsed(), text=text, is_final=is_final, kind=kind))
 
     @property
     def ttft_s(self) -> float | None:
@@ -130,9 +127,7 @@ class StreamTimeline:
         Correct for vendors that emit one final per utterance segment, where
         the full transcript is the concatenation of those segments.
         """
-        return " ".join(
-            p.text.strip() for p in self.partials if p.is_final and p.text.strip()
-        )
+        return " ".join(p.text.strip() for p in self.partials if p.is_final and p.text.strip())
 
     def last_final(self) -> str:
         """Return the most recent final hypothesis.
@@ -238,9 +233,7 @@ class SttProvider(abc.ABC):
         """
         raise NotImplementedError(f"{self.key} has no batch endpoint")
 
-    async def transcribe_stream(
-        self, clip: AudioClip, *, chunk_ms: int, realtime: bool
-    ) -> SttResult:
+    async def transcribe_stream(self, clip: AudioClip, *, chunk_ms: int, realtime: bool) -> SttResult:
         """Transcribe a clip through the streaming endpoint.
 
         Args:

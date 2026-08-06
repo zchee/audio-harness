@@ -58,9 +58,7 @@ def make_result(
     annotated: str | None = None,
 ) -> SttResult:
     """Build a saved-result record the way read_stt_results reconstructs one."""
-    result = SttResult(
-        provider=provider, clip_id=clip_id, mode=mode, text=text, error=error
-    )
+    result = SttResult(provider=provider, clip_id=clip_id, mode=mode, text=text, error=error)
     result.raw["reference"] = reference
     result.raw["language"] = language
     if gold_status:
@@ -363,9 +361,7 @@ class TestSemascore:
 
     def test_deterministic_across_calls(self) -> None:
         embed = self.embed_table({"cat": [0.3, 0.7], "dog": [0.6, 0.4]})
-        runs = {
-            semascore("the cat sat", "the dog sat", "en-US", embed) for _ in range(3)
-        }
+        runs = {semascore("the cat sat", "the dog sat", "en-US", embed) for _ in range(3)}
         assert len(runs) == 1
 
 
@@ -375,9 +371,7 @@ class TestAnchorFile:
     def test_roundtrip(self, tmp_path: Path) -> None:
         path = tmp_path / "anchor.csv"
         path.write_text(
-            "clip_id,provider,human_label\n"
-            "clip-1,deepgram-nova3,harmless\n"
-            "clip-2,soniox-rt-v5,entity\n",
+            "clip_id,provider,human_label\nclip-1,deepgram-nova3,harmless\nclip-2,soniox-rt-v5,entity\n",
             encoding="utf-8",
         )
         anchor = load_anchor(path)
@@ -404,9 +398,7 @@ class TestAnchorFile:
     def test_duplicate_row_raises(self, tmp_path: Path) -> None:
         path = tmp_path / "anchor.csv"
         path.write_text(
-            "clip_id,provider,human_label\n"
-            "clip-1,deepgram-nova3,harmless\n"
-            "clip-1,deepgram-nova3,entity\n",
+            "clip_id,provider,human_label\nclip-1,deepgram-nova3,harmless\nclip-1,deepgram-nova3,entity\n",
             encoding="utf-8",
         )
         with pytest.raises(ValueError, match="duplicate"):
@@ -424,9 +416,7 @@ def make_judgement(
 ) -> ItemJudgement:
     """Build a judged item without going through a judge."""
     return ItemJudgement(
-        item=make_item(
-            provider=provider, clip_id=clip_id, mode=mode, language=language
-        ),
+        item=make_item(provider=provider, clip_id=clip_id, mode=mode, language=language),
         votes=votes or (majority,) * 3,
         majority=majority,
         entity_errors=None,
@@ -514,9 +504,7 @@ class TestSummariesAndReport:
 
     def test_render_marks_unanchored_languages_experimental(self) -> None:
         judgements = [make_judgement("clip-1", "harmless")]
-        markdown = render_semantic_markdown(
-            summarize_semantic(judgements), evaluate_gates(judgements, None)
-        )
+        markdown = render_semantic_markdown(summarize_semantic(judgements), evaluate_gates(judgements, None))
         assert EXPERIMENTAL_BANNER in markdown
         assert "Cohen's kappa" in markdown
 
@@ -524,13 +512,8 @@ class TestSummariesAndReport:
         judgements = [make_judgement(f"clip-{i}", "harmless") for i in range(10)] + [
             make_judgement(f"clip-e{i}", "entity") for i in range(10)
         ]
-        anchor = {
-            (judgement.item.clip_id, "deepgram-nova3"): judgement.majority
-            for judgement in judgements
-        }
-        markdown = render_semantic_markdown(
-            summarize_semantic(judgements), evaluate_gates(judgements, anchor)
-        )
+        anchor = {(judgement.item.clip_id, "deepgram-nova3"): judgement.majority for judgement in judgements}
+        markdown = render_semantic_markdown(summarize_semantic(judgements), evaluate_gates(judgements, anchor))
         assert "gate passed" in markdown
 
     def test_write_semantic_results_jsonl(self, tmp_path: Path) -> None:
@@ -538,12 +521,8 @@ class TestSummariesAndReport:
 
         judgements = [make_judgement("clip-1", "harmless")]
         gates = evaluate_gates(judgements, None)
-        path = write_semantic_results(
-            judgements, gates, JudgeRunStats(live_calls=3), tmp_path / "out.jsonl"
-        )
-        records = [
-            orjson.loads(line) for line in path.read_text(encoding="utf-8").splitlines()
-        ]
+        path = write_semantic_results(judgements, gates, JudgeRunStats(live_calls=3), tmp_path / "out.jsonl")
+        records = [orjson.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
         assert records[0]["majority"] == "harmless"
         assert records[0]["model"]
         assert records[1]["gate_language"] == "en-US"

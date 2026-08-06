@@ -31,11 +31,11 @@ already-scored item.
 
 from __future__ import annotations
 
-import csv
-import hashlib
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
+import csv
 from dataclasses import dataclass, field
+import hashlib
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -43,12 +43,13 @@ import jiwer
 import numpy as np
 import orjson
 
-from ..autotag import autotag_reference
-from ..config import require_env
-from ..entities import score_entities
-from ..metrics import ZERO_COUNTS, ErrorCounts, percentile, score_pair
-from ..normalize import comparison_fold_for, normalizer_for, uses_character_metric
-from ..types import SttResult
+from audio_harness.autotag import autotag_reference
+from audio_harness.config import require_env
+from audio_harness.entities import score_entities
+from audio_harness.metrics import ZERO_COUNTS, ErrorCounts, percentile, score_pair
+from audio_harness.normalize import comparison_fold_for, normalizer_for, uses_character_metric
+from audio_harness.types import SttResult
+
 
 if TYPE_CHECKING:
     from google.genai import Client
@@ -272,17 +273,15 @@ def cache_key(item: JudgeItem, seed: int) -> str:
     that does not (provider and clip id stay out, so identical pairs share
     votes instead of re-billing).
     """
-    payload = orjson.dumps(
-        [
-            JUDGE_MODEL,
-            PROMPT_VERSION,
-            JUDGE_TEMPERATURE,
-            item.language,
-            item.reference,
-            item.hypothesis,
-            seed,
-        ]
-    )
+    payload = orjson.dumps([
+        JUDGE_MODEL,
+        PROMPT_VERSION,
+        JUDGE_TEMPERATURE,
+        item.language,
+        item.reference,
+        item.hypothesis,
+        seed,
+    ])
     return hashlib.sha256(payload).hexdigest()
 
 
@@ -367,9 +366,7 @@ class GeminiJudge:
                     },
                     "required": ["label"],
                 },
-                thinking_config=genai_types.ThinkingConfig(
-                    thinking_level=genai_types.ThinkingLevel.LOW
-                ),
+                thinking_config=genai_types.ThinkingConfig(thinking_level=genai_types.ThinkingLevel.LOW),
             ),
         )
         usage = getattr(response, "usage_metadata", None)
@@ -433,9 +430,7 @@ def entity_check(item: JudgeItem) -> bool | None:
         reference contains nothing taggable, in which case there is nothing
         for the judge to be checked against.
     """
-    annotated = item.reference_annotated or autotag_reference(
-        item.reference, item.language
-    )
+    annotated = item.reference_annotated or autotag_reference(item.reference, item.language)
     scores = score_entities(annotated, item.hypothesis, item.language)
     if not scores:
         return None
@@ -461,10 +456,7 @@ class JudgeRunStats:
     @property
     def estimated_usd(self) -> float:
         """Spend estimate from the pinned per-token pricing."""
-        return (
-            self.input_tokens / 1e6 * JUDGE_USD_PER_1M_INPUT
-            + self.output_tokens / 1e6 * JUDGE_USD_PER_1M_OUTPUT
-        )
+        return self.input_tokens / 1e6 * JUDGE_USD_PER_1M_INPUT + self.output_tokens / 1e6 * JUDGE_USD_PER_1M_OUTPUT
 
 
 def run_judge(
@@ -494,12 +486,7 @@ def run_judge(
     Raises:
         JudgeBudgetError: If the uncached vote count exceeds ``max_calls``.
     """
-    needed = sum(
-        1
-        for item in items
-        for seed in VOTE_SEEDS
-        if cache.get(cache_key(item, seed)) is None
-    )
+    needed = sum(1 for item in items for seed in VOTE_SEEDS if cache.get(cache_key(item, seed)) is None)
     if needed > max_calls:
         raise JudgeBudgetError(
             f"run needs {needed} live judge calls, over the {max_calls}-call "
@@ -519,10 +506,7 @@ def run_judge(
                 continue
             vote = judge(item, seed)
             if vote.label not in RUBRIC:
-                raise RuntimeError(
-                    f"judge returned unknown label {vote.label!r} for "
-                    f"{item.provider}/{item.clip_id}"
-                )
+                raise RuntimeError(f"judge returned unknown label {vote.label!r} for {item.provider}/{item.clip_id}")
             cache.put(key, vote.label)
             stats.live_calls += 1
             stats.input_tokens += vote.input_tokens
@@ -632,17 +616,13 @@ def roberta_embedder() -> Callable[[str], np.ndarray]:
         from transformers import AutoModel, AutoTokenizer
     except ImportError as exc:
         raise RuntimeError(
-            "SeMaScore needs the optional judge-semantic dependency group: "
-            "uv sync --extra judge-semantic"
+            "SeMaScore needs the optional judge-semantic dependency group: uv sync --extra judge-semantic"
         ) from exc
 
-    tokenizer = AutoTokenizer.from_pretrained(
-        SEMASCORE_MODEL, revision=SEMASCORE_REVISION
-    )
+    tokenizer = AutoTokenizer.from_pretrained(SEMASCORE_MODEL, revision=SEMASCORE_REVISION)
     if tokenizer is None:
         raise RuntimeError(
-            f"AutoTokenizer.from_pretrained returned no tokenizer for "
-            f"{SEMASCORE_MODEL}@{SEMASCORE_REVISION}"
+            f"AutoTokenizer.from_pretrained returned no tokenizer for {SEMASCORE_MODEL}@{SEMASCORE_REVISION}"
         )
     model = AutoModel.from_pretrained(SEMASCORE_MODEL, revision=SEMASCORE_REVISION)
     model.eval()
@@ -686,16 +666,11 @@ def load_anchor(path: str | Path) -> dict[tuple[str, str], str]:
         reader = csv.DictReader(handle)
         missing = set(ANCHOR_COLUMNS) - set(reader.fieldnames or [])
         if missing:
-            raise ValueError(
-                f"anchor file {path} is missing columns: {', '.join(sorted(missing))}"
-            )
+            raise ValueError(f"anchor file {path} is missing columns: {', '.join(sorted(missing))}")
         for number, row in enumerate(reader, 2):
             label = (row["human_label"] or "").strip()
             if label not in RUBRIC:
-                raise ValueError(
-                    f"{path}:{number}: unknown label {label!r}; "
-                    f"expected one of {', '.join(RUBRIC)}"
-                )
+                raise ValueError(f"{path}:{number}: unknown label {label!r}; expected one of {', '.join(RUBRIC)}")
             key = (row["clip_id"].strip(), row["provider"].strip())
             if key in anchor:
                 raise ValueError(f"{path}:{number}: duplicate anchor row {key}")
@@ -722,9 +697,7 @@ def cohens_kappa(pairs: Sequence[tuple[str, str]]) -> float | None:
     observed = sum(1 for human, judge in pairs if human == judge) / n
     human_marginal = Counter(human for human, _ in pairs)
     judge_marginal = Counter(judge for _, judge in pairs)
-    expected = sum(
-        human_marginal[label] * judge_marginal[label] for label in RUBRIC
-    ) / (n * n)
+    expected = sum(human_marginal[label] * judge_marginal[label] for label in RUBRIC) / (n * n)
     if expected == 1.0:
         return 1.0 if observed == 1.0 else 0.0
     return (observed - expected) / (1.0 - expected)
@@ -841,9 +814,7 @@ def evaluate_gates(
         for judgement in group:
             key = (judgement.item.clip_id, judgement.item.provider)
             existing = chosen.get(key)
-            if existing is None or (
-                existing.item.mode != "stream" and judgement.item.mode == "stream"
-            ):
+            if existing is None or (existing.item.mode != "stream" and judgement.item.mode == "stream"):
                 chosen[key] = judgement
 
         pairs: list[tuple[str, str]] = []
@@ -853,11 +824,7 @@ def evaluate_gates(
                 if human is not None:
                     pairs.append((human, judgement.majority))
 
-        unanimity = (
-            sum(1 for judgement in group if judgement.unanimous) / len(group)
-            if group
-            else None
-        )
+        unanimity = sum(1 for judgement in group if judgement.unanimous) / len(group) if group else None
         statuses.append(
             GateStatus(
                 language=language,
@@ -945,14 +912,10 @@ def summarize_semantic(
         key = (item.provider, item.mode, item.language)
         summary = summaries.setdefault(
             key,
-            SemanticSummary(
-                provider=item.provider, mode=item.mode, language=item.language
-            ),
+            SemanticSummary(provider=item.provider, mode=item.mode, language=item.language),
         )
         summary.items += 1
-        summary.labels[judgement.majority] = (
-            summary.labels.get(judgement.majority, 0) + 1
-        )
+        summary.labels[judgement.majority] = summary.labels.get(judgement.majority, 0) + 1
         if judgement.unanimous:
             summary.unanimous += 1
         if judgement.entity_errors is not None:
@@ -961,15 +924,11 @@ def summarize_semantic(
                 summary.judge_missed_entities += 1
         if judgement.semascore is not None:
             summary.semascores.append(judgement.semascore)
-        summary.counts = summary.counts + score_pair(
-            item.reference, item.hypothesis, item.language
-        )
+        summary.counts = summary.counts + score_pair(item.reference, item.hypothesis, item.language)
     return sorted(summaries.values(), key=lambda s: (s.language, s.provider, s.mode))
 
 
-def render_semantic_markdown(
-    summaries: Sequence[SemanticSummary], gates: Sequence[GateStatus]
-) -> str:
+def render_semantic_markdown(summaries: Sequence[SemanticSummary], gates: Sequence[GateStatus]) -> str:
     """Render the judge tables as GitHub-flavoured markdown.
 
     Every language's rows carry the gate status inline; an unanchored or
@@ -1011,14 +970,8 @@ def render_semantic_markdown(
     ]
     for summary in summaries:
         language_gate = gate_by_language.get(summary.language)
-        status = (
-            language_gate.status if language_gate is not None else EXPERIMENTAL_BANNER
-        )
-        missed = (
-            f"{summary.judge_missed_entities}/{summary.entity_checked}"
-            if summary.entity_checked
-            else "—"
-        )
+        status = language_gate.status if language_gate is not None else EXPERIMENTAL_BANNER
+        missed = f"{summary.judge_missed_entities}/{summary.entity_checked}" if summary.entity_checked else "—"
         mean_semascore = summary.mean_semascore
         lines.append(
             f"| {summary.provider} | {summary.mode} | {summary.language} "
@@ -1067,57 +1020,51 @@ def write_semantic_results(
         for judgement in judgements:
             item = judgement.item
             handle.write(
-                orjson.dumps(
-                    {
-                        "provider": item.provider,
-                        "clip_id": item.clip_id,
-                        "mode": item.mode,
-                        "language": item.language,
-                        "reference": item.reference,
-                        "hypothesis": item.hypothesis,
-                        "votes": list(judgement.votes),
-                        "majority": judgement.majority,
-                        "unanimous": judgement.unanimous,
-                        "entity_errors": judgement.entity_errors,
-                        "judge_missed_entity": judgement.judge_missed_entity,
-                        "semascore": judgement.semascore,
-                        "wer": judgement.wer,
-                        "model": JUDGE_MODEL,
-                        "prompt_version": PROMPT_VERSION,
-                    }
-                )
+                orjson.dumps({
+                    "provider": item.provider,
+                    "clip_id": item.clip_id,
+                    "mode": item.mode,
+                    "language": item.language,
+                    "reference": item.reference,
+                    "hypothesis": item.hypothesis,
+                    "votes": list(judgement.votes),
+                    "majority": judgement.majority,
+                    "unanimous": judgement.unanimous,
+                    "entity_errors": judgement.entity_errors,
+                    "judge_missed_entity": judgement.judge_missed_entity,
+                    "semascore": judgement.semascore,
+                    "wer": judgement.wer,
+                    "model": JUDGE_MODEL,
+                    "prompt_version": PROMPT_VERSION,
+                })
             )
             handle.write(b"\n")
         for gate in gates:
             handle.write(
-                orjson.dumps(
-                    {
-                        "gate_language": gate.language,
-                        "judged": gate.judged,
-                        "anchored": gate.anchored,
-                        "kappa": gate.kappa,
-                        "ci": list(gate.ci) if gate.ci else None,
-                        "unanimity": gate.unanimity,
-                        "passed": gate.passed,
-                        "near_threshold": gate.near_threshold,
-                    }
-                )
+                orjson.dumps({
+                    "gate_language": gate.language,
+                    "judged": gate.judged,
+                    "anchored": gate.anchored,
+                    "kappa": gate.kappa,
+                    "ci": list(gate.ci) if gate.ci else None,
+                    "unanimity": gate.unanimity,
+                    "passed": gate.passed,
+                    "near_threshold": gate.near_threshold,
+                })
             )
             handle.write(b"\n")
         handle.write(
-            orjson.dumps(
-                {
-                    "run_stats": {
-                        "model": JUDGE_MODEL,
-                        "live_calls": stats.live_calls,
-                        "cached_votes": stats.cached_votes,
-                        "input_tokens": stats.input_tokens,
-                        "output_tokens": stats.output_tokens,
-                        "estimated_usd": stats.estimated_usd,
-                        "pricing_checked": JUDGE_PRICING_CHECKED,
-                    }
+            orjson.dumps({
+                "run_stats": {
+                    "model": JUDGE_MODEL,
+                    "live_calls": stats.live_calls,
+                    "cached_votes": stats.cached_votes,
+                    "input_tokens": stats.input_tokens,
+                    "output_tokens": stats.output_tokens,
+                    "estimated_usd": stats.estimated_usd,
+                    "pricing_checked": JUDGE_PRICING_CHECKED,
                 }
-            )
+            })
         )
         handle.write(b"\n")
     return target

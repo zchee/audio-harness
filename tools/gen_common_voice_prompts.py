@@ -37,6 +37,7 @@ from audio_harness.prompt_suite import (
     write_jsonl,
 )
 
+
 REPO = "common-voice/common-voice"
 DATA_PATH = "server/data"
 API_BASE = f"https://api.github.com/repos/{REPO}/contents/{DATA_PATH}"
@@ -78,11 +79,7 @@ def list_locale_files(client: httpx.Client, subtag: str) -> list[str]:
     response = client.get(f"{API_BASE}/{subtag}")
     response.raise_for_status()
     entries = response.json()
-    return sorted(
-        entry["name"]
-        for entry in entries
-        if entry["type"] == "file" and entry["name"].endswith(".txt")
-    )
+    return sorted(entry["name"] for entry in entries if entry["type"] == "file" and entry["name"].endswith(".txt"))
 
 
 def fetch_lines(client: httpx.Client, subtag: str, filename: str) -> list[str]:
@@ -148,14 +145,10 @@ def main() -> None:
 
     retrieved = datetime.now(UTC).date().isoformat()
     total = 0
-    with httpx.Client(
-        timeout=30.0, headers={"User-Agent": "audio-harness/gen_common_voice_prompts"}
-    ) as client:
+    with httpx.Client(timeout=30.0, headers={"User-Agent": "audio-harness/gen_common_voice_prompts"}) as client:
         for subtag in subtags:
             try:
-                prompts, files, candidate_count = generate_locale(
-                    client, subtag, count=args.count, seed=args.seed
-                )
+                prompts, files, candidate_count = generate_locale(client, subtag, count=args.count, seed=args.seed)
             except httpx.HTTPStatusError as exc:
                 print(f"skip {subtag}: {exc}")
                 continue
@@ -180,8 +173,7 @@ def main() -> None:
             )
             total += len(prompts)
             print(
-                f"wrote {jsonl_path} ({len(prompts)} sentences from "
-                f"{len(files)} file(s), {candidate_count} candidates)"
+                f"wrote {jsonl_path} ({len(prompts)} sentences from {len(files)} file(s), {candidate_count} candidates)"
             )
 
     print(f"total: {total} sentences across {len(subtags)} locale(s)")

@@ -7,11 +7,13 @@ from typing import Any
 import orjson
 from websockets.asyncio.client import ClientConnection
 
-from ..audio import wrap_wav
-from ..config import require_env
-from ..types import AudioClip, Mode, SttResult
+from audio_harness.audio import wrap_wav
+from audio_harness.config import require_env
+from audio_harness.types import AudioClip, Mode, SttResult
+
 from .base import StreamTimeline, SttProvider, raise_for_status, register
 from .ws import StreamProtocolError, run_stream
+
 
 BATCH_URL = "https://api.x.ai/v1/stt"
 STREAM_URL = "wss://api.x.ai/v1/stt"
@@ -70,24 +72,20 @@ class XaiGrokStt(SttProvider):
         result.raw["response"] = payload
         return result
 
-    async def transcribe_stream(
-        self, clip: AudioClip, *, chunk_ms: int, realtime: bool
-    ) -> SttResult:
+    async def transcribe_stream(self, clip: AudioClip, *, chunk_ms: int, realtime: bool) -> SttResult:
         """Stream raw PCM frames over the realtime socket."""
         result = self._result(clip, Mode.STREAM)
         timeline = StreamTimeline()
 
         async def configure(socket: ClientConnection) -> None:
             await socket.send(
-                orjson.dumps(
-                    {
-                        "type": "session.update",
-                        "model": self._model(),
-                        "language": clip.language.split("-")[0],
-                        "sample_rate": clip.sample_rate,
-                        "interim_results": True,
-                    }
-                ).decode()
+                orjson.dumps({
+                    "type": "session.update",
+                    "model": self._model(),
+                    "language": clip.language.split("-")[0],
+                    "sample_rate": clip.sample_rate,
+                    "interim_results": True,
+                }).decode()
             )
 
         async def audio_done(socket: ClientConnection) -> None:

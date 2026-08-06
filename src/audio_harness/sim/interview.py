@@ -30,12 +30,12 @@ Three design points keep the score honest:
 from __future__ import annotations
 
 import asyncio
-import math
-import secrets
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from itertools import permutations
+import math
 from pathlib import Path
+import secrets
 from typing import Any
 
 import numpy as np
@@ -43,14 +43,15 @@ import orjson
 import soxr
 import yaml
 
-from .. import runner, synthetic
-from ..autotag import autotag_reference
-from ..config import STT_PRICING, BenchmarkConfig, ConfigError, require_env
-from ..entities import ENTITY_CLASSES
-from ..metrics import percentile, summarize
-from ..normalize import normalizer_for
-from ..snr import TELEPHONY_RATE
-from ..types import AudioClip, SttResult
+from audio_harness import runner, synthetic
+from audio_harness.autotag import autotag_reference
+from audio_harness.config import STT_PRICING, BenchmarkConfig, ConfigError, require_env
+from audio_harness.entities import ENTITY_CLASSES
+from audio_harness.metrics import percentile, summarize
+from audio_harness.normalize import normalizer_for
+from audio_harness.snr import TELEPHONY_RATE
+from audio_harness.types import AudioClip, SttResult
+
 
 GEMINI_MODEL = "gemini-2.5-flash"
 """Pinned interviewer/persona model. Overridable per config, but the gate is
@@ -168,18 +169,13 @@ def load_scenarios(path: str | Path) -> list[Scenario]:
             kind = str(slot.get("kind", ""))
             if kind not in SLOT_KINDS:
                 raise ConfigError(
-                    f"scenario {entry['id']}: unknown slot kind {kind!r}; "
-                    f"expected one of {', '.join(SLOT_KINDS)}"
+                    f"scenario {entry['id']}: unknown slot kind {kind!r}; expected one of {', '.join(SLOT_KINDS)}"
                 )
             entity = str(slot.get("entity") or _KIND_ENTITY[kind])
             if entity not in ENTITY_CLASSES:
-                raise ConfigError(
-                    f"scenario {entry['id']}: unknown entity class {entity!r}"
-                )
+                raise ConfigError(f"scenario {entry['id']}: unknown entity class {entity!r}")
             if not slot.get("name") or not slot.get("question"):
-                raise ConfigError(
-                    f"scenario {entry['id']}: slot needs name and question: {slot!r}"
-                )
+                raise ConfigError(f"scenario {entry['id']}: slot needs name and question: {slot!r}")
             slots.append(
                 SlotSpec(
                     name=str(slot["name"]),
@@ -360,8 +356,7 @@ def _sample_value(kind: str, rng: np.random.Generator, language: str) -> SlotVal
     """Draw one ground-truth value for a slot kind."""
     if kind == "person":
         written = (
-            f"{_FIRST_NAMES[int(rng.integers(len(_FIRST_NAMES)))]} "
-            f"{_LAST_NAMES[int(rng.integers(len(_LAST_NAMES)))]}"
+            f"{_FIRST_NAMES[int(rng.integers(len(_FIRST_NAMES)))]} {_LAST_NAMES[int(rng.integers(len(_LAST_NAMES)))]}"
         )
         return SlotValue(canonical_value("name", written, language), written, written)
     if kind == "company":
@@ -405,9 +400,7 @@ def _sample_value(kind: str, rng: np.random.Generator, language: str) -> SlotVal
             f"{month} {_ORDINALS[day]}",
         )
     if kind == "code":
-        letters = [
-            _CODE_LETTERS[int(rng.integers(len(_CODE_LETTERS)))] for _ in range(2)
-        ]
+        letters = [_CODE_LETTERS[int(rng.integers(len(_CODE_LETTERS)))] for _ in range(2)]
         digits = f"{rng.integers(1000, 10000)}"
         tail = _CODE_LETTERS[int(rng.integers(len(_CODE_LETTERS)))]
         written = f"{letters[0]}{letters[1]}{digits}{tail}"
@@ -491,9 +484,7 @@ def _number_words(value: int) -> str:
     return head + (f" {_number_words(rest)}" if rest else "")
 
 
-def sample_personas(
-    scenario: Scenario, count: int, rng: np.random.Generator
-) -> list[Persona]:
+def sample_personas(scenario: Scenario, count: int, rng: np.random.Generator) -> list[Persona]:
     """Sample ``count`` fresh personas for one scenario.
 
     Every slot gets a value; slots of kind ``person`` reuse the persona's own
@@ -560,8 +551,7 @@ def _digit_run_candidates(tokens: list[str]) -> set[str]:
             run.append(token)
             continue
         for start in range(len(run)):
-            for stop in range(start + 1, len(run) + 1):
-                candidates.add("".join(run[start:stop]))
+            candidates.update("".join(run[start:stop]) for stop in range(start + 1, len(run) + 1))
         run = []
     return candidates
 
@@ -583,11 +573,7 @@ def _alnum_run_candidates(tokens: list[str]) -> set[str]:
         for start in range(len(run)):
             for stop in range(start + 1, min(start + 9, len(run) + 1)):
                 squashed = "".join(run[start:stop])
-                if (
-                    len(squashed) >= 3
-                    and any(ch.isdigit() for ch in squashed)
-                    and any(ch.isalpha() for ch in squashed)
-                ):
+                if len(squashed) >= 3 and any(ch.isdigit() for ch in squashed) and any(ch.isalpha() for ch in squashed):
                     candidates.add(squashed)
         run = []
     return candidates
@@ -605,8 +591,7 @@ def _currency_candidates(tokens: list[str]) -> set[str]:
         while cursor >= 0 and tokens[cursor].isdigit():
             digits.insert(0, tokens[cursor])
             cursor -= 1
-        for start in range(len(digits)):
-            candidates.add(f"{''.join(digits[start:])} {unit}")
+        candidates.update(f"{''.join(digits[start:])} {unit}" for start in range(len(digits)))
     return candidates
 
 
@@ -634,9 +619,7 @@ def _date_candidates(tokens: list[str]) -> set[str]:
     return candidates
 
 
-def extract_slot(
-    transcript: str, truth: SlotValue, entity: str, language: str
-) -> str | None:
+def extract_slot(transcript: str, truth: SlotValue, entity: str, language: str) -> str | None:
     """Extract one slot value from a transcript, deterministically.
 
     The extractor is schema-aware: it knows the entity class it is looking
@@ -665,10 +648,7 @@ def extract_slot(
         candidates = _date_candidates(tokens)
     elif entity == "name":
         width = len(truth.canonical.split())
-        candidates = {
-            " ".join(tokens[i : i + width])
-            for i in range(max(0, len(tokens) - width + 1))
-        }
+        candidates = {" ".join(tokens[i : i + width]) for i in range(max(0, len(tokens) - width + 1))}
     else:
         raise ConfigError(f"unknown entity class {entity!r}")
     return truth.canonical if truth.canonical in candidates else None
@@ -759,9 +739,7 @@ async def conduct_interview(
     """
     history: list[str] = []
     turns: list[Turn] = []
-    interviewer_system = _INTERVIEWER_SYSTEM.format(
-        description=scenario.description or scenario.scenario_id
-    )
+    interviewer_system = _INTERVIEWER_SYSTEM.format(description=scenario.description or scenario.scenario_id)
     persona_system = _PERSONA_SYSTEM.format(
         name=persona.name,
         description=scenario.description or scenario.scenario_id,
@@ -783,26 +761,18 @@ async def conduct_interview(
         turn.question = (
             await llm(
                 interviewer_system,
-                f"Conversation so far:\n{context}\n\n"
-                f"Scripted question to ask next: {slot.question}",
+                f"Conversation so far:\n{context}\n\nScripted question to ask next: {slot.question}",
                 0.3,
             )
         ).strip() or slot.question
 
         fact = _FACT_TEMPLATES[slot.kind].format(spoken=truth.spoken)
-        prompt = (
-            f"Interviewer asks: {turn.question}\n\n"
-            f"You must clearly state {fact}\nAnswer naturally."
-        )
+        prompt = f"Interviewer asks: {turn.question}\n\nYou must clearly state {fact}\nAnswer naturally."
         for attempt in range(1, max_attempts + 1):
             turn.attempts = attempt
             answer = (await llm(persona_system, prompt, 1.0)).strip()
             turn.answer = " ".join(answer.split())
-            if (
-                turn.answer
-                and extract_slot(turn.answer, truth, slot.entity, scenario.language)
-                is not None
-            ):
+            if turn.answer and extract_slot(turn.answer, truth, slot.entity, scenario.language) is not None:
                 turn.verified = True
                 break
             prompt = (
@@ -813,8 +783,7 @@ async def conduct_interview(
                 f"{truth.spoken}"
             )
 
-        history.append(f"Interviewer: {turn.question}")
-        history.append(f"You: {turn.answer}")
+        history.extend((f"Interviewer: {turn.question}", f"You: {turn.answer}"))
         turns.append(turn)
     return turns
 
@@ -915,21 +884,14 @@ class KokoroSynth:
             from huggingface_hub import hf_hub_download
             from kokoro import KModel, KPipeline
         except ImportError as exc:
-            raise RuntimeError(
-                "kokoro is not installed; run: uv sync --extra sim-kokoro"
-            ) from exc
+            raise RuntimeError("kokoro is not installed; run: uv sync --extra sim-kokoro") from exc
 
         config = hf_hub_download(KOKORO_REPO, "config.json", revision=KOKORO_REVISION)
-        weights = hf_hub_download(
-            KOKORO_REPO, "kokoro-v1_0.pth", revision=KOKORO_REVISION
-        )
+        weights = hf_hub_download(KOKORO_REPO, "kokoro-v1_0.pth", revision=KOKORO_REVISION)
         model = KModel(repo_id=KOKORO_REPO, config=config, model=weights).eval()
         self._pipeline = KPipeline(lang_code="a", repo_id=KOKORO_REPO, model=model)
         self._voice_paths = {
-            voice: hf_hub_download(
-                KOKORO_REPO, f"voices/{voice}.pt", revision=KOKORO_REVISION
-            )
-            for voice in voices
+            voice: hf_hub_download(KOKORO_REPO, f"voices/{voice}.pt", revision=KOKORO_REVISION) for voice in voices
         }
 
     def __call__(self, text: str, voice: str) -> np.ndarray:
@@ -982,9 +944,7 @@ def clips_from_turns(
         if not turn.verified:
             continue
         wav24 = tts(turn.answer, turn.voice)
-        wav16 = soxr.resample(
-            wav24, KOKORO_SAMPLE_RATE, STT_SAMPLE_RATE, quality="HQ"
-        ).astype(np.float32)
+        wav16 = soxr.resample(wav24, KOKORO_SAMPLE_RATE, STT_SAMPLE_RATE, quality="HQ").astype(np.float32)
         degraded = degrade_tel8k(wav16, STT_SAMPLE_RATE)
         clips.append(
             synthetic._to_clip(
@@ -1034,11 +994,11 @@ class SpendEstimate:
         ]
         for provider, usd in sorted(self.stt_usd.items()):
             lines.append(f"  stt {provider}: ${usd:.2f}")
-        lines.append(
-            f"  llm ~{self.llm_calls} calls ({GEMINI_MODEL}): ${self.llm_usd:.2f}"
-        )
-        lines.append("  tts kokoro (local): $0.00")
-        lines.append(f"expected total: ${self.total_usd:.2f}")
+        lines.extend((
+            f"  llm ~{self.llm_calls} calls ({GEMINI_MODEL}): ${self.llm_usd:.2f}",
+            "  tts kokoro (local): $0.00",
+            f"expected total: ${self.total_usd:.2f}",
+        ))
         return "\n".join(lines)
 
 
@@ -1075,9 +1035,7 @@ def estimate_spend(
     calls = int(turns * 2 * _EST_RETRY_FACTOR)
     interviewer_in, interviewer_out = _EST_INTERVIEWER_TOKENS
     persona_in, persona_out = _EST_PERSONA_TOKENS
-    llm_usd = (
-        interviewer_in + persona_in
-    ) / 2 * calls / 1e6 * GEMINI_FLASH_USD_PER_M_INPUT + (
+    llm_usd = (interviewer_in + persona_in) / 2 * calls / 1e6 * GEMINI_FLASH_USD_PER_M_INPUT + (
         interviewer_out + persona_out
     ) / 2 * calls / 1e6 * GEMINI_FLASH_USD_PER_M_OUTPUT
     return SpendEstimate(
@@ -1102,9 +1060,7 @@ def ensure_within_cap(estimate: SpendEstimate, cap_usd: float) -> None:
         )
 
 
-def actual_spend(
-    results: list[SttResult], usage: LlmUsage, *, warmup_s: float
-) -> dict[str, float]:
+def actual_spend(results: list[SttResult], usage: LlmUsage, *, warmup_s: float) -> dict[str, float]:
     """Compute the realized spend from measured audio and recorded tokens.
 
     Streamed audio is billed whether or not the transcript came back, so
@@ -1122,9 +1078,7 @@ def actual_spend(
     for result in results:
         pricing = STT_PRICING.get(result.provider)
         rate = pricing.stream_per_hour if pricing else None
-        spend[result.provider] = spend.get(result.provider, 0.0) + (
-            result.audio_s / 3600.0 * (rate or 0.0)
-        )
+        spend[result.provider] = spend.get(result.provider, 0.0) + (result.audio_s / 3600.0 * (rate or 0.0))
     for provider in list(spend):
         pricing = STT_PRICING.get(provider)
         rate = pricing.stream_per_hour if pricing else None
@@ -1139,9 +1093,7 @@ def actual_spend(
 # --------------------------------------------------------------------------
 
 
-def average_ranks(
-    scores: dict[str, float | None], *, higher_is_better: bool = False
-) -> dict[str, float]:
+def average_ranks(scores: dict[str, float | None], *, higher_is_better: bool = False) -> dict[str, float]:
     """Rank vendors with average-rank tie handling; missing ranks worst.
 
     A vendor with no value for a cell — its lane failed, or produced nothing
@@ -1304,21 +1256,15 @@ def composite_ranking(
         reference = result.raw.get("reference")
         language = str(result.raw.get("language") or fallback_language)
         if isinstance(annotated, str) and annotated and isinstance(reference, str):
-            shared[(language, result.clip_id)] = (reference, annotated)
+            shared[language, result.clip_id] = (reference, annotated)
 
     for result in results:
         reference = result.raw.get("reference")
         language = str(result.raw.get("language") or fallback_language)
-        if (
-            not isinstance(reference, str)
-            or not reference
-            or result.raw.get("reference_annotated")
-        ):
+        if not isinstance(reference, str) or not reference or result.raw.get("reference_annotated"):
             continue
         known = shared.get((language, result.clip_id))
-        if known is not None and " ".join(known[0].split()) == " ".join(
-            reference.split()
-        ):
+        if known is not None and " ".join(known[0].split()) == " ".join(reference.split()):
             result.raw["reference_annotated"] = known[1]
             continue
         annotated = autotag_reference(reference, language)
@@ -1356,11 +1302,7 @@ def composite_ranking(
             pooled = None
             for score in summary.entities.values():
                 pooled = score.counts if pooled is None else pooled + score.counts
-            entity_scores[vendor] = (
-                pooled.rate
-                if pooled is not None and pooled.reference_length > 0
-                else None
-            )
+            entity_scores[vendor] = pooled.rate if pooled is not None and pooled.reference_length > 0 else None
             finalize_scores[vendor] = percentile(summary.finalize_s, 50)
 
         for metric, scores in (
@@ -1368,9 +1310,7 @@ def composite_ranking(
             ("finalize-p50", finalize_scores),
         ):
             if all(value is None for value in scores.values()):
-                composite.decisions.append(
-                    f"cell dropped (no vendor measured): {language}/{metric}"
-                )
+                composite.decisions.append(f"cell dropped (no vendor measured): {language}/{metric}")
                 continue
             composite.cells.append(
                 CompositeCell(
@@ -1383,9 +1323,7 @@ def composite_ranking(
 
     for vendor in composite.vendors:
         cell_ranks = [cell.ranks[vendor] for cell in composite.cells]
-        composite.mean_rank[vendor] = (
-            sum(cell_ranks) / len(cell_ranks) if cell_ranks else math.nan
-        )
+        composite.mean_rank[vendor] = sum(cell_ranks) / len(cell_ranks) if cell_ranks else math.nan
     return composite
 
 
@@ -1438,14 +1376,8 @@ def score_vendors(
     for turn in turns:
         vendor_cells: dict[str, dict[str, Any]] = {}
         for result in by_clip.get(turn.clip_id, []):
-            score = scores.setdefault(
-                result.provider, VendorScore(provider=result.provider)
-            )
-            extracted = (
-                extract_slot(result.text, turn.truth, turn.slot.entity, language)
-                if result.ok
-                else None
-            )
+            score = scores.setdefault(result.provider, VendorScore(provider=result.provider))
+            extracted = extract_slot(result.text, turn.truth, turn.slot.entity, language) if result.ok else None
             correct = extracted is not None
             score.scorable += 1
             score.correct += int(correct)
@@ -1463,26 +1395,24 @@ def score_vendors(
                 "extracted": extracted,
                 "correct": correct,
             }
-        records.append(
-            {
-                "scenario": turn.scenario_id,
-                "persona": turn.persona_id,
-                "turn": turn.index,
-                "slot": turn.slot.name,
-                "entity": turn.slot.entity,
-                "kind": turn.slot.kind,
-                "question": turn.question,
-                "answer": turn.answer,
-                "verified": turn.verified,
-                "attempts": turn.attempts,
-                "voice": turn.voice,
-                "clip_id": turn.clip_id,
-                "truth_written": turn.truth.written,
-                "truth_canonical": turn.truth.canonical,
-                "degradation": DEGRADATION,
-                "vendors": vendor_cells,
-            }
-        )
+        records.append({
+            "scenario": turn.scenario_id,
+            "persona": turn.persona_id,
+            "turn": turn.index,
+            "slot": turn.slot.name,
+            "entity": turn.slot.entity,
+            "kind": turn.slot.kind,
+            "question": turn.question,
+            "answer": turn.answer,
+            "verified": turn.verified,
+            "attempts": turn.attempts,
+            "voice": turn.voice,
+            "clip_id": turn.clip_id,
+            "truth_written": turn.truth.written,
+            "truth_canonical": turn.truth.canonical,
+            "degradation": DEGRADATION,
+            "vendors": vendor_cells,
+        })
     return scores, records
 
 
@@ -1521,13 +1451,9 @@ def evaluate_gate(
         gate's written analysis starts from.
     """
     vendors = sorted(set(composite.vendors) & set(vendor_scores))
-    e3_success: dict[str, float | None] = {
-        vendor: vendor_scores[vendor].success for vendor in vendors
-    }
+    e3_success: dict[str, float | None] = {vendor: vendor_scores[vendor].success for vendor in vendors}
     e3_rank = average_ranks(e3_success, higher_is_better=True)
-    composite_rank = average_ranks(
-        {vendor: composite.mean_rank.get(vendor) for vendor in vendors}
-    )
+    composite_rank = average_ranks({vendor: composite.mean_rank.get(vendor) for vendor in vendors})
     rho = spearman_rho(e3_rank, composite_rank)
     p_exact = exact_permutation_p(e3_rank, composite_rank)
     divergence = [
@@ -1538,9 +1464,7 @@ def evaluate_gate(
             "composite_rank": composite_rank[vendor],
             "delta": e3_rank[vendor] - composite_rank[vendor],
         }
-        for vendor in sorted(
-            vendors, key=lambda v: -abs(e3_rank[v] - composite_rank[v])
-        )
+        for vendor in sorted(vendors, key=lambda v: -abs(e3_rank[v] - composite_rank[v]))
     ]
     return GateVerdict(
         rho=rho,
@@ -1550,9 +1474,7 @@ def evaluate_gate(
         vendors=vendors,
         e3_success=e3_success,
         e3_rank=e3_rank,
-        composite_mean_rank={
-            vendor: composite.mean_rank.get(vendor, math.nan) for vendor in vendors
-        },
+        composite_mean_rank={vendor: composite.mean_rank.get(vendor, math.nan) for vendor in vendors},
         composite_rank=composite_rank,
         divergence=divergence,
         decisions=list(composite.decisions),
@@ -1678,9 +1600,7 @@ async def run_sim(
         for turns in interviews:
             all_turns.extend(turns)
 
-    clips = clips_from_turns(
-        all_turns, tts, language=language, degradation=sim.degradation
-    )
+    clips = clips_from_turns(all_turns, tts, language=language, degradation=sim.degradation)
     if not clips:
         raise ConfigError("no verified turns produced any audio; nothing to run")
 
@@ -1730,9 +1650,7 @@ def _usage_of(llm: LlmFn) -> LlmUsage:
 # --------------------------------------------------------------------------
 
 
-def write_sim_outputs(
-    outcome: SimOutcome, gate: GateVerdict | None, results_path: Path
-) -> tuple[Path, Path, Path]:
+def write_sim_outputs(outcome: SimOutcome, gate: GateVerdict | None, results_path: Path) -> tuple[Path, Path, Path]:
     """Write the sim results, gate metrics and report next to the raw runs.
 
     Args:
@@ -1772,10 +1690,7 @@ def write_sim_outputs(
             "vendors": gate.vendors,
             "e3_success": gate.e3_success,
             "e3_rank": gate.e3_rank,
-            "composite_mean_rank": {
-                k: None if math.isnan(v) else v
-                for k, v in gate.composite_mean_rank.items()
-            },
+            "composite_mean_rank": {k: None if math.isnan(v) else v for k, v in gate.composite_mean_rank.items()},
             "composite_rank": gate.composite_rank,
             "divergence": gate.divergence,
             "decisions": gate.decisions,
@@ -1861,8 +1776,7 @@ def render_sim_markdown(outcome: SimOutcome, gate: GateVerdict | None) -> str:
             ]
     lines += [
         "",
-        "_Experimental lane: rankings above are not publishable until the "
-        "gate passes (plan AC8)._",
+        "_Experimental lane: rankings above are not publishable until the gate passes (plan AC8)._",
         "",
     ]
     return "\n".join(lines)

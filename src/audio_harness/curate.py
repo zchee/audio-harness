@@ -26,11 +26,12 @@ without the network; ``tools/curate_yodas.py`` does the fetching.
 
 from __future__ import annotations
 
+from dataclasses import asdict, dataclass
 import random
 import re
-from dataclasses import asdict, dataclass
 
 import orjson
+
 
 YODAS_LICENSE = "CC-BY-3.0"
 GRANARY_LICENSE = "CC-BY-4.0"
@@ -130,9 +131,7 @@ def parse_yodas_text_shard(
     return candidates
 
 
-def parse_granary_lines(
-    lines: list[str], *, subset: str, language: str
-) -> list[Candidate]:
+def parse_granary_lines(lines: list[str], *, subset: str, language: str) -> list[Candidate]:
     """Extract filtered candidates from Granary manifest JSONL lines.
 
     Granary rows reference audio by ``utt_id``/``original_source_id``; the
@@ -160,11 +159,7 @@ def parse_granary_lines(
         text = row.get("text")
         duration = row.get("duration")
         utt_id = row.get("utt_id")
-        if not (
-            isinstance(text, str)
-            and isinstance(duration, int | float)
-            and isinstance(utt_id, str)
-        ):
+        if not (isinstance(text, str) and isinstance(duration, int | float) and isinstance(utt_id, str)):
             continue
         if not _keep_utterance(text, float(duration)):
             continue
@@ -194,9 +189,7 @@ def _keep_utterance(text: str, duration_s: float) -> bool:
     return not _REJECT_TEXT.search(stripped)
 
 
-def sample_candidates(
-    candidates: list[Candidate], *, count: int, seed: int
-) -> list[Candidate]:
+def sample_candidates(candidates: list[Candidate], *, count: int, seed: int) -> list[Candidate]:
     """Draw a reproducible, speaker-diverse sample.
 
     At most :data:`MAX_PER_VIDEO` utterances per recording, chosen with a

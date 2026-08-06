@@ -54,9 +54,7 @@ def _verdict(
     aspect: str = "naturalness",
     prompt_id: str = "p1",
 ) -> Verdict:
-    return Verdict(
-        aspect=aspect, prompt_id=prompt_id, first=first, second=second, winner=winner
-    )
+    return Verdict(aspect=aspect, prompt_id=prompt_id, first=first, second=second, winner=winner)
 
 
 def _write_wav(path: Path, *, seconds: float = 0.3, freq: float = 220.0) -> Path:
@@ -221,8 +219,10 @@ class TestBootstrapCi:
             pid = f"p{i:02d}"
             better = winner_by_prompt(i)
             other = "b" if better == "a" else "a"
-            verdicts.append(_verdict(better, other, "first", prompt_id=pid))
-            verdicts.append(_verdict(other, better, "second", prompt_id=pid))
+            verdicts.extend((
+                _verdict(better, other, "first", prompt_id=pid),
+                _verdict(other, better, "second", prompt_id=pid),
+            ))
         return verdicts
 
     def test_same_seed_reproduces_the_interval(self) -> None:
@@ -361,11 +361,7 @@ def _scores_separated() -> list[BtScore]:
 
 
 def _panel(winner: str, *, votes_per_rater: int = 100) -> list[PanelVote]:
-    return [
-        PanelVote(f"r{rater}", f"p{i:03d}", "a", "b", winner)
-        for rater in (1, 2)
-        for i in range(votes_per_rater)
-    ]
+    return [PanelVote(f"r{rater}", f"p{i:03d}", "a", "b", winner) for rater in (1, 2) for i in range(votes_per_rater)]
 
 
 class TestGate:
@@ -483,9 +479,7 @@ class TestRunArenaCache:
 
         assert second_judge.calls == 0
         assert (second.live_calls, second.cached_calls) == (0, 12)
-        assert sorted(v.winner for v in second.verdicts) == sorted(
-            v.winner for v in first.verdicts
-        )
+        assert sorted(v.winner for v in second.verdicts) == sorted(v.winner for v in first.verdicts)
         assert all(v.cached for v in second.verdicts)
 
     async def test_positional_stub_judge_flips_everything(self, tmp_path: Path) -> None:
@@ -501,9 +495,7 @@ class TestRunArenaCache:
 
         assert order_flip_stats(run.verdicts).rate == 1.0
 
-    async def test_missing_audio_skips_the_pair_and_says_so(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_missing_audio_skips_the_pair_and_says_so(self, tmp_path: Path) -> None:
         audio_dir, prompts = self._stage(tmp_path)
         (audio_dir / "sysb-batch-p2.wav").unlink()
 
@@ -518,9 +510,7 @@ class TestRunArenaCache:
         assert run.missing_audio == ["sysb:p2"]
         assert len(run.verdicts) == 6
 
-    async def test_unparseable_replies_error_and_are_not_cached(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_unparseable_replies_error_and_are_not_cached(self, tmp_path: Path) -> None:
         audio_dir, prompts = self._stage(tmp_path)
         cache = tmp_path / "cache.jsonl"
 
@@ -576,9 +566,9 @@ class TestOutputs:
     """Reports lead with the gate label; the summary carries AC8 metrics."""
 
     def _fixture(self):
-        verdicts = [
-            _verdict("a", "b", "first", prompt_id=f"p{i:02d}") for i in range(4)
-        ] + [_verdict("b", "a", "second", prompt_id=f"p{i:02d}") for i in range(4)]
+        verdicts = [_verdict("a", "b", "first", prompt_id=f"p{i:02d}") for i in range(4)] + [
+            _verdict("b", "a", "second", prompt_id=f"p{i:02d}") for i in range(4)
+        ]
         run = tts_arena.ArenaRun(
             verdicts=verdicts,
             systems=("a", "b"),
@@ -593,9 +583,7 @@ class TestOutputs:
     def test_markdown_leads_with_the_gate_label(self) -> None:
         run, scores, _flips, gate = self._fixture()
 
-        markdown = render_arena_markdown(
-            run, scores, gate, notes=["ja interview prompts are PENDING"]
-        )
+        markdown = render_arena_markdown(run, scores, gate, notes=["ja interview prompts are PENDING"])
 
         assert markdown.startswith("## TTS arena (en-US) - experimental (panel")
         assert "| a |" in markdown
@@ -607,11 +595,10 @@ class TestOutputs:
 
         run, scores, flips, gate = self._fixture()
 
-        results, summary, report = write_arena_outputs(
-            tmp_path, run, scores, flips, gate, notes=["note"]
-        )
+        results, summary, report = write_arena_outputs(tmp_path, run, scores, flips, gate, notes=["note"])
 
-        assert results.is_file() and report.is_file()
+        assert results.is_file()
+        assert report.is_file()
         payload = orjson.loads(summary.read_bytes())
         assert payload["language"] == "en-US"
         assert payload["gate"]["criteria"][1]["status"] == "uncomputable"
@@ -635,14 +622,10 @@ class TestLiveJudge:
         t = np.arange(rate) / rate
         clean = (0.4 * np.sin(2 * np.pi * 220.0 * t)).astype(np.float32)
         rng = np.random.default_rng(0)
-        harsh = np.clip(
-            clean * 5.0 + rng.normal(0, 0.3, clean.shape), -1.0, 1.0
-        ).astype(np.float32)
+        harsh = np.clip(clean * 5.0 + rng.normal(0, 0.3, clean.shape), -1.0, 1.0).astype(np.float32)
 
         judge = tts_arena._gemini_judge(tts_arena.JUDGE_MODEL)
-        reply = await judge(
-            pair_wav_bytes(clean, harsh), tts_arena.aspect_instruction("artifacts")
-        )
+        reply = await judge(pair_wav_bytes(clean, harsh), tts_arena.aspect_instruction("artifacts"))
 
         assert parse_verdict(reply.text) is not None
         assert reply.prompt_tokens > 0

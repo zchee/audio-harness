@@ -17,6 +17,7 @@ from audio_harness import report, runner
 from audio_harness.audio import PauseStats, measure_pauses, pcm16_to_float
 from audio_harness.types import Mode, TtsResult
 
+
 RATE = 24000
 PROVIDER = "delta-fake-tts"
 """Deliberately unregistered: it forms its own family, so the registered
@@ -57,8 +58,7 @@ class TestMeasurePauses:
         stats = self._measure(("silence", 0.3), ("tone", 0.3), ("silence", 0.4))
 
         assert stats == PauseStats(0.0, 0.0, 0), (
-            "edge silence belongs to latency and endpointing metrics; "
-            "counting it here would double-charge the vendor"
+            "edge silence belongs to latency and endpointing metrics; counting it here would double-charge the vendor"
         )
 
     def test_multiple_pauses_accumulate(self) -> None:
@@ -103,9 +103,7 @@ def _run(
         total_s=0.5,
         raw={"text": "hello world"},
     )
-    result.raw["roundtrip"] = [
-        {"provider": "deepgram-nova3", "text": rt_text, "error": None}
-    ]
+    result.raw["roundtrip"] = [{"provider": "deepgram-nova3", "text": rt_text, "error": None}]
     return result
 
 
@@ -157,8 +155,7 @@ class TestModeDeltaFrame:
 
         assert row["prompts"] == 2
         assert row["rt_stream"] == pytest.approx(0.5), (
-            "p2 exists only in the stream lane; its garbage transcript must "
-            "not contaminate the paired comparison"
+            "p2 exists only in the stream lane; its garbage transcript must not contaminate the paired comparison"
         )
 
     def test_cold_and_load_runs_are_excluded(self) -> None:
@@ -177,9 +174,7 @@ class TestModeDeltaFrame:
 
     def test_failed_runs_are_excluded(self) -> None:
         results = _paired_results()
-        results.append(
-            TtsResult(provider=PROVIDER, prompt_id="p0", mode=Mode.STREAM, error="boom")
-        )
+        results.append(TtsResult(provider=PROVIDER, prompt_id="p0", mode=Mode.STREAM, error="boom"))
 
         row = report.tts_mode_delta_frame(results, "en-US").to_dicts()[0]
 
@@ -204,8 +199,7 @@ class TestModeDeltaFrame:
 
         assert row["pause_delta_s"] is None
         assert row["rt_delta"] == pytest.approx(0.5), (
-            "round-trip and duration survive without audio; only the pause "
-            "profile needs the waveform"
+            "round-trip and duration survive without audio; only the pause profile needs the waveform"
         )
 
 
@@ -213,9 +207,7 @@ class TestModeDeltaMarkdown:
     """The rendered table carries the delta columns."""
 
     def test_renders_provider_row_and_delta_columns(self) -> None:
-        markdown = report.render_tts_mode_delta_markdown(
-            report.tts_mode_delta_frame(_paired_results(), "en-US")
-        )
+        markdown = report.render_tts_mode_delta_markdown(report.tts_mode_delta_frame(_paired_results(), "en-US"))
 
         assert "Δ RT" in markdown
         assert "Δ Pause" in markdown

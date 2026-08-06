@@ -9,9 +9,9 @@ unverified subtitles never reach ranked accuracy.
 
 from __future__ import annotations
 
-import tarfile
 from io import BytesIO
 from pathlib import Path
+import tarfile
 
 import numpy as np
 import orjson
@@ -30,6 +30,7 @@ from audio_harness.metrics import summarize
 from audio_harness.report import render_stt_markdown, stt_summary_frame
 from audio_harness.types import Mode, SttResult
 
+
 NATIVE_RATE = 24000
 
 
@@ -37,12 +38,10 @@ def _wav_bytes(duration_s: float, *, tone_s: float | None = None) -> bytes:
     """A mono tone (with optional trailing silence) as WAV bytes."""
     tone_s = duration_s if tone_s is None else tone_s
     t = np.linspace(0, tone_s, int(NATIVE_RATE * tone_s), endpoint=False)
-    samples = np.concatenate(
-        [
-            0.5 * np.sin(2 * np.pi * 220 * t),
-            np.zeros(int(NATIVE_RATE * (duration_s - tone_s))),
-        ]
-    ).astype("float32")
+    samples = np.concatenate([
+        0.5 * np.sin(2 * np.pi * 220 * t),
+        np.zeros(int(NATIVE_RATE * (duration_s - tone_s))),
+    ]).astype("float32")
     buffer = BytesIO()
     sf.write(buffer, samples, NATIVE_RATE, format="WAV")
     return buffer.getvalue()
@@ -120,9 +119,7 @@ def patched(tmp_path: Path, shard_tar: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(curated, "CACHE_DIR", tmp_path / "cache")
 
     def open_shard(subset: str, shard: str):
-        assert (subset, shard) == ("de000", "00000000"), (
-            "only the fixture shard may be streamed"
-        )
+        assert (subset, shard) == ("de000", "00000000"), "only the fixture shard may be streamed"
         return shard_tar.open("rb")
 
     monkeypatch.setattr(curated, "_open_shard", open_shard)
@@ -144,9 +141,7 @@ class TestDetection:
 class TestLoading:
     """Segments come out cut, resampled, and fully attributed."""
 
-    def test_segments_are_cut_to_their_offsets(
-        self, tmp_path: Path, patched: pytest.MonkeyPatch
-    ) -> None:
+    def test_segments_are_cut_to_their_offsets(self, tmp_path: Path, patched: pytest.MonkeyPatch) -> None:
         path = _manifest(
             tmp_path,
             [_yodas_row("u1", 0.5, 1.5), _yodas_row("u2", 1.0, 3.0), _GRANARY_ROW],
@@ -166,9 +161,7 @@ class TestLoading:
         assert clips[0].reference == "ein hinreichend langer satz"
         assert clips[0].source_path.startswith("yodas2://de000/00000000/vid01#")
 
-    def test_speech_end_is_detected_on_the_segment(
-        self, tmp_path: Path, patched: pytest.MonkeyPatch
-    ) -> None:
+    def test_speech_end_is_detected_on_the_segment(self, tmp_path: Path, patched: pytest.MonkeyPatch) -> None:
         # vid01 is tone until 3.0 s then silence; a segment spanning the
         # transition must place speech-end near the transition, not the end.
         path = _manifest(tmp_path, [_yodas_row("u1", 2.5, 4.0)])
@@ -177,29 +170,21 @@ class TestLoading:
 
         assert clips[0].speech_end_s == pytest.approx(0.5, abs=0.1)
 
-    def test_unfetchable_sources_are_skipped_not_failed(
-        self, tmp_path: Path, patched: pytest.MonkeyPatch
-    ) -> None:
+    def test_unfetchable_sources_are_skipped_not_failed(self, tmp_path: Path, patched: pytest.MonkeyPatch) -> None:
         path = _manifest(tmp_path, [_yodas_row("u1", 0.5, 1.5), _YTC_ROW])
 
         clips = load_curated_clips(SourceConfig(manifest=str(path)))
 
         assert [c.clip_id for c in clips] == ["u1"]
 
-    def test_limit_truncates_in_manifest_order(
-        self, tmp_path: Path, patched: pytest.MonkeyPatch
-    ) -> None:
-        path = _manifest(
-            tmp_path, [_yodas_row("u1", 0.5, 1.5), _yodas_row("u2", 1.0, 2.0)]
-        )
+    def test_limit_truncates_in_manifest_order(self, tmp_path: Path, patched: pytest.MonkeyPatch) -> None:
+        path = _manifest(tmp_path, [_yodas_row("u1", 0.5, 1.5), _yodas_row("u2", 1.0, 2.0)])
 
         clips = load_curated_clips(SourceConfig(manifest=str(path), limit=1))
 
         assert [c.clip_id for c in clips] == ["u1"]
 
-    def test_second_load_serves_from_cache_without_streaming(
-        self, tmp_path: Path, patched: pytest.MonkeyPatch
-    ) -> None:
+    def test_second_load_serves_from_cache_without_streaming(self, tmp_path: Path, patched: pytest.MonkeyPatch) -> None:
         path = _manifest(tmp_path, [_yodas_row("u1", 0.5, 1.5)])
         load_curated_clips(SourceConfig(manifest=str(path)))
 
@@ -211,18 +196,14 @@ class TestLoading:
 
         assert clips[0].duration_s == pytest.approx(1.0, abs=0.02)
 
-    def test_dataset_dispatch_routes_curated_manifests(
-        self, tmp_path: Path, patched: pytest.MonkeyPatch
-    ) -> None:
+    def test_dataset_dispatch_routes_curated_manifests(self, tmp_path: Path, patched: pytest.MonkeyPatch) -> None:
         path = _manifest(tmp_path, [_yodas_row("u1", 0.5, 1.5)])
 
         clips = load_source(SourceConfig(manifest=str(path)))
 
         assert clips[0].clip_id == "u1"
 
-    def test_malformed_granary_utt_id_is_an_error(
-        self, tmp_path: Path, patched: pytest.MonkeyPatch
-    ) -> None:
+    def test_malformed_granary_utt_id_is_an_error(self, tmp_path: Path, patched: pytest.MonkeyPatch) -> None:
         row = dict(_GRANARY_ROW)
         row["utt_id"] = "not-encoding-anything"
         path = _manifest(tmp_path, [row])
@@ -235,9 +216,7 @@ class TestScoringGate:
     """Unverified references measure latency, never ranked accuracy."""
 
     def _result(self, gold_status: str) -> SttResult:
-        result = SttResult(
-            provider="p1", clip_id="c1", mode=Mode.STREAM, text="hallo welt"
-        )
+        result = SttResult(provider="p1", clip_id="c1", mode=Mode.STREAM, text="hallo welt")
         result.audio_s = 2.0
         result.ttft_s = 0.4
         result.raw["reference"] = "hallo welt kaputt"
@@ -250,9 +229,7 @@ class TestScoringGate:
     def test_unverified_reference_is_excluded_from_accuracy(self) -> None:
         summary = summarize([self._result("unverified")], "de-DE")[0]
 
-        assert summary.error_rate is None, (
-            "an unverified subtitle must not feed ranked accuracy"
-        )
+        assert summary.error_rate is None, "an unverified subtitle must not feed ranked accuracy"
         assert summary.ttft_s == [0.4], "latency needs no transcript truth"
         assert summary.unverified == 1
         assert summary.licenses == {"CC-BY-3.0"}
@@ -264,9 +241,7 @@ class TestScoringGate:
         assert summary.unverified == 0
 
     def test_report_renders_license_and_unverified_columns(self) -> None:
-        markdown = render_stt_markdown(
-            stt_summary_frame([self._result("unverified")], "de-DE")
-        )
+        markdown = render_stt_markdown(stt_summary_frame([self._result("unverified")], "de-DE"))
 
         assert "License" in markdown
         assert "CC-BY-3.0" in markdown

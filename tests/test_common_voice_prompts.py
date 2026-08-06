@@ -34,9 +34,7 @@ class TestFilterSentences:
 
         kept = filter_sentences(lines, language="en-US")
 
-        assert kept == [
-            "This sentence has a perfectly reasonable number of words in it."
-        ]
+        assert kept == ["This sentence has a perfectly reasonable number of words in it."]
 
     def test_deduplicates_repeated_lines(self) -> None:
         lines = ["A repeated general-length sentence goes here."] * 3

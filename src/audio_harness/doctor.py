@@ -15,12 +15,13 @@ a realtime session and sending no audio.
 from __future__ import annotations
 
 import asyncio
-import os
 from dataclasses import dataclass
+import os
 
 import httpx
 import orjson
 from websockets.asyncio.client import connect
+
 
 TIMEOUT_S = 20.0
 
@@ -153,9 +154,7 @@ async def _run_http_check(client: httpx.AsyncClient, check: _HttpCheck) -> Check
             provider=check.provider,
             env_var=check.env_var,
             ok=False,
-            detail=(
-                f"rejected (HTTP {response.status_code}) — key invalid or scoped out"
-            ),
+            detail=(f"rejected (HTTP {response.status_code}) — key invalid or scoped out"),
         )
     if response.status_code >= 400:
         return CheckResult(
@@ -176,9 +175,7 @@ async def _run_http_check(client: httpx.AsyncClient, check: _HttpCheck) -> Check
     )
 
 
-async def _check_quota(
-    client: httpx.AsyncClient, check: _HttpCheck, headers: dict[str, str]
-) -> CheckResult:
+async def _check_quota(client: httpx.AsyncClient, check: _HttpCheck, headers: dict[str, str]) -> CheckResult:
     """Confirm an authenticated key can also spend, not just identify itself.
 
     A key that authenticates but has no credit will pass every naive check and
@@ -246,15 +243,13 @@ async def _check_soniox_session() -> CheckResult:
     try:
         async with connect(SONIOX_STREAM_URL, open_timeout=15.0) as socket:
             await socket.send(
-                orjson.dumps(
-                    {
-                        "api_key": key,
-                        "model": "stt-rt-v5",
-                        "audio_format": "pcm_s16le",
-                        "sample_rate": 16000,
-                        "num_channels": 1,
-                    }
-                ).decode()
+                orjson.dumps({
+                    "api_key": key,
+                    "model": "stt-rt-v5",
+                    "audio_format": "pcm_s16le",
+                    "sample_rate": 16000,
+                    "num_channels": 1,
+                }).decode()
             )
             try:
                 raw = await asyncio.wait_for(socket.recv(), timeout=10.0)
@@ -305,17 +300,14 @@ def _check_google_cloud() -> CheckResult:
     try:
         import google.auth
 
-        credentials, discovered = google.auth.default(
-            scopes=["https://www.googleapis.com/auth/cloud-platform"]
-        )
+        credentials, discovered = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
     except Exception as exc:
         return CheckResult(
             provider="Google Cloud",
             env_var="GOOGLE_CLOUD_PROJECT",
             ok=False,
             detail=(
-                f"no application default credentials ({type(exc).__name__}); "
-                f"run: gcloud auth application-default login"
+                f"no application default credentials ({type(exc).__name__}); run: gcloud auth application-default login"
             ),
         )
 
@@ -340,8 +332,6 @@ async def run_checks() -> list[CheckResult]:
         One result per provider, in a stable order for display.
     """
     async with httpx.AsyncClient(timeout=TIMEOUT_S, follow_redirects=True) as client:
-        http_results = await asyncio.gather(
-            *(_run_http_check(client, check) for check in _CHECKS)
-        )
+        http_results = await asyncio.gather(*(_run_http_check(client, check) for check in _CHECKS))
     soniox = await _check_soniox_session()
     return [*http_results, soniox, _check_google_cloud()]

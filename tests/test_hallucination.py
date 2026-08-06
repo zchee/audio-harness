@@ -10,9 +10,9 @@ fixtures.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 import contextlib
 import os
-from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import TypedDict
 
@@ -39,6 +39,7 @@ from audio_harness.stt.ws import run_stream
 from audio_harness.synthetic import low_snr_clip, noise_clip, silence_clip
 from audio_harness.types import Mode, Partial, SttResult
 
+
 FABRICATED = "thank you for watching please subscribe"
 
 
@@ -62,10 +63,7 @@ def _result(
         error=error,
     )
     result.raw = {"reference": reference, "language": language}
-    result.partials = [
-        Partial(t_s=float(i), text=final, is_final=True)
-        for i, final in enumerate(finals)
-    ]
+    result.partials = [Partial(t_s=float(i), text=final, is_final=True) for i, final in enumerate(finals)]
     return result
 
 
@@ -132,10 +130,7 @@ class TestInsertionRuns:
 
     def test_normalization_matches_the_accuracy_metric(self) -> None:
         runs = insertion_run_lengths("room 101", "Room 101.", "en-US")
-        assert runs == [], (
-            "formatting differences the WER forgives must not count as "
-            "fabricated words either"
-        )
+        assert runs == [], "formatting differences the WER forgives must not count as fabricated words either"
 
 
 class _LoopCase(TypedDict):
@@ -189,9 +184,7 @@ class TestNgramLoop:
             },
         }
         for name, case in tests.items():
-            assert has_ngram_loop(case["text"], case["language"]) is case["expected"], (
-                name
-            )
+            assert has_ngram_loop(case["text"], case["language"]) is case["expected"], name
 
 
 class _PhantomCase(TypedDict):
@@ -215,9 +208,7 @@ class TestPhantomFinals:
                 "expected": 0,
             },
             "clips with a reference never count": {
-                "result": _result(
-                    "clip-000", "hello", reference="hello", finals=("hello",)
-                ),
+                "result": _result("clip-000", "hello", reference="hello", finals=("hello",)),
                 "expected": 0,
             },
             "multiple phantom finals all count": {
@@ -233,10 +224,7 @@ class TestSummarizeHallucination:
     """AC4: fabricating providers score above zero, silent ones exactly zero."""
 
     def test_fabricating_provider_scores_above_zero(self) -> None:
-        results = [
-            _result(f"silence-{i:03d}", FABRICATED, finals=(FABRICATED,))
-            for i in range(3)
-        ]
+        results = [_result(f"silence-{i:03d}", FABRICATED, finals=(FABRICATED,)) for i in range(3)]
         (summary,) = summarize_hallucination(results, "en-US")
 
         assert summary.condition == "silence"
@@ -244,9 +232,7 @@ class TestSummarizeHallucination:
         assert summary.fabrication_rate > 0
         assert summary.inserted_words == 3 * len(FABRICATED.split())
         assert summary.phantom_finals == 3
-        assert summary.inserted_words_per_min == pytest.approx(
-            len(FABRICATED.split()) / (8.0 / 60.0)
-        )
+        assert summary.inserted_words_per_min == pytest.approx(len(FABRICATED.split()) / (8.0 / 60.0))
 
     def test_silent_provider_scores_exactly_zero(self) -> None:
         results = [_result(f"silence-{i:03d}", "") for i in range(3)]
@@ -260,12 +246,8 @@ class TestSummarizeHallucination:
     def test_short_insertions_do_not_count_as_fabrication(self) -> None:
         below = " ".join(["word"] * (FABRICATION_MIN_RUN - 1))
         (summary,) = summarize_hallucination([_result("silence-000", below)], "en-US")
-        assert summary.fabrication_rate == 0.0, (
-            "a run below the threshold is insertion noise, not fabrication"
-        )
-        assert summary.inserted_words == FABRICATION_MIN_RUN - 1, (
-            "the words still count toward inserted-words/min"
-        )
+        assert summary.fabrication_rate == 0.0, "a run below the threshold is insertion noise, not fabrication"
+        assert summary.inserted_words == FABRICATION_MIN_RUN - 1, "the words still count toward inserted-words/min"
 
     def test_conditions_are_separate_rows(self) -> None:
         results = [
@@ -296,14 +278,10 @@ class TestSummarizeHallucination:
         assert summary.clips == 2
         assert summary.failures == 1
         assert summary.scored == 1
-        assert summary.fabrication_rate == 1.0, (
-            "a failed clip must not dilute the rate's denominator"
-        )
+        assert summary.fabrication_rate == 1.0, "a failed clip must not dilute the rate's denominator"
 
     def test_all_failures_yield_none_not_zero(self) -> None:
-        (summary,) = summarize_hallucination(
-            [_result("silence-000", "", error="boom")], "en-US"
-        )
+        (summary,) = summarize_hallucination([_result("silence-000", "", error="boom")], "en-US")
         assert summary.fabrication_rate is None
 
     def test_loop_rate_flags_looping_transcripts(self) -> None:
@@ -332,12 +310,8 @@ class TestSummarizeHallucination:
             return (s.provider, s.mode, s.language, s.condition)
 
         assert sorted(map(key, reloaded)) == sorted(map(key, direct))
-        for before, after in zip(
-            sorted(direct, key=key), sorted(reloaded, key=key), strict=True
-        ):
-            assert before == after, (
-                "re-scoring a saved run must not need the audio or the runner"
-            )
+        for before, after in zip(sorted(direct, key=key), sorted(reloaded, key=key), strict=True):
+            assert before == after, "re-scoring a saved run must not need the audio or the runner"
 
 
 class TestConditionCounts:
@@ -345,10 +319,7 @@ class TestConditionCounts:
 
     def test_config_declares_20_20_50_50(self) -> None:
         config = BenchmarkConfig.from_yaml("configs/stt-hallucination.yaml")
-        counts = {
-            source.synthetic: source.limit
-            for source in config.dataset.resolved_sources()
-        }
+        counts = {source.synthetic: source.limit for source in config.dataset.resolved_sources()}
         assert counts == {
             "silence": 20,
             "noise": 20,
@@ -358,12 +329,8 @@ class TestConditionCounts:
 
     def test_streaming_only_and_realtime(self) -> None:
         config = BenchmarkConfig.from_yaml("configs/stt-hallucination.yaml")
-        assert all(entry.modes == ["stream"] for entry in config.stt), (
-            "fabrication is a streaming-endpoint behaviour"
-        )
-        assert config.run.realtime, (
-            "endpointing-driven fabrication only exists under real-time pacing"
-        )
+        assert all(entry.modes == ["stream"] for entry in config.stt), "fabrication is a streaming-endpoint behaviour"
+        assert config.run.realtime, "endpointing-driven fabrication only exists under real-time pacing"
 
 
 class FabricatingServer:
@@ -383,11 +350,7 @@ class FabricatingServer:
         except websockets.ConnectionClosed:
             return
         with contextlib.suppress(websockets.ConnectionClosed):
-            await socket.send(
-                orjson.dumps(
-                    {"type": "transcript", "text": self.transcript, "final": True}
-                ).decode()
-            )
+            await socket.send(orjson.dumps({"type": "transcript", "text": self.transcript, "final": True}).decode())
             await socket.send(orjson.dumps({"type": "done"}).decode())
 
 
@@ -403,9 +366,7 @@ async def fabricating_server() -> AsyncIterator[str]:
 class TestStreamPath:
     """The metrics must read an event stream a real socket produced."""
 
-    async def test_fabrication_scores_from_a_live_stream(
-        self, fabricating_server: str
-    ) -> None:
+    async def test_fabrication_scores_from_a_live_stream(self, fabricating_server: str) -> None:
         clip = silence_clip(0, duration_s=0.4, sample_rate=16000, language="en-US")
         timeline = StreamTimeline()
 
@@ -415,9 +376,7 @@ class TestStreamPath:
             if payload.get("type") == "done":
                 return True
             if payload.get("type") == "transcript":
-                timeline.record(
-                    str(payload["text"]), is_final=bool(payload.get("final"))
-                )
+                timeline.record(str(payload["text"]), is_final=bool(payload.get("final")))
             return False
 
         async def eos(socket: ClientConnection) -> None:
@@ -457,8 +416,7 @@ LIVE_FLAG = "AUDIO_HARNESS_TEST_HALLUCINATION_LIVE"
 
 @pytest.mark.skipif(
     not os.environ.get(LIVE_FLAG) or not os.environ.get("DEEPGRAM_API_KEY"),
-    reason=f"live smoke needs {LIVE_FLAG}=1 and DEEPGRAM_API_KEY "
-    "(3 clips, ~20 s of audio, fractions of a cent)",
+    reason=f"live smoke needs {LIVE_FLAG}=1 and DEEPGRAM_API_KEY (3 clips, ~20 s of audio, fractions of a cent)",
 )
 class TestLiveSmoke:
     """Minimal real-vendor pass: do the metrics read genuine event streams?

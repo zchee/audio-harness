@@ -18,12 +18,12 @@ the whole lane; their transcripts remain useful for text-only work.
 
 from __future__ import annotations
 
-import re
-import tarfile
 from collections.abc import Buffer, Iterator
 from dataclasses import dataclass
 from io import RawIOBase
 from pathlib import Path
+import re
+import tarfile
 from tempfile import TemporaryDirectory
 
 import httpx
@@ -35,6 +35,7 @@ import soxr
 from .audio import BYTES_PER_SAMPLE, detect_speech_end_s, wrap_wav
 from .config import SourceConfig
 from .types import AudioClip
+
 
 YODAS_AUDIO_BASE = "https://huggingface.co/datasets/espnet/yodas2/resolve/main"
 
@@ -85,9 +86,7 @@ def is_curated_manifest(path: Path) -> bool:
     return False
 
 
-def load_curated_clips(
-    source: SourceConfig, *, sample_rate: int = 16000
-) -> list[AudioClip]:
+def load_curated_clips(source: SourceConfig, *, sample_rate: int = 16000) -> list[AudioClip]:
     """Load the clips a curated manifest references.
 
     Cached segments load from disk; the rest are cut from their shards, one
@@ -108,11 +107,6 @@ def load_curated_clips(
     """
     manifest = Path(source.manifest or "")
     segments, skipped = _read_manifest(manifest, limit=source.limit)
-    if skipped:
-        print(
-            f"{manifest.name}: skipped {len(skipped)} row(s) with no fetchable "
-            f"audio host ({', '.join(sorted({s for s in skipped}))})"
-        )
     if not segments:
         if skipped:
             return []
@@ -152,18 +146,14 @@ def load_curated_clips(
     return clips
 
 
-def _read_manifest(
-    manifest: Path, *, limit: int | None
-) -> tuple[list[_Segment], list[str]]:
+def _read_manifest(manifest: Path, *, limit: int | None) -> tuple[list[_Segment], list[str]]:
     """Parse manifest rows into fetchable segments plus skip notes."""
     if not manifest.is_file():
         raise CuratedManifestError(f"manifest not found: {manifest}")
 
     segments: list[_Segment] = []
     skipped: list[str] = []
-    for number, line in enumerate(
-        manifest.read_text(encoding="utf-8").splitlines(), start=1
-    ):
+    for number, line in enumerate(manifest.read_text(encoding="utf-8").splitlines(), start=1):
         if not line.strip():
             continue
         try:
@@ -213,8 +203,7 @@ def _resolve_row(row: dict[str, object], where: str) -> _Segment | str:
         match = _GRANARY_YODAS_ID.match(utt_id)
         if match is None:
             raise CuratedManifestError(
-                f"{where}: granary/yodas utt_id {utt_id!r} does not encode "
-                f"its YODAS coordinates"
+                f"{where}: granary/yodas utt_id {utt_id!r} does not encode its YODAS coordinates"
             )
         start_s = float(f"{match.group('start_i')}.{match.group('start_f')}")
         duration = float(f"{match.group('dur_i')}.{match.group('dur_f')}")
@@ -245,9 +234,7 @@ def _fetch_missing(segments: list[_Segment], *, sample_rate: int) -> None:
         _extract_shard(subset, shard, wanted, sample_rate=sample_rate)
 
 
-def _extract_shard(
-    subset: str, shard: str, wanted: list[_Segment], *, sample_rate: int
-) -> None:
+def _extract_shard(subset: str, shard: str, wanted: list[_Segment], *, sample_rate: int) -> None:
     """Stream one shard tarball and cache every wanted segment.
 
     The tarball is read sequentially (gzip allows nothing else) and the
@@ -324,17 +311,11 @@ class _HttpStream(RawIOBase):
     """Minimal read-only file object over a streaming HTTP response."""
 
     def __init__(self, url: str) -> None:
-        self._client = httpx.Client(
-            timeout=httpx.Timeout(300.0, connect=15.0), follow_redirects=True
-        )
-        self._response = self._client.send(
-            self._client.build_request("GET", url), stream=True
-        )
+        self._client = httpx.Client(timeout=httpx.Timeout(300.0, connect=15.0), follow_redirects=True)
+        self._response = self._client.send(self._client.build_request("GET", url), stream=True)
         if self._response.status_code >= 400:
             self.close()
-            raise CuratedManifestError(
-                f"HTTP {self._response.status_code} fetching {url}"
-            )
+            raise CuratedManifestError(f"HTTP {self._response.status_code} fetching {url}")
         self._chunks: Iterator[bytes] = self._response.iter_bytes()
         self._buffer = b""
 

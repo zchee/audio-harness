@@ -20,10 +20,10 @@ merge.
 from __future__ import annotations
 
 import asyncio
-import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+import time
 
 import orjson
 
@@ -51,9 +51,7 @@ class Progress:
             self.on_result(provider, mode, ok)
 
 
-async def run_stt(
-    config: BenchmarkConfig, clips: list[AudioClip], progress: Progress | None = None
-) -> list[SttResult]:
+async def run_stt(config: BenchmarkConfig, clips: list[AudioClip], progress: Progress | None = None) -> list[SttResult]:
     """Benchmark every configured STT provider over every clip.
 
     Args:
@@ -143,17 +141,13 @@ async def _stt_lane(
         return results
 
 
-async def _warmup_stt(
-    provider: stt.SttProvider, clip: AudioClip, mode: Mode, run: RunConfig
-) -> None:
+async def _warmup_stt(provider: stt.SttProvider, clip: AudioClip, mode: Mode, run: RunConfig) -> None:
     """Absorb DNS, TLS and cold-start cost so it does not skew run one."""
     for _ in range(run.warmup):
         await _one_stt(provider, clip, mode, run)
 
 
-async def _one_stt(
-    provider: stt.SttProvider, clip: AudioClip, mode: Mode, run: RunConfig
-) -> SttResult:
+async def _one_stt(provider: stt.SttProvider, clip: AudioClip, mode: Mode, run: RunConfig) -> SttResult:
     """Execute a single transcription, converting any failure into a result.
 
     The requested frame size is clamped to what the provider accepts and the
@@ -167,9 +161,7 @@ async def _one_stt(
         try:
             async with asyncio.timeout(run.timeout_s):
                 if mode is Mode.STREAM:
-                    result = await provider.transcribe_stream(
-                        clip, chunk_ms=chunk_ms, realtime=run.realtime
-                    )
+                    result = await provider.transcribe_stream(clip, chunk_ms=chunk_ms, realtime=run.realtime)
                     result.raw["chunk_ms"] = chunk_ms
                     _rebase_finalize(result, clip, realtime=run.realtime)
                     if attempt:
@@ -334,9 +326,7 @@ async def _tts_lane(
         return results
 
 
-async def _tts_load_pass(
-    provider: tts.TtsProvider, prompts: list[TtsPrompt], run: RunConfig
-) -> list[TtsResult]:
+async def _tts_load_pass(provider: tts.TtsProvider, prompts: list[TtsPrompt], run: RunConfig) -> list[TtsResult]:
     """Repeat the prompt set with several syntheses in flight at once.
 
     A voice agent under load holds concurrent sessions, and a vendor that
@@ -348,18 +338,14 @@ async def _tts_load_pass(
     load = run.tts_load_concurrency
     results: list[TtsResult] = []
     for prompt in prompts:
-        batch = await asyncio.gather(
-            *(_one_tts(provider, prompt, Mode.STREAM, run) for _ in range(load))
-        )
+        batch = await asyncio.gather(*(_one_tts(provider, prompt, Mode.STREAM, run) for _ in range(load)))
         for result in batch:
             result.raw["load"] = load
         results.extend(batch)
     return results
 
 
-async def _one_tts(
-    provider: tts.TtsProvider, prompt: TtsPrompt, mode: Mode, run: RunConfig
-) -> TtsResult:
+async def _one_tts(provider: tts.TtsProvider, prompt: TtsPrompt, mode: Mode, run: RunConfig) -> TtsResult:
     """Execute a single synthesis, converting any failure into a result.
 
     With incremental text enabled, streaming lanes whose protocol accepts
@@ -372,9 +358,7 @@ async def _one_tts(
             if mode is Mode.STREAM:
                 if run.tts_incremental_text:
                     if provider.supports_input_streaming:
-                        return await provider.synthesize_incremental(
-                            prompt, token_rate=run.tts_token_rate
-                        )
+                        return await provider.synthesize_incremental(prompt, token_rate=run.tts_token_rate)
                     result = await provider.synthesize_stream(prompt)
                     result.raw["input_streaming"] = False
                     return result
@@ -475,40 +459,38 @@ def _stt_record(result: SttResult) -> bytes:
     crash artifact and the canonical file can never drift apart in format.
     """
     return (
-        orjson.dumps(
-            {
-                "provider": result.provider,
-                "clip_id": result.clip_id,
-                "mode": str(result.mode),
-                "text": result.text,
-                "reference": result.raw.get("reference", ""),
-                "reference_annotated": result.raw.get("reference_annotated"),
-                "license": result.raw.get("license"),
-                "gold_status": result.raw.get("gold_status"),
-                "language": result.raw.get("language", ""),
-                "audio_s": result.audio_s,
-                "total_s": result.total_s,
-                "ttft_s": result.ttft_s,
-                "finalize_s": result.finalize_s,
-                "rtf": result.rtf,
-                "chunk_ms": result.raw.get("chunk_ms"),
-                "speech_end_s": result.raw.get("speech_end_s"),
-                "pauses": result.raw.get("pauses"),
-                "ws_rtt_s": result.raw.get("ws_rtt_s"),
-                "eou_source": result.raw.get("eou_source"),
-                "endpoint_config": result.raw.get("endpoint_config"),
-                "error": result.error,
-                "partials": [
-                    {
-                        "t_s": p.t_s,
-                        "text": p.text,
-                        "is_final": p.is_final,
-                        "kind": p.kind,
-                    }
-                    for p in result.partials
-                ],
-            }
-        )
+        orjson.dumps({
+            "provider": result.provider,
+            "clip_id": result.clip_id,
+            "mode": str(result.mode),
+            "text": result.text,
+            "reference": result.raw.get("reference", ""),
+            "reference_annotated": result.raw.get("reference_annotated"),
+            "license": result.raw.get("license"),
+            "gold_status": result.raw.get("gold_status"),
+            "language": result.raw.get("language", ""),
+            "audio_s": result.audio_s,
+            "total_s": result.total_s,
+            "ttft_s": result.ttft_s,
+            "finalize_s": result.finalize_s,
+            "rtf": result.rtf,
+            "chunk_ms": result.raw.get("chunk_ms"),
+            "speech_end_s": result.raw.get("speech_end_s"),
+            "pauses": result.raw.get("pauses"),
+            "ws_rtt_s": result.raw.get("ws_rtt_s"),
+            "eou_source": result.raw.get("eou_source"),
+            "endpoint_config": result.raw.get("endpoint_config"),
+            "error": result.error,
+            "partials": [
+                {
+                    "t_s": p.t_s,
+                    "text": p.text,
+                    "is_final": p.is_final,
+                    "kind": p.kind,
+                }
+                for p in result.partials
+            ],
+        })
         + b"\n"
     )
 
@@ -536,35 +518,31 @@ def _tts_record(result: TtsResult, audio_path: str | None) -> bytes:
     so the crash artifact and the canonical file can never drift in format.
     """
     return (
-        orjson.dumps(
-            {
-                "provider": result.provider,
-                "prompt_id": result.prompt_id,
-                "mode": str(result.mode),
-                "chars": result.chars,
-                "audio_s": result.audio_s,
-                "ttfb_s": result.ttfb_s,
-                "ttfa_s": result.ttfa_s,
-                "gap_p99_s": result.gap_p99_s,
-                "cold": result.cold,
-                "chunk_t_s": result.chunk_t_s,
-                "total_s": result.total_s,
-                "rtf": result.rtf,
-                "load": result.raw.get("load"),
-                "input_streaming": result.raw.get("input_streaming"),
-                "error": result.error,
-                "text": result.raw.get("text", ""),
-                "roundtrip": result.raw.get("roundtrip"),
-                "audio_path": audio_path,
-            }
-        )
+        orjson.dumps({
+            "provider": result.provider,
+            "prompt_id": result.prompt_id,
+            "mode": str(result.mode),
+            "chars": result.chars,
+            "audio_s": result.audio_s,
+            "ttfb_s": result.ttfb_s,
+            "ttfa_s": result.ttfa_s,
+            "gap_p99_s": result.gap_p99_s,
+            "cold": result.cold,
+            "chunk_t_s": result.chunk_t_s,
+            "total_s": result.total_s,
+            "rtf": result.rtf,
+            "load": result.raw.get("load"),
+            "input_streaming": result.raw.get("input_streaming"),
+            "error": result.error,
+            "text": result.raw.get("text", ""),
+            "roundtrip": result.raw.get("roundtrip"),
+            "audio_path": audio_path,
+        })
         + b"\n"
     )
 
 
-def write_tts_results(
-    results: list[TtsResult], output_dir: str | Path, *, save_audio: bool
-) -> Path:
+def write_tts_results(results: list[TtsResult], output_dir: str | Path, *, save_audio: bool) -> Path:
     """Persist TTS results as JSONL, optionally writing the audio alongside."""
     path = _prepare(output_dir, "tts-results.jsonl")
     audio_dir = path.parent / "audio"
@@ -796,7 +774,7 @@ def _begin_run(output_dir: str | Path, filename: str) -> Path:
     """
     directory = Path(output_dir) / time.strftime("%Y%m%d-%H%M%S")
     directory.mkdir(parents=True, exist_ok=True)
-    _ACTIVE_RUNS[(str(Path(output_dir)), filename)] = directory
+    _ACTIVE_RUNS[str(Path(output_dir)), filename] = directory
     return directory / filename
 
 

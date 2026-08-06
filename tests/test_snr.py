@@ -27,6 +27,7 @@ from audio_harness.snr import (
 )
 from audio_harness.types import Mode, SttResult
 
+
 RATE = 16000
 
 
@@ -70,9 +71,7 @@ def _snr_source(base_manifest: Path, noise_dir: Path) -> SourceConfig:
 class TestMatrixGeneration:
     """Five mixtures per base, differing only in noise gain."""
 
-    def test_every_base_appears_at_every_level(
-        self, base_manifest: Path, noise_dir: Path
-    ) -> None:
+    def test_every_base_appears_at_every_level(self, base_manifest: Path, noise_dir: Path) -> None:
         clips = synthesize_snr_source(_snr_source(base_manifest, noise_dir))
 
         assert len(clips) == 2 * len(SNR_LEVELS)
@@ -86,14 +85,10 @@ class TestMatrixGeneration:
         assert all(c.reference == "ein test satz" for c in clips)
         assert all(c.language == "de-DE" for c in clips)
 
-    def test_noise_grows_as_snr_falls(
-        self, base_manifest: Path, noise_dir: Path
-    ) -> None:
+    def test_noise_grows_as_snr_falls(self, base_manifest: Path, noise_dir: Path) -> None:
         clips = synthesize_snr_source(_snr_source(base_manifest, noise_dir))
         speech = np.frombuffer(
-            load_source(
-                SourceConfig(manifest=str(base_manifest), language="de-DE", limit=1)
-            )[0].pcm,
+            load_source(SourceConfig(manifest=str(base_manifest), language="de-DE", limit=1))[0].pcm,
             dtype="<i2",
         ).astype(np.float32)
 
@@ -102,34 +97,24 @@ class TestMatrixGeneration:
             mixed = np.frombuffer(clip.pcm, dtype="<i2").astype(np.float32)
             residuals.append(float(np.sqrt(np.mean((mixed - speech) ** 2))))
 
-        assert residuals == sorted(residuals), (
-            "levels are ordered +20 to -5; noise energy must rise monotonically"
-        )
+        assert residuals == sorted(residuals), "levels are ordered +20 to -5; noise energy must rise monotonically"
 
-    def test_one_noise_draw_is_shared_across_levels(
-        self, base_manifest: Path, noise_dir: Path
-    ) -> None:
+    def test_one_noise_draw_is_shared_across_levels(self, base_manifest: Path, noise_dir: Path) -> None:
         """The five residuals must be the same noise at different gains, so a
         level-to-level WER delta can only be the SNR's doing."""
         clips = synthesize_snr_source(_snr_source(base_manifest, noise_dir))
         speech = np.frombuffer(
-            load_source(
-                SourceConfig(manifest=str(base_manifest), language="de-DE", limit=1)
-            )[0].pcm,
+            load_source(SourceConfig(manifest=str(base_manifest), language="de-DE", limit=1))[0].pcm,
             dtype="<i2",
         ).astype(np.float32)
 
         loud = np.frombuffer(clips[4].pcm, dtype="<i2").astype(np.float32) - speech
         quiet = np.frombuffer(clips[0].pcm, dtype="<i2").astype(np.float32) - speech
 
-        cosine = float(
-            np.dot(loud, quiet) / (np.linalg.norm(loud) * np.linalg.norm(quiet))
-        )
+        cosine = float(np.dot(loud, quiet) / (np.linalg.norm(loud) * np.linalg.norm(quiet)))
         assert cosine > 0.99
 
-    def test_dispatches_through_the_dataset_layer(
-        self, base_manifest: Path, noise_dir: Path
-    ) -> None:
+    def test_dispatches_through_the_dataset_layer(self, base_manifest: Path, noise_dir: Path) -> None:
         clips = load_source(_snr_source(base_manifest, noise_dir))
         assert len(clips) == 10
 
@@ -143,28 +128,20 @@ class TestTelephony:
         path = tmp_path / "tone.wav"
         sf.write(path, tone, RATE)
         manifest = tmp_path / "tone.jsonl"
-        manifest.write_bytes(
-            orjson.dumps({"audio": path.name, "text": "ton", "id": "t0"}) + b"\n"
-        )
+        manifest.write_bytes(orjson.dumps({"audio": path.name, "text": "ton", "id": "t0"}) + b"\n")
         return manifest
 
     def test_high_band_content_is_removed(self, tmp_path: Path) -> None:
         manifest = self._tone_manifest(tmp_path, 6000.0)
-        clips = synthesize_snr_source(
-            SourceConfig(synthetic="telephony", manifest=str(manifest), limit=1)
-        )
+        clips = synthesize_snr_source(SourceConfig(synthetic="telephony", manifest=str(manifest), limit=1))
 
         samples = np.frombuffer(clips[0].pcm, dtype="<i2").astype(np.float32) / 32767.0
         assert clips[0].clip_id == "tel8k-t0"
-        assert float(np.sqrt(np.mean(samples**2))) < 0.01, (
-            "a 6 kHz tone cannot survive an 8 kHz sample-rate round-trip"
-        )
+        assert float(np.sqrt(np.mean(samples**2))) < 0.01, "a 6 kHz tone cannot survive an 8 kHz sample-rate round-trip"
 
     def test_voice_band_content_survives(self, tmp_path: Path) -> None:
         manifest = self._tone_manifest(tmp_path, 1000.0)
-        clips = synthesize_snr_source(
-            SourceConfig(synthetic="telephony", manifest=str(manifest), limit=1)
-        )
+        clips = synthesize_snr_source(SourceConfig(synthetic="telephony", manifest=str(manifest), limit=1))
 
         samples = np.frombuffer(clips[0].pcm, dtype="<i2").astype(np.float32) / 32767.0
         assert float(np.sqrt(np.mean(samples**2))) > 0.15
@@ -197,9 +174,7 @@ def _result(
     finalize_s: float | None = None,
     error: str | None = None,
 ) -> SttResult:
-    result = SttResult(
-        provider="p1", clip_id=clip_id, mode=Mode.STREAM, text=text, error=error
-    )
+    result = SttResult(provider="p1", clip_id=clip_id, mode=Mode.STREAM, text=text, error=error)
     result.audio_s = 2.0
     result.finalize_s = finalize_s
     result.raw["reference"] = "a b c d"
@@ -223,9 +198,7 @@ class TestSummarize:
         assert summary.rate(5.0) == pytest.approx(0.25)
         assert summary.rate(-5.0) == pytest.approx(0.5)
         # Trapezoids over [-5, 5] and [5, 20], normalized by the 25 dB span.
-        assert summary.wer_auc == pytest.approx(
-            ((0.5 + 0.25) / 2 * 10 + (0.25 + 0.0) / 2 * 15) / 25
-        )
+        assert summary.wer_auc == pytest.approx(((0.5 + 0.25) / 2 * 10 + (0.25 + 0.0) / 2 * 15) / 25)
 
     def test_failures_count_per_level(self) -> None:
         results = [
@@ -246,9 +219,7 @@ class TestSummarize:
 
         summary = summarize_snr(results, "de-DE")[0]
 
-        assert summary.finalize_degradation_s == pytest.approx(0.5), (
-            "noise cost half a second of turn-taking latency"
-        )
+        assert summary.finalize_degradation_s == pytest.approx(0.5), "noise cost half a second of turn-taking latency"
 
     def test_telephony_accumulates_separately(self) -> None:
         results = [

@@ -8,15 +8,16 @@ way published STT comparisons go wrong.
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
 from itertools import pairwise
+import math
 from typing import TYPE_CHECKING
 
 import jiwer
 
 from .normalize import comparison_fold_for, normalizer_for, uses_character_metric
 from .types import Partial, SttResult
+
 
 if TYPE_CHECKING:
     from .entities import EntityClassScore
@@ -148,11 +149,7 @@ def partial_instability(partials: list[Partial]) -> float | None:
     interim = [p for p in partials if not p.is_final and p.text]
     if len(interim) < 2:
         return None
-    rewrites = sum(
-        1
-        for previous, current in pairwise(interim)
-        if not current.text.startswith(previous.text)
-    )
+    rewrites = sum(1 for previous, current in pairwise(interim) if not current.text.startswith(previous.text))
     return rewrites / (len(interim) - 1)
 
 
@@ -289,9 +286,7 @@ def summarize(results: list[SttResult], language: str) -> list[ProviderSummary]:
 
         reference = result.raw.get("reference")
         if isinstance(reference, str) and reference:
-            summary.counts = summary.counts + score_pair(
-                reference, result.text, clip_language
-            )
+            summary.counts = summary.counts + score_pair(reference, result.text, clip_language)
 
         annotated = result.raw.get("reference_annotated")
         if isinstance(annotated, str) and annotated:
@@ -299,13 +294,9 @@ def summarize(results: list[SttResult], language: str) -> list[ProviderSummary]:
             # module's ErrorCounts, so a top-level import would be circular.
             from .entities import score_entities
 
-            for label, score in score_entities(
-                annotated, result.text, clip_language
-            ).items():
+            for label, score in score_entities(annotated, result.text, clip_language).items():
                 existing = summary.entities.get(label)
-                summary.entities[label] = (
-                    score if existing is None else existing + score
-                )
+                summary.entities[label] = score if existing is None else existing + score
 
     return list(summaries.values())
 
@@ -374,11 +365,7 @@ def insertion_run_lengths(reference: str, hypothesis: str, language: str) -> lis
     output = jiwer.process_words(" ".join(ref_tokens), " ".join(hyp_tokens))
     # jiwer merges adjacent same-type operations into a single chunk, so each
     # insert chunk is exactly one maximal run.
-    return [
-        chunk.hyp_end_idx - chunk.hyp_start_idx
-        for chunk in output.alignments[0]
-        if chunk.type == "insert"
-    ]
+    return [chunk.hyp_end_idx - chunk.hyp_start_idx for chunk in output.alignments[0] if chunk.type == "insert"]
 
 
 def has_ngram_loop(
@@ -405,11 +392,7 @@ def has_ngram_loop(
         ``True`` when any qualifying loop exists.
     """
     tokens = _comparison_tokens(text, language)
-    max_n = (
-        LOOP_MAX_NGRAM_CHARS
-        if uses_character_metric(language)
-        else LOOP_MAX_NGRAM_WORDS
-    )
+    max_n = LOOP_MAX_NGRAM_CHARS if uses_character_metric(language) else LOOP_MAX_NGRAM_WORDS
     for n in range(1, max_n + 1):
         if n * min_repeats > len(tokens):
             break
@@ -513,9 +496,7 @@ class HallucinationSummary:
         return self.looped_clips / self.scored
 
 
-def summarize_hallucination(
-    results: list[SttResult], language: str
-) -> list[HallucinationSummary]:
+def summarize_hallucination(results: list[SttResult], language: str) -> list[HallucinationSummary]:
     """Aggregate hallucination counters per provider, mode, language and
     condition.
 
@@ -542,9 +523,7 @@ def summarize_hallucination(
         clip_language = recorded if isinstance(recorded, str) and recorded else language
         raw_reference = result.raw.get("reference")
         reference = raw_reference if isinstance(raw_reference, str) else ""
-        condition = condition_of(result.clip_id) or (
-            "speech" if reference.strip() else "no_speech"
-        )
+        condition = condition_of(result.clip_id) or ("speech" if reference.strip() else "no_speech")
 
         key = (result.provider, str(result.mode), clip_language, condition)
         summary = summaries.setdefault(

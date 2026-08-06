@@ -40,7 +40,7 @@ class TestNormalization:
                 "expected": "a b c",
             },
             "folds full-width latin to ascii": {
-                "raw": "ＨＥＬＬＯ",  # noqa: RUF001 - full-width input is the fixture
+                "raw": "ＨＥＬＬＯ",  # ruff: ignore[ambiguous-unicode-character-string] - full-width input is the fixture
                 "expected": "hello",
             },
             "keeps digits intact": {
@@ -66,7 +66,7 @@ class TestNormalization:
                 "expected": "アイウ",
             },
             "folds full-width digits": {
-                "raw": "１２３",  # noqa: RUF001 - full-width input is the fixture
+                "raw": "１２３",  # ruff: ignore[ambiguous-unicode-character-string] - full-width input is the fixture
                 "expected": "123",
             },
         }
@@ -108,9 +108,7 @@ class TestNormalization:
             },
         }
         for name, case in tests.items():
-            assert normalize_english(case["spoken"]) == normalize_english(
-                case["written"]
-            ), name
+            assert normalize_english(case["spoken"]) == normalize_english(case["written"]), name
 
     def test_digit_sequences_are_not_summed(self) -> None:
         """A dictated account number must not collapse into an arithmetic sum."""
@@ -245,19 +243,14 @@ class TestPercentile:
         values = [0.1] * 90 + [10.0] * 10
 
         assert percentile(values, 50) == pytest.approx(0.1)
-        assert percentile(values, 95) == pytest.approx(10.0), (
-            "when a tenth of requests are slow, p95 must surface it"
-        )
+        assert percentile(values, 95) == pytest.approx(10.0), "when a tenth of requests are slow, p95 must surface it"
 
 
 class TestPartialInstability:
     """Churn measures how often a provider retracts text it already showed."""
 
     def _partials(self, texts: list[str]) -> list[Partial]:
-        return [
-            Partial(t_s=float(i), text=text, is_final=False)
-            for i, text in enumerate(texts)
-        ]
+        return [Partial(t_s=float(i), text=text, is_final=False) for i, text in enumerate(texts)]
 
     def test_monotonic_growth_is_perfectly_stable(self) -> None:
         partials = self._partials(["he", "hell", "hello", "hello wo"])
@@ -281,6 +274,4 @@ class TestPartialInstability:
             Partial(t_s=1.0, text="totally different", is_final=True),
             Partial(t_s=2.0, text="ab", is_final=False),
         ]
-        assert partial_instability(partials) == 0.0, (
-            "a final between two growing partials is not a rewrite"
-        )
+        assert partial_instability(partials) == 0.0, "a final between two growing partials is not a rewrite"

@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 import time
 import wave
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -51,9 +51,7 @@ class TestLoadClip:
         clip = load_clip(path, clip_id="c", reference=None, language="en-US")
 
         assert clip.sample_rate == 16000
-        assert clip.duration_s == pytest.approx(1.0, abs=0.02), (
-            "resampling must preserve wall-clock duration"
-        )
+        assert clip.duration_s == pytest.approx(1.0, abs=0.02), "resampling must preserve wall-clock duration"
 
     def test_downmixes_stereo_to_mono(self, tmp_path: Path) -> None:
         path = _tone(tmp_path / "stereo.wav", seconds=0.5, rate=16000, channels=2)
@@ -125,9 +123,7 @@ class TestPacing:
     async def test_deadlines_do_not_accumulate_drift(self) -> None:
         clip = TestChunking()._clip(0.6)
         started = time.perf_counter()
-        stamps = []
-        async for _ in pace_chunks(clip, 20, realtime=True):
-            stamps.append(time.perf_counter() - started)
+        stamps = [time.perf_counter() - started async for _ in pace_chunks(clip, 20, realtime=True)]
 
         expected_last = (len(stamps) - 1) * 0.02
         assert stamps[-1] == pytest.approx(expected_last, abs=0.08), (
@@ -156,30 +152,18 @@ class TestDurations:
             assert handle.readframes(handle.getnframes()) == pcm
 
     def test_decode_duration_for_raw_pcm(self) -> None:
-        duration = decode_audio_duration(
-            b"\x00\x00" * 24000, encoding="pcm_s16le", sample_rate=24000
-        )
+        duration = decode_audio_duration(b"\x00\x00" * 24000, encoding="pcm_s16le", sample_rate=24000)
         assert duration == pytest.approx(1.0)
 
     def test_decode_duration_reads_container_header(self, tmp_path: Path) -> None:
         pcm = b"\x00\x00" * 24000
-        duration = decode_audio_duration(
-            wrap_wav(pcm, 24000), encoding="wav", sample_rate=8000
-        )
-        assert duration == pytest.approx(1.0), (
-            "the container's own rate must win over the requested rate"
-        )
+        duration = decode_audio_duration(wrap_wav(pcm, 24000), encoding="wav", sample_rate=8000)
+        assert duration == pytest.approx(1.0), "the container's own rate must win over the requested rate"
 
     def test_unparseable_payload_reports_zero_not_a_crash(self) -> None:
-        duration = decode_audio_duration(
-            b"not audio", encoding="mp3", sample_rate=24000
-        )
+        duration = decode_audio_duration(b"not audio", encoding="mp3", sample_rate=24000)
         assert duration == 0.0
 
     def test_empty_payload_reports_zero(self) -> None:
-        assert (
-            decode_audio_duration(b"", encoding="pcm_s16le", sample_rate=16000) == 0.0
-        )
-        assert not math.isnan(
-            decode_audio_duration(b"", encoding="mp3", sample_rate=16000)
-        )
+        assert decode_audio_duration(b"", encoding="pcm_s16le", sample_rate=16000) == 0.0
+        assert not math.isnan(decode_audio_duration(b"", encoding="mp3", sample_rate=16000))

@@ -35,6 +35,7 @@ from .stt import family_of as stt_family
 from .tts import family_of as tts_family
 from .types import SttResult, TtsResult
 
+
 SECONDS_PER_HOUR = 3600.0
 CHARS_PER_MILLION = 1_000_000.0
 
@@ -86,18 +87,12 @@ def _entity_cell(score: EntityClassScore | None) -> str:
     return f"{_pct(score.error_rate)} / EM {_pct(score.exact_match_rate)}"
 
 
-def _stt_row(
-    summary: ProviderSummary, entity_labels: list[str] | None = None
-) -> dict[str, object]:
+def _stt_row(summary: ProviderSummary, entity_labels: list[str] | None = None) -> dict[str, object]:
     """Flatten one provider summary into a table row."""
     pricing = STT_PRICING.get(summary.provider)
     rate = None
     if pricing is not None:
-        rate = (
-            pricing.stream_per_hour
-            if summary.mode == "stream"
-            else pricing.batch_per_hour
-        )
+        rate = pricing.stream_per_hour if summary.mode == "stream" else pricing.batch_per_hour
     audio_hours = summary.audio_s / SECONDS_PER_HOUR
 
     row: dict[str, object] = {
@@ -178,18 +173,13 @@ def tts_summary_frame(results: list[TtsResult], language: str) -> pl.DataFrame:
         key = (result.provider, str(result.mode), _load_of(result))
         grouped.setdefault(key, []).append(result)
 
-    judges = sorted(
-        {
-            str(entry.get("provider"))
-            for result in results
-            for entry in _roundtrip_entries(result)
-            if entry.get("provider")
-        }
-    )
-    rows = [
-        _tts_row(provider, mode, load, runs, language, judges)
-        for (provider, mode, load), runs in grouped.items()
-    ]
+    judges = sorted({
+        str(entry.get("provider"))
+        for result in results
+        for entry in _roundtrip_entries(result)
+        if entry.get("provider")
+    })
+    rows = [_tts_row(provider, mode, load, runs, language, judges) for (provider, mode, load), runs in grouped.items()]
     if not rows:
         return pl.DataFrame()
     return pl.DataFrame(rows).sort(["ttfb_p50_s"], nulls_last=True)
@@ -203,9 +193,7 @@ def _load_of(result: TtsResult) -> int:
     return 1
 
 
-def _ranked_counts(
-    per_judge: dict[str, ErrorCounts], provider: str
-) -> ErrorCounts | None:
+def _ranked_counts(per_judge: dict[str, ErrorCounts], provider: str) -> ErrorCounts | None:
     """Pool the judges from outside the candidate's family into one score.
 
     A vendor's own recognizer decodes that vendor's voices best, so only
@@ -280,11 +268,7 @@ def _tts_row(
     candidate_family = tts_family(provider)
     ranked = _ranked_counts(per_judge, provider)
 
-    rates = [
-        judge_counts.rate
-        for judge_counts in per_judge.values()
-        if judge_counts.reference_length > 0
-    ]
+    rates = [judge_counts.rate for judge_counts in per_judge.values() if judge_counts.reference_length > 0]
     diverged = len(rates) >= 2 and max(rates) - min(rates) > JUDGE_DIVERGENCE_PTS
 
     pricing = TTS_PRICING.get(provider)
@@ -308,9 +292,7 @@ def _tts_row(
         "gap_p99_s": percentile(gaps, 50),
         "ttfb_cold_s": percentile(ttfb_cold, 50),
         "rtf_p50": percentile(rtf, 50),
-        "roundtrip_error_rate": (
-            None if ranked is None or ranked.reference_length == 0 else ranked.rate
-        ),
+        "roundtrip_error_rate": (None if ranked is None or ranked.reference_length == 0 else ranked.rate),
         "rt_divergence": diverged,
         "chars": chars,
         "audio_s": audio_s,
@@ -348,9 +330,7 @@ def tts_mode_delta_frame(results: list[TtsResult], language: str) -> pl.DataFram
     for result in results:
         if not result.ok or result.cold or _load_of(result) > 1:
             continue
-        by_provider.setdefault(result.provider, {}).setdefault(
-            str(result.mode), []
-        ).append(result)
+        by_provider.setdefault(result.provider, {}).setdefault(str(result.mode), []).append(result)
 
     rows: list[dict[str, object]] = []
     for provider, modes in sorted(by_provider.items()):
@@ -565,14 +545,8 @@ def render_stt_markdown(frame: pl.DataFrame) -> str:
     columns = list(_STT_COLUMNS)
     entity_fields = sorted(field for field in frame.columns if field.startswith("ent["))
     if entity_fields:
-        anchor = next(
-            index
-            for index, column in enumerate(columns)
-            if column.field == "error_rate"
-        )
-        columns[anchor + 1 : anchor + 1] = [
-            Column(f"Ent {field[4:-1]}", field, str) for field in entity_fields
-        ]
+        anchor = next(index for index, column in enumerate(columns) if column.field == "error_rate")
+        columns[anchor + 1 : anchor + 1] = [Column(f"Ent {field[4:-1]}", field, str) for field in entity_fields]
     return _markdown_table(frame, columns)
 
 
@@ -586,14 +560,8 @@ def render_tts_markdown(frame: pl.DataFrame) -> str:
     columns = list(_TTS_COLUMNS)
     judge_fields = sorted(field for field in frame.columns if field.startswith("rt["))
     if judge_fields:
-        anchor = next(
-            index
-            for index, column in enumerate(columns)
-            if column.field == "roundtrip_error_rate"
-        )
-        columns[anchor + 1 : anchor + 1] = [
-            Column(f"RT {field[3:-1]}", field, str) for field in judge_fields
-        ]
+        anchor = next(index for index, column in enumerate(columns) if column.field == "roundtrip_error_rate")
+        columns[anchor + 1 : anchor + 1] = [Column(f"RT {field[3:-1]}", field, str) for field in judge_fields]
     return _markdown_table(frame, columns)
 
 

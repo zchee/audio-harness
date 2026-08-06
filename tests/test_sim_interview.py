@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import math
 import os
-import re
 from pathlib import Path
+import re
 
 import numpy as np
 import orjson
@@ -38,6 +38,7 @@ from audio_harness.sim.interview import (
 )
 from audio_harness.types import Mode, SttResult
 
+
 SCENARIOS_EN = Path("data/sim/scenarios-en.yaml")
 
 
@@ -63,15 +64,8 @@ class TestScenarioParsing:
 
     def test_malformed_specs_are_rejected(self, tmp_path: Path) -> None:
         tests = {
-            "error: unknown kind": (
-                "scenarios:\n"
-                "  - id: x\n"
-                "    slots:\n"
-                "      - {name: a, kind: nope, question: q}\n"
-            ),
-            "error: missing question": (
-                "scenarios:\n  - id: x\n    slots:\n      - {name: a, kind: phone}\n"
-            ),
+            "error: unknown kind": ("scenarios:\n  - id: x\n    slots:\n      - {name: a, kind: nope, question: q}\n"),
+            "error: missing question": ("scenarios:\n  - id: x\n    slots:\n      - {name: a, kind: phone}\n"),
             "error: no scenarios": "scenarios: []\n",
             "error: no slots": "scenarios:\n  - id: x\n    slots: []\n",
         }
@@ -92,9 +86,7 @@ class TestPersonaSampling:
         second = sample_personas(scenario, 3, np.random.default_rng(11))
 
         assert [p.name for p in first] == [p.name for p in second]
-        assert [p.values["phone"].canonical for p in first] == [
-            p.values["phone"].canonical for p in second
-        ]
+        assert [p.values["phone"].canonical for p in first] == [p.values["phone"].canonical for p in second]
 
     def test_person_slot_reuses_the_identity(self) -> None:
         scenario = load_scenarios(SCENARIOS_EN)[0]
@@ -263,9 +255,7 @@ class TestRankingMath:
     """Hand-computed fixtures for ranks, rho and the exact permutation p."""
 
     def test_average_ranks_with_ties(self) -> None:
-        ranks = average_ranks(
-            {"a": 0.9, "b": 0.8, "c": 0.8, "d": 0.1}, higher_is_better=True
-        )
+        ranks = average_ranks({"a": 0.9, "b": 0.8, "c": 0.8, "d": 0.1}, higher_is_better=True)
 
         assert ranks == {"a": 1.0, "b": 2.5, "c": 2.5, "d": 4.0}
 
@@ -279,13 +269,9 @@ class TestRankingMath:
         a = {"a": 1.0, "b": 2.0, "c": 3.0, "d": 4.0}
 
         assert spearman_rho(a, a) == pytest.approx(1.0)
-        assert spearman_rho(
-            a, {"a": 4.0, "b": 3.0, "c": 2.0, "d": 1.0}
-        ) == pytest.approx(-1.0)
+        assert spearman_rho(a, {"a": 4.0, "b": 3.0, "c": 2.0, "d": 1.0}) == pytest.approx(-1.0)
         # One adjacent swap on n=4: rho = 1 - 6*2/(4*15) = 0.8.
-        assert spearman_rho(
-            a, {"a": 2.0, "b": 1.0, "c": 3.0, "d": 4.0}
-        ) == pytest.approx(0.8)
+        assert spearman_rho(a, {"a": 2.0, "b": 1.0, "c": 3.0, "d": 4.0}) == pytest.approx(0.8)
 
     def test_spearman_degenerate_is_nan(self) -> None:
         constant = {"a": 1.0, "b": 1.0, "c": 1.0}
@@ -298,9 +284,7 @@ class TestRankingMath:
         # Perfect agreement: only the identity of 24 permutations reaches 1.
         assert exact_permutation_p(a, a) == pytest.approx(1 / 24)
         # Perfect disagreement: every permutation is at least -1.
-        assert exact_permutation_p(
-            a, {"a": 4.0, "b": 3.0, "c": 2.0, "d": 1.0}
-        ) == pytest.approx(1.0)
+        assert exact_permutation_p(a, {"a": 4.0, "b": 3.0, "c": 2.0, "d": 1.0}) == pytest.approx(1.0)
 
     def test_gate_verdict_thresholds(self) -> None:
         composite = composite_ranking([], ["a", "b", "c"])
@@ -506,15 +490,13 @@ class TestPipelineDryRun:
     """End-to-end with pre-generated dialogue, fake TTS and fake STT."""
 
     async def test_dry_run_produces_a_scored_interview(self, tmp_path: Path) -> None:
-        bench = BenchmarkConfig.from_dict(
-            {
-                "stt": [
-                    {"name": "vendor-perfect", "modes": ["stream"]},
-                    {"name": "vendor-broken", "modes": ["stream"]},
-                ],
-                "run": {"repeats": 1, "warmup": 0, "output_dir": str(tmp_path)},
-            }
-        )
+        bench = BenchmarkConfig.from_dict({
+            "stt": [
+                {"name": "vendor-perfect", "modes": ["stream"]},
+                {"name": "vendor-broken", "modes": ["stream"]},
+            ],
+            "run": {"repeats": 1, "warmup": 0, "output_dir": str(tmp_path)},
+        })
         sim = SimConfig(
             scenarios_path=str(_mini_spec(tmp_path)),
             personas_per_scenario=2,
@@ -535,17 +517,14 @@ class TestPipelineDryRun:
         perfect = outcome.vendor_scores["vendor-perfect"]
         broken = outcome.vendor_scores["vendor-broken"]
         assert perfect.success == pytest.approx(1.0)
-        assert broken.success is not None and broken.success < 1.0
+        assert broken.success is not None
+        assert broken.success < 1.0
         assert outcome.spend["total"] >= 0.0
 
         results_path = tmp_path / "stt-results.jsonl"
         results_path.write_bytes(b"")
-        sim_path, gate_path, report_path = write_sim_outputs(
-            outcome, None, results_path
-        )
-        records = [
-            orjson.loads(line) for line in sim_path.read_bytes().splitlines() if line
-        ]
+        sim_path, gate_path, report_path = write_sim_outputs(outcome, None, results_path)
+        records = [orjson.loads(line) for line in sim_path.read_bytes().splitlines() if line]
         assert len(records) == 4
         assert all(r["vendors"] for r in records)
         assert orjson.loads(gate_path.read_bytes())["gate"] is None
@@ -557,9 +536,7 @@ class TestPipelineDryRun:
 
         scenario = load_scenarios(SCENARIOS_EN)[0]
         persona = sample_personas(scenario, 1, np.random.default_rng(2))[0]
-        turns = await conduct_interview(
-            scenario, persona, hopeless_llm, voice="af_heart"
-        )
+        turns = await conduct_interview(scenario, persona, hopeless_llm, voice="af_heart")
 
         assert all(not t.verified for t in turns)
         assert all(t.attempts == 3 for t in turns)
@@ -586,9 +563,7 @@ class TestSpendGuards:
     """The estimate prints before spend, and the hard cap aborts."""
 
     def test_estimate_counts_turns_and_lanes(self) -> None:
-        bench = BenchmarkConfig.from_dict(
-            {"stt": [{"name": "deepgram-nova3", "modes": ["stream"]}]}
-        )
+        bench = BenchmarkConfig.from_dict({"stt": [{"name": "deepgram-nova3", "modes": ["stream"]}]})
         scenarios = load_scenarios(SCENARIOS_EN)
 
         estimate = estimate_spend(bench, scenarios, 8, est_answer_s=12.0)
@@ -599,12 +574,8 @@ class TestSpendGuards:
         assert "expected total" in estimate.render()
 
     def test_hard_cap_aborts(self) -> None:
-        bench = BenchmarkConfig.from_dict(
-            {"stt": [{"name": "google-chirp3", "modes": ["stream"]}]}
-        )
-        estimate = estimate_spend(
-            bench, load_scenarios(SCENARIOS_EN), 8, est_answer_s=12.0
-        )
+        bench = BenchmarkConfig.from_dict({"stt": [{"name": "google-chirp3", "modes": ["stream"]}]})
+        estimate = estimate_spend(bench, load_scenarios(SCENARIOS_EN), 8, est_answer_s=12.0)
 
         with pytest.raises(ConfigError):
             ensure_within_cap(estimate, 0.01)
@@ -627,26 +598,22 @@ class TestLiveSmoke:
         from audio_harness.sim.interview import KokoroSynth, gemini_llm
 
         load_env_file()
-        bench = BenchmarkConfig.from_dict(
-            {
-                "stt": [{"name": "deepgram-nova3", "modes": ["stream"]}],
-                "run": {
-                    "repeats": 1,
-                    "warmup": 0,
-                    "provider_concurrency": 1,
-                    "output_dir": str(tmp_path),
-                },
-            }
-        )
+        bench = BenchmarkConfig.from_dict({
+            "stt": [{"name": "deepgram-nova3", "modes": ["stream"]}],
+            "run": {
+                "repeats": 1,
+                "warmup": 0,
+                "provider_concurrency": 1,
+                "output_dir": str(tmp_path),
+            },
+        })
         sim = SimConfig(
             scenarios_path=str(_mini_spec(tmp_path)),
             personas_per_scenario=1,
             voices=("af_heart",),
         )
 
-        outcome = await run_sim(
-            bench, sim, llm=gemini_llm(sim.model), tts=KokoroSynth(("af_heart",))
-        )
+        outcome = await run_sim(bench, sim, llm=gemini_llm(sim.model), tts=KokoroSynth(("af_heart",)))
 
         assert outcome.usage.calls > 0
         score = outcome.vendor_scores["deepgram-nova3"]

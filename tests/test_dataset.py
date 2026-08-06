@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import wave
 from io import BytesIO
 from pathlib import Path
+import wave
 
 import orjson
 import polars as pl
@@ -27,16 +27,12 @@ def _wav(seconds: float, rate: int = 16000) -> bytes:
 
 def _corpus(path: Path, rows: int = 5, *, rate: int = 16000) -> Path:
     """Write a parquet corpus shaped like a Hugging Face audio dataset."""
-    pl.DataFrame(
-        {
-            "sample_id": [f"clip-{i:03d}" for i in range(rows)],
-            "audio": [
-                {"bytes": _wav(0.5 + i * 0.1, rate), "path": None} for i in range(rows)
-            ],
-            "duration_seconds": [0.5 + i * 0.1 for i in range(rows)],
-            "transcription": [f"utterance number {i}" for i in range(rows)],
-        }
-    ).write_parquet(path)
+    pl.DataFrame({
+        "sample_id": [f"clip-{i:03d}" for i in range(rows)],
+        "audio": [{"bytes": _wav(0.5 + i * 0.1, rate), "path": None} for i in range(rows)],
+        "duration_seconds": [0.5 + i * 0.1 for i in range(rows)],
+        "transcription": [f"utterance number {i}" for i in range(rows)],
+    }).write_parquet(path)
     return path
 
 
@@ -55,28 +51,21 @@ class TestParquetCorpus:
         assert all(c.pcm for c in clips), "every clip must decode to real samples"
 
     def test_resamples_to_the_harness_rate(self, tmp_path: Path) -> None:
-        config = DatasetConfig(
-            parquet=str(_corpus(tmp_path / "c.parquet", rows=2, rate=48000))
-        )
+        config = DatasetConfig(parquet=str(_corpus(tmp_path / "c.parquet", rows=2, rate=48000)))
         clips = load_clips(config)
 
         assert all(c.sample_rate == 16000 for c in clips), (
-            "every provider must receive identical audio, so no corpus keeps "
-            "its own sample rate"
+            "every provider must receive identical audio, so no corpus keeps its own sample rate"
         )
         assert clips[0].duration_s == pytest.approx(0.5, abs=0.02)
 
     def test_limit_without_seed_takes_the_head(self, tmp_path: Path) -> None:
-        config = DatasetConfig(
-            parquet=str(_corpus(tmp_path / "c.parquet", rows=10)), limit=3
-        )
+        config = DatasetConfig(parquet=str(_corpus(tmp_path / "c.parquet", rows=10)), limit=3)
         clips = load_clips(config)
 
         assert [c.clip_id for c in clips] == ["clip-000", "clip-001", "clip-002"]
 
-    def test_seeded_sample_is_reproducible_and_not_the_head(
-        self, tmp_path: Path
-    ) -> None:
+    def test_seeded_sample_is_reproducible_and_not_the_head(self, tmp_path: Path) -> None:
         path = str(_corpus(tmp_path / "c.parquet", rows=40))
         config = DatasetConfig(parquet=path, limit=6, sample_seed=1234)
 
@@ -86,20 +75,13 @@ class TestParquetCorpus:
         assert first == second, "a pinned seed must give the same subset"
         assert len(first) == 6
         assert first != [f"clip-{i:03d}" for i in range(6)], (
-            "corpora are often ordered by length or source, so sampling must "
-            "not silently return the head"
+            "corpora are often ordered by length or source, so sampling must not silently return the head"
         )
 
     def test_different_seeds_select_different_clips(self, tmp_path: Path) -> None:
         path = str(_corpus(tmp_path / "c.parquet", rows=40))
-        a = [
-            c.clip_id
-            for c in load_clips(DatasetConfig(parquet=path, limit=8, sample_seed=1))
-        ]
-        b = [
-            c.clip_id
-            for c in load_clips(DatasetConfig(parquet=path, limit=8, sample_seed=2))
-        ]
+        a = [c.clip_id for c in load_clips(DatasetConfig(parquet=path, limit=8, sample_seed=1))]
+        b = [c.clip_id for c in load_clips(DatasetConfig(parquet=path, limit=8, sample_seed=2))]
 
         assert a != b
 
@@ -113,13 +95,11 @@ class TestParquetCorpus:
 
     def test_custom_column_names(self, tmp_path: Path) -> None:
         path = tmp_path / "custom.parquet"
-        pl.DataFrame(
-            {
-                "uid": ["a", "b"],
-                "wav": [{"bytes": _wav(0.4), "path": None} for _ in range(2)],
-                "sentence": ["hello there", "goodbye now"],
-            }
-        ).write_parquet(path)
+        pl.DataFrame({
+            "uid": ["a", "b"],
+            "wav": [{"bytes": _wav(0.4), "path": None} for _ in range(2)],
+            "sentence": ["hello there", "goodbye now"],
+        }).write_parquet(path)
 
         clips = load_clips(
             DatasetConfig(
@@ -134,13 +114,11 @@ class TestParquetCorpus:
 
     def test_raw_bytes_column_is_accepted(self, tmp_path: Path) -> None:
         path = tmp_path / "raw.parquet"
-        pl.DataFrame(
-            {
-                "sample_id": ["x"],
-                "audio": [_wav(0.3)],
-                "transcription": ["raw bytes work"],
-            }
-        ).write_parquet(path)
+        pl.DataFrame({
+            "sample_id": ["x"],
+            "audio": [_wav(0.3)],
+            "transcription": ["raw bytes work"],
+        }).write_parquet(path)
 
         clips = load_clips(DatasetConfig(parquet=str(path)))
         assert clips[0].reference == "raw bytes work"
@@ -159,24 +137,18 @@ class TestCorpusErrors:
 
         with pytest.raises(DatasetError, match="does_not_exist") as excinfo:
             load_clips(config)
-        assert "transcription" in str(excinfo.value), (
-            "the error should list the columns that do exist"
-        )
+        assert "transcription" in str(excinfo.value), "the error should list the columns that do exist"
 
-    def test_undecodable_audio_is_rejected_not_counted_as_provider_failure(
-        self, tmp_path: Path
-    ) -> None:
+    def test_undecodable_audio_is_rejected_not_counted_as_provider_failure(self, tmp_path: Path) -> None:
         path = tmp_path / "bad.parquet"
-        pl.DataFrame(
-            {
-                "sample_id": ["ok", "bad"],
-                "audio": [
-                    {"bytes": _wav(0.4), "path": None},
-                    {"bytes": b"not audio at all", "path": None},
-                ],
-                "transcription": ["fine", "broken"],
-            }
-        ).write_parquet(path)
+        pl.DataFrame({
+            "sample_id": ["ok", "bad"],
+            "audio": [
+                {"bytes": _wav(0.4), "path": None},
+                {"bytes": b"not audio at all", "path": None},
+            ],
+            "transcription": ["fine", "broken"],
+        }).write_parquet(path)
 
         with pytest.raises(DatasetError, match=r"failed to.*decode"):
             load_clips(DatasetConfig(parquet=str(path)))
@@ -203,9 +175,7 @@ class TestManifest:
         (tmp_path / "clips").mkdir()
         (tmp_path / "clips" / "a.wav").write_bytes(_wav(0.6))
         manifest = tmp_path / "m.jsonl"
-        manifest.write_bytes(
-            orjson.dumps({"id": "a", "audio": "clips/a.wav", "text": "hello"}) + b"\n"
-        )
+        manifest.write_bytes(orjson.dumps({"id": "a", "audio": "clips/a.wav", "text": "hello"}) + b"\n")
 
         clips = load_clips(DatasetConfig(manifest=str(manifest)))
         assert len(clips) == 1

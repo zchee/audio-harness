@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import polars as pl
 
+
 if TYPE_CHECKING:
     from matplotlib.axes import Axes
 
@@ -69,9 +70,7 @@ class _Point:
     error_pct: float
 
 
-def _points(
-    frame: pl.DataFrame, *, mode: str, language: str, metric: str
-) -> list[_Point]:
+def _points(frame: pl.DataFrame, *, mode: str, language: str, metric: str) -> list[_Point]:
     """Extract plottable providers for one mode and language.
 
     Rows missing either coordinate are dropped rather than plotted at zero,
@@ -157,8 +156,8 @@ def plot_pareto(
     import matplotlib
 
     matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
     from matplotlib.lines import Line2D
+    import matplotlib.pyplot as plt
 
     points = _points(frame, mode=mode, language=language, metric=metric)
     if len(points) < 2:
@@ -198,10 +197,7 @@ def plot_pareto(
     ax.scatter(xs, ys, s=55, color=DOT, edgecolors=SURFACE, linewidths=1.2, zorder=5)
 
     leader = {"arrowstyle": "-", "color": MUTED, "alpha": 0.6, "lw": 0.8}
-    texts = [
-        ax.text(p.latency_ms, p.error_pct, p.name, fontsize=7.5, color=INK_2, zorder=6)
-        for p in points
-    ]
+    texts = [ax.text(p.latency_ms, p.error_pct, p.name, fontsize=7.5, color=INK_2, zorder=6) for p in points]
     try:
         from adjustText import adjust_text
 
@@ -280,9 +276,9 @@ def plot_latency_range(
     import matplotlib
 
     matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
     from matplotlib.collections import LineCollection
     from matplotlib.colors import LinearSegmentedColormap
+    import matplotlib.pyplot as plt
 
     points = _points(frame, mode=mode, language=language, metric=metric)
     if not points:
@@ -458,9 +454,7 @@ def plot_stability(
     return output
 
 
-def plot_language_grid(
-    frame: pl.DataFrame, output: Path, *, mode: str = "stream"
-) -> Path | None:
+def plot_language_grid(frame: pl.DataFrame, output: Path, *, mode: str = "stream") -> Path | None:
     """Render error rate per provider grouped across languages.
 
     The chart for a multilingual run: it shows whether a provider is uniformly
@@ -482,19 +476,13 @@ def plot_language_grid(
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    rows = [
-        row
-        for row in frame.iter_rows(named=True)
-        if row.get("mode") == mode and row.get("error_rate") is not None
-    ]
+    rows = [row for row in frame.iter_rows(named=True) if row.get("mode") == mode and row.get("error_rate") is not None]
     languages = sorted({row["language"] for row in rows})
     providers = sorted({row["provider"] for row in rows})
     if len(languages) < 2 or not providers:
         return None
 
-    rates: dict[tuple[str, str], float] = {
-        (row["provider"], row["language"]): row["error_rate"] * 100 for row in rows
-    }
+    rates: dict[tuple[str, str], float] = {(row["provider"], row["language"]): row["error_rate"] * 100 for row in rows}
     metric_by_language = {row["language"]: row.get("metric", "WER") for row in rows}
 
     # One hue per provider, stepped around the wheel from the base dot color.
@@ -507,10 +495,7 @@ def plot_language_grid(
 
     width = 0.8 / len(providers)
     for index, provider in enumerate(providers):
-        offsets = [
-            lang_index + index * width - 0.4 + width / 2
-            for lang_index in range(len(languages))
-        ]
+        offsets = [lang_index + index * width - 0.4 + width / 2 for lang_index in range(len(languages))]
         values = [rates.get((provider, language)) for language in languages]
         ax.bar(
             [o for o, v in zip(offsets, values, strict=True) if v is not None],
@@ -523,10 +508,7 @@ def plot_language_grid(
             zorder=3,
         )
 
-    labels = [
-        f"{language}\n({metric_by_language.get(language, 'WER')})"
-        for language in languages
-    ]
+    labels = [f"{language}\n({metric_by_language.get(language, 'WER')})" for language in languages]
     ax.set_xticks(range(len(languages)))
     ax.set_xticklabels(labels, fontsize=9, color=INK_2)
     _chrome(
@@ -614,17 +596,12 @@ def _overview_matrix(
         span = high - low
         return [0.0 if v is None or span <= 0 else (v - low) / span for v in values]
 
-    columns: list[list[float | None]] = [
-        [value_of(p, language) for p in providers] for language in languages
-    ]
+    columns: list[list[float | None]] = [[value_of(p, language) for p in providers] for language in languages]
     if per_language_shading:
         column_shades = [shades(column) for column in columns]
     else:
         flat = shades([v for column in columns for v in column])
-        column_shades = [
-            flat[i * len(providers) : (i + 1) * len(providers)]
-            for i in range(len(languages))
-        ]
+        column_shades = [flat[i * len(providers) : (i + 1) * len(providers)] for i in range(len(languages))]
 
     matrix: list[list[_Cell]] = []
     for row_index, provider in enumerate(providers):
@@ -633,9 +610,7 @@ def _overview_matrix(
             value = columns[col_index][row_index]
             row = lookup.get((provider, language))
             failed = bool(row and row.get("failures"))
-            display = (
-                "—" if value is None else format(value, fmt) + ("*" if failed else "")
-            )
+            display = "—" if value is None else format(value, fmt) + ("*" if failed else "")
             cells.append(
                 _Cell(
                     value=value,
@@ -667,9 +642,7 @@ def _draw_overview_panel(
             else:
                 face = _mix(SURFACE, hue, 0.10 + 0.78 * cell.shade)
                 text_color = SURFACE if cell.shade > 0.62 else INK
-            ax.add_patch(
-                Rectangle((x, y), 0.94, 0.88, facecolor=face, edgecolor=SURFACE, lw=1.5)
-            )
+            ax.add_patch(Rectangle((x, y), 0.94, 0.88, facecolor=face, edgecolor=SURFACE, lw=1.5))
             ax.text(
                 x + 0.47,
                 y + 0.44,
@@ -695,9 +668,7 @@ def _draw_overview_panel(
     ax.set_title(title, fontsize=11, color=INK, pad=10, loc="left")
 
 
-def plot_overview(
-    frame: pl.DataFrame, output: Path, *, mode: str = "stream"
-) -> Path | None:
+def plot_overview(frame: pl.DataFrame, output: Path, *, mode: str = "stream") -> Path | None:
     """Render the whole multilingual run as one figure.
 
     Aligned matrices share the provider rows: error rate on the left,
@@ -720,11 +691,7 @@ def plot_overview(
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    rows = [
-        row
-        for row in frame.iter_rows(named=True)
-        if row.get("mode") == mode and row.get("error_rate") is not None
-    ]
+    rows = [row for row in frame.iter_rows(named=True) if row.get("mode") == mode and row.get("error_rate") is not None]
     languages = sorted({str(row["language"]) for row in rows})
     if len(languages) < 2:
         return None
@@ -751,9 +718,7 @@ def plot_overview(
             ranks.setdefault(str(row["provider"]), []).append(position)
     providers = sorted(ranks, key=lambda p: sum(ranks[p]) / len(ranks[p]))
 
-    metric_by_language = {
-        str(row["language"]): str(row.get("metric", "WER")) for row in rows
-    }
+    metric_by_language = {str(row["language"]): str(row.get("metric", "WER")) for row in rows}
     accuracy = _overview_matrix(
         rows,
         providers,
@@ -823,8 +788,7 @@ def plot_overview(
         )
 
     caption = (
-        "rows ordered by mean within-language accuracy rank · "
-        "darker = worse · * = lane had failures · — = not run"
+        "rows ordered by mean within-language accuracy rank · darker = worse · * = lane had failures · — = not run"
     )
     if has_entities:
         caption += " · entity panel averages the corpus' annotated classes"
@@ -844,9 +808,7 @@ def plot_overview(
     return output
 
 
-def plot_tts_latency(
-    frame: pl.DataFrame, output: Path, *, mode_prefix: str = "stream"
-) -> Path | None:
+def plot_tts_latency(frame: pl.DataFrame, output: Path, *, mode_prefix: str = "stream") -> Path | None:
     """Render the TTS latency profile: TTFB→TTFA rows plus chunk stutter.
 
     Two aligned panels share the provider rows. The left panel draws each
@@ -868,15 +830,14 @@ def plot_tts_latency(
     import matplotlib
 
     matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
     from matplotlib.collections import LineCollection
     from matplotlib.colors import LinearSegmentedColormap
+    import matplotlib.pyplot as plt
 
     rows = [
         row
         for row in frame.iter_rows(named=True)
-        if str(row.get("mode", "")).startswith(mode_prefix)
-        and row.get("ttfb_p50_s") is not None
+        if str(row.get("mode", "")).startswith(mode_prefix) and row.get("ttfb_p50_s") is not None
     ]
     if not rows:
         return None
@@ -884,11 +845,7 @@ def plot_tts_latency(
 
     def label(row: dict[str, object]) -> str:
         mode = str(row["mode"])
-        return (
-            str(row["provider"])
-            if mode == mode_prefix
-            else f"{row['provider']} ({mode})"
-        )
+        return str(row["provider"]) if mode == mode_prefix else f"{row['provider']} ({mode})"
 
     gradient = LinearSegmentedColormap.from_list(
         "ttfa", [_mix(RANGE_P50, SURFACE, 0.55), _mix(RANGE_P95, SURFACE, 0.55)]
@@ -1035,9 +992,7 @@ _NO_SPEECH_CONDITIONS = {"silence", "noise", "no_speech"}
 """Conditions whose clips contain no speech, where a phantom final can exist."""
 
 
-def plot_hallucination(
-    summaries: list[HallucinationSummary], output: Path, *, mode: str = "stream"
-) -> Path | None:
+def plot_hallucination(summaries: list[HallucinationSummary], output: Path, *, mode: str = "stream") -> Path | None:
     """Render fabrication and phantom-final rates per provider and condition.
 
     Two stacked bar panels in the language-grid style: the top panel shows
@@ -1059,14 +1014,10 @@ def plot_hallucination(
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    rows = [
-        s
-        for s in summaries
-        if getattr(s, "mode", None) == mode and getattr(s, "scored", 0) > 0
-    ]
-    conditions = [
-        c for c in _CONDITION_ORDER if any(s.condition == c for s in rows)
-    ] + sorted({s.condition for s in rows} - set(_CONDITION_ORDER) - {"speech"})
+    rows = [s for s in summaries if getattr(s, "mode", None) == mode and getattr(s, "scored", 0) > 0]
+    conditions = [c for c in _CONDITION_ORDER if any(s.condition == c for s in rows)] + sorted(
+        {s.condition for s in rows} - set(_CONDITION_ORDER) - {"speech"}
+    )
     providers = sorted({s.provider for s in rows})
     if not conditions or not providers:
         return None
@@ -1075,9 +1026,9 @@ def plot_hallucination(
     phantom: dict[tuple[str, str], float] = {}
     for s in rows:
         if s.fabrication_rate is not None:
-            fabrication[(s.provider, s.condition)] = s.fabrication_rate * 100
+            fabrication[s.provider, s.condition] = s.fabrication_rate * 100
         if s.condition in _NO_SPEECH_CONDITIONS and s.phantom_final_rate is not None:
-            phantom[(s.provider, s.condition)] = s.phantom_final_rate * 100
+            phantom[s.provider, s.condition] = s.phantom_final_rate * 100
 
     phantom_conditions = [c for c in conditions if c in _NO_SPEECH_CONDITIONS]
     cmap = plt.get_cmap("tab10")
@@ -1103,10 +1054,7 @@ def plot_hallucination(
         ax.set_facecolor(SURFACE)
         width = 0.8 / len(providers)
         for index, provider in enumerate(providers):
-            offsets = [
-                cond_index + index * width - 0.4 + width / 2
-                for cond_index in range(len(panel_conditions))
-            ]
+            offsets = [cond_index + index * width - 0.4 + width / 2 for cond_index in range(len(panel_conditions))]
             values = [rates.get((provider, c)) for c in panel_conditions]
             ax.bar(
                 [o for o, v in zip(offsets, values, strict=True) if v is not None],
@@ -1156,9 +1104,7 @@ def plot_hallucination(
     return output
 
 
-def render_all(
-    frame: pl.DataFrame, output_dir: Path, *, metric: str = "finalize"
-) -> list[Path]:
+def render_all(frame: pl.DataFrame, output_dir: Path, *, metric: str = "finalize") -> list[Path]:
     """Render every chart the summary frame supports, one pair per language.
 
     Args:
@@ -1175,9 +1121,7 @@ def render_all(
     written: list[Path] = []
     for language in sorted(set(frame["language"].to_list())):
         rows = frame.filter(pl.col("language") == language)
-        metric_label = (
-            rows["metric"].to_list()[0] if "metric" in rows.columns else "WER"
-        )
+        metric_label = rows["metric"].to_list()[0] if "metric" in rows.columns else "WER"
         slug = language.lower().replace("-", "_")
         pareto = plot_pareto(
             frame,
@@ -1196,9 +1140,7 @@ def render_all(
         )
         if latency is not None:
             written.append(latency)
-        stability = plot_stability(
-            frame, output_dir / f"stability_{slug}.png", language=language
-        )
+        stability = plot_stability(frame, output_dir / f"stability_{slug}.png", language=language)
         if stability is not None:
             written.append(stability)
 

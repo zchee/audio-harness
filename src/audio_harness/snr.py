@@ -30,15 +30,16 @@ schema change needed.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from itertools import pairwise
+import re
 
 import numpy as np
 import soxr
 
 from .metrics import ErrorCounts, percentile, score_pair
 from .types import SttResult
+
 
 SNR_LEVELS = (20.0, 10.0, 5.0, 0.0, -5.0)
 """Pre-registered matrix levels; the plan budgets exactly these five."""
@@ -88,32 +89,24 @@ def synthesize_snr_source(source, *, sample_rate: int = 16000):
 
     kind = source.synthetic
     if kind not in SNR_KINDS:
-        raise DatasetError(
-            f"unknown SNR source kind {kind!r}; expected one of {', '.join(SNR_KINDS)}"
-        )
+        raise DatasetError(f"unknown SNR source kind {kind!r}; expected one of {', '.join(SNR_KINDS)}")
 
     bases = synthetic._base_clips(source, sample_rate=sample_rate)
     if kind == "telephony":
         return [_telephony_clip(base, synthetic) for base in bases]
 
-    seed = (
-        source.sample_seed if source.sample_seed is not None else synthetic.DEFAULT_SEED
-    )
+    seed = source.sample_seed if source.sample_seed is not None else synthetic.DEFAULT_SEED
     files = synthetic._noise_files(source.noise_dir)
     clips = []
     for index, base in enumerate(bases):
         rng = np.random.default_rng([seed, index])
         path = files[int(rng.integers(len(files)))]
         speech = synthetic._pcm_to_float(base.pcm)
-        noise = synthetic._segment(
-            synthetic._load_noise(path, base.sample_rate), len(speech), rng
-        )
+        noise = synthetic._segment(synthetic._load_noise(path, base.sample_rate), len(speech), rng)
         if float(np.sqrt(np.mean(noise**2))) <= 0.0:
             raise DatasetError(f"noise file decodes to silence: {path}")
         for level in SNR_LEVELS:
-            mixed = synthetic.mix_at_snr(
-                speech, noise, snr_db=level, sample_rate=base.sample_rate
-            )
+            mixed = synthetic.mix_at_snr(speech, noise, snr_db=level, sample_rate=base.sample_rate)
             clips.append(
                 synthetic._to_clip(
                     mixed,
@@ -185,11 +178,7 @@ class SnrSummary:
         visibly better than one already failing at +10. Needs at least two
         levels; a single point has no curve.
         """
-        points = sorted(
-            (level, rate)
-            for level in self.levels
-            if (rate := self.rate(level)) is not None
-        )
+        points = sorted((level, rate) for level in self.levels if (rate := self.rate(level)) is not None)
         if len(points) < 2:
             return None
         area = 0.0
@@ -241,9 +230,7 @@ def summarize_snr(results: list[SttResult], language: str) -> list[SnrSummary]:
         key = (result.provider, str(result.mode), clip_language)
         summary = summaries.setdefault(
             key,
-            SnrSummary(
-                provider=result.provider, mode=str(result.mode), language=clip_language
-            ),
+            SnrSummary(provider=result.provider, mode=str(result.mode), language=clip_language),
         )
 
         reference = result.raw.get("reference")
@@ -255,9 +242,7 @@ def summarize_snr(results: list[SttResult], language: str) -> list[SnrSummary]:
 
         if telephony:
             if scored is not None:
-                summary.telephony = (
-                    scored if summary.telephony is None else summary.telephony + scored
-                )
+                summary.telephony = scored if summary.telephony is None else summary.telephony + scored
             continue
 
         assert level is not None
@@ -299,27 +284,21 @@ def render_snr_markdown(summaries: list[SnrSummary]) -> str:
             + [
                 pct(summary.wer_auc),
                 "—" if degradation is None else f"{degradation:+.3f}s",
-                (
-                    "—"
-                    if telephony is None or telephony.reference_length == 0
-                    else pct(telephony.rate)
-                ),
+                ("—" if telephony is None or telephony.reference_length == 0 else pct(telephony.rate)),
                 str(sum(summary.failures.values())),
             ]
         )
         lines.append("| " + " | ".join(cells) + " |")
-    lines.append("")
-    lines.append(
+    lines.extend((
+        "",
         "_WER AUC: trapezoidal mean WER across the SNR range (lower is "
         "better). Fin Δ: finalize-p50 shift from cleanest to noisiest level. "
-        "8 kHz: telephony resample round-trip._"
-    )
+        "8 kHz: telephony resample round-trip._",
+    ))
     return "\n".join(lines)
 
 
-def estimated_matrix_cost(
-    *, clips: int, mean_clip_s: float, usd_per_hour: float
-) -> float:
+def estimated_matrix_cost(*, clips: int, mean_clip_s: float, usd_per_hour: float) -> float:
     """Estimated spend for one vendor lane over the full matrix.
 
     Kept as code, not a comment, so the config header's number can be

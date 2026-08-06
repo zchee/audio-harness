@@ -18,6 +18,7 @@ from pathlib import Path
 from audio_harness.entity_prompts import CATEGORY, generate_locale
 from audio_harness.prompt_suite import LOCALES, flatten_to_prompts_txt, write_jsonl
 
+
 DEFAULT_SEED = 20260806
 DEFAULT_COUNT_PER_CLASS = 6
 
@@ -47,9 +48,7 @@ def main() -> None:
 
     total = 0
     for subtag, language in LOCALES.items():
-        prompts = generate_locale(
-            subtag, count_per_class=args.count_per_class, seed=args.seed
-        )
+        prompts = generate_locale(subtag, count_per_class=args.count_per_class, seed=args.seed)
         out_dir = args.out_dir / f"prompts-{subtag}"
         jsonl_path = write_jsonl(out_dir / f"{CATEGORY}.jsonl", prompts)
         flatten_to_prompts_txt(prompts, out_dir / f"{CATEGORY}.txt")

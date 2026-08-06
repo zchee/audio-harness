@@ -44,17 +44,18 @@ reason: per-language letter-name pronunciation is out of scope here.
 
 from __future__ import annotations
 
-import random
 from collections.abc import Callable
 from datetime import date, timedelta
+import random
 
-import num2words
 from babel.dates import format_date, get_month_names
 from babel.numbers import format_currency
 from faker import Faker
+import num2words
 
 from .entities import ENTITY_CLASSES
 from .prompt_suite import LOCALES, SuitePrompt
+
 
 CATEGORY = "entities"
 LICENSE = "generated"
@@ -117,7 +118,7 @@ TEMPLATES: dict[str, dict[str, str]] = {
         "pl": "Proszę potwierdzić ilość: {}.",
         "pt": "Por favor confirme a quantidade: {}.",
         "ru": "Пожалуйста, подтвердите количество: {}.",
-        "tr": "Lütfen miktarı onaylayın: {}.",  # noqa: RUF001 - Turkish dotless i
+        "tr": "Lütfen miktarı onaylayın: {}.",  # ruff: ignore[ambiguous-unicode-character-string] - Turkish dotless i
         "vi": "Vui lòng xác nhận số lượng: {}.",
     },
     "date": {
@@ -133,7 +134,7 @@ TEMPLATES: dict[str, dict[str, str]] = {
         "pl": "Spotkanie jest zaplanowane na {}.",
         "pt": "A consulta está marcada para {}.",
         "ru": "Встреча назначена на {}.",
-        "tr": "Randevu {} tarihine planlandı.",  # noqa: RUF001 - Turkish dotless i
+        "tr": "Randevu {} tarihine planlandı.",  # ruff: ignore[ambiguous-unicode-character-string] - Turkish dotless i
         "vi": "Cuộc hẹn được lên lịch vào {}.",
     },
     "currency": {
@@ -181,7 +182,7 @@ TEMPLATES: dict[str, dict[str, str]] = {
         "pl": "Proszę zapytać o {} po przyjeździe.",
         "pt": "Por favor, pergunte por {} quando chegar.",
         "ru": "Пожалуйста, спросите {} по прибытии.",
-        "tr": "Vardığınızda lütfen {} kişisini sorun.",  # noqa: RUF001 - Turkish dotless i
+        "tr": "Vardığınızda lütfen {} kişisini sorun.",  # ruff: ignore[ambiguous-unicode-character-string] - Turkish dotless i
         "vi": "Vui lòng hỏi {} khi bạn đến.",
     },
 }
@@ -218,17 +219,9 @@ def spoken_currency(major: int, minor: int, lang: str) -> str:
     if lang == "tr":
         return str(num2words.num2words(major, lang="tr", to="currency"))
     if lang in WHOLE_UNIT_CURRENCY:  # ja, ko
-        return str(
-            num2words.num2words(
-                major, lang=lang, to="currency", currency=CURRENCY_CODE[lang]
-            )
-        )
+        return str(num2words.num2words(major, lang=lang, to="currency", currency=CURRENCY_CODE[lang]))
     value = major + minor / 100
-    return str(
-        num2words.num2words(
-            value, lang=lang, to="currency", currency=CURRENCY_CODE[lang]
-        )
-    )
+    return str(num2words.num2words(value, lang=lang, to="currency", currency=CURRENCY_CODE[lang]))
 
 
 def spoken_date(day: date, lang: str) -> str:
@@ -294,9 +287,7 @@ _BUILDERS: dict[str, Callable[[random.Random, str], tuple[str, str]]] = {
 }
 
 
-def generate_locale(
-    subtag: str, *, count_per_class: int, seed: int
-) -> list[SuitePrompt]:
+def generate_locale(subtag: str, *, count_per_class: int, seed: int) -> list[SuitePrompt]:
     """Generate every entity-class hard case for one locale.
 
     Args:

@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Cross-vendor STT/TTS benchmark harness: accuracy, streaming latency, and cost"
 readme = "README.md"
 authors = [
-    { name = "Koichi Shiraishi", email = "zchee.io@gmail.com" }
+    { name = "Koichi Shiraishi", email = "zchee.io@gmail.com" },
 ]
 requires-python = ">=3.14"
 dependencies = [
@@ -84,11 +84,42 @@ build-backend = "hatchling.build"
 allow-direct-references = true
 
 [tool.ruff]
-line-length = 88
+src = ["src"]
 target-version = "py314"
+line-length = 120
+preview = true
+unsafe-fixes = true
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "N", "UP", "B", "SIM", "RUF"]
+select = [
+    "E", "W", "F", "I", "UP", "B", "C4", "SIM", "RUF", "D", "PIE", "PERF",
+    "PT", "T20", "TID", "PTH", "TRY", "PYI", "ANN", "ARG", "ASYNC", "SLF",
+    "RET", "FURB", "G", "LOG", "N", "unnecessary-paren-on-raise-exception", "SLOT", "blanket-type-ignore", "blanket-noqa", "implicit-namespace-package",
+]
+ignore = [
+    # Provider SDK callbacks and API shims use externally-dictated names.
+    "invalid-function-name", "invalid-first-argument-name-for-method",
+    # Formatter-conflict set: ruff format owns whitespace and line length.
+    "tab-indentation", "indentation-with-invalid-multiple", "indentation-with-invalid-multiple-comment", "over-indented", "docstring-tab-indentation", "triple-single-quotes", "line-too-long",
+    # Typer/FastAPI-style call-in-default is intentional; terse exceptions
+    # and Any-typed escape hatches are accepted; broad pytest.raises OK.
+    "function-call-in-default-argument", "raise-vanilla-args", "any-type", "pytest-raises-too-broad",
+    # Complexity thresholds are judged in review, not by the linter.
+    "too-many-return-statements", "too-many-branches", "too-many-arguments", "too-many-locals", "too-many-statements", "complex-structure",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ANN", "ARG", "D", "private-member-access", "implicit-namespace-package"]
+"tools/**" = ["implicit-namespace-package", "print", "D", "ANN"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.isort]
+force-sort-within-sections = true
+lines-after-imports = 2
+split-on-trailing-comma = true
+combine-as-imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -96,3 +127,6 @@ testpaths = ["tests"]
 
 [tool.ty.environment]
 python-version = "3.14"
+
+[tool.ty.terminal]
+error-on-warning = true

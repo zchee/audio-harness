@@ -25,6 +25,7 @@ import orjson
 from audio_harness.autotag import annotate_record
 from audio_harness.entities import parse_annotated
 
+
 DEFAULT_MASSIVE_DIR = Path("data/hf/speech-massive")
 
 
@@ -46,12 +47,10 @@ def load_gold(massive_dir: Path) -> dict[tuple[str, str], str]:
         files = sorted(locale_dir.glob("*.parquet"))
         if not files:
             continue
-        frame = pl.concat(
-            [pl.read_parquet(file, columns=["id", "annot_utt"]) for file in files]
-        )
+        frame = pl.concat([pl.read_parquet(file, columns=["id", "annot_utt"]) for file in files])
         for clip_id, annot_utt in frame.iter_rows():
             if annot_utt:
-                gold[(locale_dir.name, str(clip_id))] = annot_utt
+                gold[locale_dir.name, str(clip_id)] = annot_utt
     return gold
 
 
@@ -91,21 +90,15 @@ def main() -> None:
         default=DEFAULT_MASSIVE_DIR,
         help="Speech-MASSIVE corpus root for gold slot annotations",
     )
-    parser.add_argument(
-        "--in-place", action="store_true", help="overwrite inputs instead of copying"
-    )
-    parser.add_argument(
-        "--force", action="store_true", help="re-annotate already-annotated records"
-    )
+    parser.add_argument("--in-place", action="store_true", help="overwrite inputs instead of copying")
+    parser.add_argument("--force", action="store_true", help="re-annotate already-annotated records")
     args = parser.parse_args()
 
     gold = load_gold(args.massive_dir)
     print(f"gold annotations loaded: {len(gold)}")
 
     for path in args.results:
-        target, counts = annotate_file(
-            path, gold, in_place=args.in_place, force=args.force
-        )
+        target, counts = annotate_file(path, gold, in_place=args.in_place, force=args.force)
         total = sum(counts.values())
         print(f"{path} -> {target}: {total} tagged spans")
         for key in sorted(counts):

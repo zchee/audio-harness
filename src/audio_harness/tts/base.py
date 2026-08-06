@@ -10,22 +10,17 @@ from __future__ import annotations
 
 import abc
 import asyncio
-import re
-import time
 from collections.abc import AsyncIterator
 from itertools import pairwise
+import re
+import time
 from typing import Any, ClassVar
 
 import httpx
 
-from ..audio import (
-    BYTES_PER_SAMPLE,
-    detect_speech_onset_s,
-    pcm16_to_float,
-    wav_data_offset,
-)
-from ..metrics import percentile
-from ..types import Mode, TtsPrompt, TtsResult
+from audio_harness.audio import BYTES_PER_SAMPLE, detect_speech_onset_s, pcm16_to_float, wav_data_offset
+from audio_harness.metrics import percentile
+from audio_harness.types import Mode, TtsPrompt, TtsResult
 
 
 class TtsProvider(abc.ABC):
@@ -115,9 +110,7 @@ class TtsProvider(abc.ABC):
         """
         raise NotImplementedError(f"{self.key} has no streaming endpoint")
 
-    async def synthesize_incremental(
-        self, prompt: TtsPrompt, *, token_rate: float
-    ) -> TtsResult:
+    async def synthesize_incremental(self, prompt: TtsPrompt, *, token_rate: float) -> TtsResult:
         """Synthesize while the text itself arrives at LLM-token cadence.
 
         A voice agent never holds a finished sentence: text trickles out of a
@@ -233,9 +226,7 @@ def _audible_onset_latency(result: TtsResult, timeline: ChunkTimeline) -> float 
         return None
 
     header = wav_data_offset(payload)
-    onset_s = detect_speech_onset_s(
-        pcm16_to_float(payload[header:]), result.sample_rate
-    )
+    onset_s = detect_speech_onset_s(pcm16_to_float(payload[header:]), result.sample_rate)
     if onset_s is None:
         return None
 

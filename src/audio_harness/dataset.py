@@ -70,9 +70,7 @@ def load_source(source: SourceConfig, *, sample_rate: int = 16000) -> list[Audio
 
         return synthesize_source(source, sample_rate=sample_rate)
     if source.manifest and source.parquet:
-        raise DatasetError(
-            "set only one of dataset.manifest or dataset.parquet, not both"
-        )
+        raise DatasetError("set only one of dataset.manifest or dataset.parquet, not both")
     if source.parquet:
         return load_clips_from_parquet(source, sample_rate=sample_rate)
     if source.manifest:
@@ -91,9 +89,7 @@ def load_source(source: SourceConfig, *, sample_rate: int = 16000) -> list[Audio
     return load_clips_from_manifest(source, sample_rate=sample_rate)
 
 
-def load_clips_from_parquet(
-    config: SourceConfig, *, sample_rate: int = 16000
-) -> list[AudioClip]:
+def load_clips_from_parquet(config: SourceConfig, *, sample_rate: int = 16000) -> list[AudioClip]:
     """Load clips from a parquet corpus with embedded audio.
 
     Hugging Face audio datasets ship this way: one row per clip, with the audio
@@ -135,10 +131,7 @@ def load_clips_from_parquet(
         required.add(config.words_column)
     missing = sorted(required - available)
     if missing:
-        raise DatasetError(
-            f"{path}: missing column(s) {', '.join(missing)}; "
-            f"available: {', '.join(sorted(available))}"
-        )
+        raise DatasetError(f"{path}: missing column(s) {', '.join(missing)}; available: {', '.join(sorted(available))}")
 
     columns = [
         pl.col(config.id_column).alias("id"),
@@ -191,9 +184,7 @@ def load_clips_from_parquet(
     return clips
 
 
-def _select_rows(
-    frame: pl.LazyFrame, *, limit: int | None, seed: int | None
-) -> pl.DataFrame:
+def _select_rows(frame: pl.LazyFrame, *, limit: int | None, seed: int | None) -> pl.DataFrame:
     """Materialize only the rows a run will actually use.
 
     Audio is the overwhelming majority of a speech corpus by bytes, so
@@ -218,24 +209,15 @@ def _select_rows(
     if limit >= total:
         return frame.collect()
 
-    chosen = (
-        pl.int_range(total, eager=True).sample(n=limit, seed=seed, shuffle=False).sort()
-    )
-    return (
-        frame.with_row_index("__row")
-        .filter(pl.col("__row").is_in(chosen))
-        .drop("__row")
-        .collect()
-    )
+    chosen = pl.int_range(total, eager=True).sample(n=limit, seed=seed, shuffle=False).sort()
+    return frame.with_row_index("__row").filter(pl.col("__row").is_in(chosen)).drop("__row").collect()
 
 
 def _join_words(value: object) -> str | None:
     """Join word-timing structs into a plain reference transcript."""
     if not isinstance(value, list):
         return None
-    words = [
-        str(item.get("word", "")).strip() for item in value if isinstance(item, dict)
-    ]
+    words = [str(item.get("word", "")).strip() for item in value if isinstance(item, dict)]
     text = " ".join(word for word in words if word)
     return text or None
 
@@ -251,11 +233,7 @@ def _apply_silence_spans(clip: AudioClip, value: object) -> AudioClip:
     """
     if not isinstance(value, list) or not value:
         return clip
-    spans = sorted(
-        (float(item["start"]), float(item["end"]))
-        for item in value
-        if isinstance(item, dict)
-    )
+    spans = sorted((float(item["start"]), float(item["end"])) for item in value if isinstance(item, dict))
     if not spans:
         return clip
     return replace(clip, pauses=tuple(spans[:-1]), speech_end_s=spans[-1][0])
@@ -279,9 +257,7 @@ def _audio_bytes(value: object, clip_id: str) -> bytes:
     raise ValueError(f"clip {clip_id}: unsupported audio cell {type(value).__name__}")
 
 
-def load_clips_from_manifest(
-    config: SourceConfig, *, sample_rate: int = 16000
-) -> list[AudioClip]:
+def load_clips_from_manifest(config: SourceConfig, *, sample_rate: int = 16000) -> list[AudioClip]:
     """Load audio clips listed in a JSONL manifest.
 
     Each line is a JSON object with:
@@ -311,9 +287,7 @@ def load_clips_from_manifest(
         raise DatasetError(f"manifest not found: {manifest}")
 
     clips: list[AudioClip] = []
-    for line_number, line in enumerate(
-        manifest.read_text(encoding="utf-8").splitlines(), start=1
-    ):
+    for line_number, line in enumerate(manifest.read_text(encoding="utf-8").splitlines(), start=1):
         if not line.strip():
             continue
         try:
@@ -367,9 +341,7 @@ def load_prompts(config: DatasetConfig) -> list[TtsPrompt]:
         raise DatasetError(f"prompt file not found: {path}")
 
     prompts = [
-        TtsPrompt(
-            prompt_id=f"p{index:04d}", text=line.strip(), language=config.language
-        )
+        TtsPrompt(prompt_id=f"p{index:04d}", text=line.strip(), language=config.language)
         for index, line in enumerate(path.read_text(encoding="utf-8").splitlines())
         if line.strip()
     ]

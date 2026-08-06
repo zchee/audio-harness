@@ -8,17 +8,18 @@ WebSocket adapters do not pay for — keep that in mind when ranking latency.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 import os
 import time
-from collections.abc import AsyncIterator
 
 from google.api_core.client_options import ClientOptions
 from google.cloud.speech_v2 import SpeechAsyncClient
 from google.cloud.speech_v2.types import cloud_speech
 
-from ..audio import pace_chunks
-from ..config import require_env
-from ..types import AudioClip, EventKind, Mode, SttResult
+from audio_harness.audio import pace_chunks
+from audio_harness.config import require_env
+from audio_harness.types import AudioClip, EventKind, Mode, SttResult
+
 from .base import StreamTimeline, SttProvider, register
 
 
@@ -56,10 +57,7 @@ class GoogleChirp3(SttProvider):
         return require_env("GOOGLE_CLOUD_PROJECT", self.key)
 
     def _location(self) -> str:
-        return str(
-            self.options.get("location")
-            or os.environ.get("GOOGLE_CLOUD_LOCATION", "us")
-        )
+        return str(self.options.get("location") or os.environ.get("GOOGLE_CLOUD_LOCATION", "us"))
 
     def _recognizer(self) -> str:
         return f"projects/{self._project()}/locations/{self._location()}/recognizers/_"
@@ -68,11 +66,7 @@ class GoogleChirp3(SttProvider):
         """Return a client bound to the configured region's endpoint."""
         if self._client is None:
             location = self._location()
-            options = (
-                None
-                if location == "global"
-                else ClientOptions(api_endpoint=f"{location}-speech.googleapis.com")
-            )
+            options = None if location == "global" else ClientOptions(api_endpoint=f"{location}-speech.googleapis.com")
             self._client = SpeechAsyncClient(client_options=options)
         return self._client
 
@@ -102,15 +96,11 @@ class GoogleChirp3(SttProvider):
         )
         result.total_s = time.perf_counter() - started
         result.text = " ".join(
-            item.alternatives[0].transcript
-            for item in response.results
-            if item.alternatives
+            item.alternatives[0].transcript for item in response.results if item.alternatives
         ).strip()
         return result
 
-    async def transcribe_stream(
-        self, clip: AudioClip, *, chunk_ms: int, realtime: bool
-    ) -> SttResult:
+    async def transcribe_stream(self, clip: AudioClip, *, chunk_ms: int, realtime: bool) -> SttResult:
         """Stream the clip over a bidirectional recognize call."""
         result = self._result(clip, Mode.STREAM)
         timeline = StreamTimeline()
@@ -150,9 +140,7 @@ class GoogleChirp3(SttProvider):
         return result
 
 
-def _record_response(
-    response: cloud_speech.StreamingRecognizeResponse, timeline: StreamTimeline
-) -> None:
+def _record_response(response: cloud_speech.StreamingRecognizeResponse, timeline: StreamTimeline) -> None:
     """Record one streaming response's transcript and voice-activity events.
 
     ``SPEECH_ACTIVITY_END`` arrives as a bare event — no transcript rides on
@@ -160,10 +148,7 @@ def _record_response(
     their segment-final semantics; Google's ``is_final`` is a decoding
     boundary, not an endpointing one.
     """
-    if (
-        response.speech_event_type
-        == cloud_speech.StreamingRecognizeResponse.SpeechEventType.SPEECH_ACTIVITY_END
-    ):
+    if response.speech_event_type == cloud_speech.StreamingRecognizeResponse.SpeechEventType.SPEECH_ACTIVITY_END:
         timeline.record("", is_final=False, kind=EventKind.EOU)
     for item in response.results:
         if item.alternatives:

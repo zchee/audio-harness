@@ -32,24 +32,22 @@ class TestTtsLatencyChart:
     """TTFB→TTFA rows with cold markers and the stutter panel."""
 
     def test_renders_stream_lanes(self, tmp_path: Path) -> None:
-        frame = _tts_frame(
-            [
-                {
-                    "provider": "fast",
-                    "ttfb_p50_s": 0.10,
-                    "ttfa_p50_s": 0.30,
-                    "ttfb_cold_s": 0.90,
-                    "gap_p99_s": 0.02,
-                },
-                {
-                    "provider": "slow",
-                    "ttfb_p50_s": 0.25,
-                    "ttfa_p50_s": 0.28,
-                    "gap_p99_s": 0.15,
-                },
-                {"provider": "loaded", "mode": "stream x2", "ttfb_p50_s": 0.40},
-            ]
-        )
+        frame = _tts_frame([
+            {
+                "provider": "fast",
+                "ttfb_p50_s": 0.10,
+                "ttfa_p50_s": 0.30,
+                "ttfb_cold_s": 0.90,
+                "gap_p99_s": 0.02,
+            },
+            {
+                "provider": "slow",
+                "ttfb_p50_s": 0.25,
+                "ttfa_p50_s": 0.28,
+                "gap_p99_s": 0.15,
+            },
+            {"provider": "loaded", "mode": "stream x2", "ttfb_p50_s": 0.40},
+        ])
 
         output = plot.plot_tts_latency(frame, tmp_path / "tts_latency.png")
 
@@ -79,7 +77,7 @@ def _summary(
     phantom: int = 0,
     clips: int = 10,
 ) -> HallucinationSummary:
-    summary = HallucinationSummary(
+    return HallucinationSummary(
         provider=provider,
         mode="stream",
         language="en-US",
@@ -90,7 +88,6 @@ def _summary(
         inserted_words=fabricated * 4,
         audio_s=clips * 5.0,
     )
-    return summary
 
 
 class TestHallucinationChart:
@@ -120,10 +117,7 @@ class TestHallucinationChart:
     def test_wrong_mode_renders_nothing(self, tmp_path: Path) -> None:
         summaries = [_summary("a", "silence", fabricated=1)]
 
-        assert (
-            plot.plot_hallucination(summaries, tmp_path / "none.png", mode="batch")
-            is None
-        )
+        assert plot.plot_hallucination(summaries, tmp_path / "none.png", mode="batch") is None
 
 
 def _stt_row(
@@ -149,14 +143,12 @@ class TestOverviewEntityPanel:
     """The overview grows an entity panel only when annotations exist."""
 
     def test_annotated_frame_renders_three_panels(self, tmp_path: Path) -> None:
-        frame = pl.DataFrame(
-            [
-                _stt_row("a", "de-DE", 0.10, entity=0.05),
-                _stt_row("a", "fr-FR", 0.12, entity=0.20),
-                _stt_row("b", "de-DE", 0.20, entity=None),
-                _stt_row("b", "fr-FR", 0.25, entity=0.30),
-            ]
-        )
+        frame = pl.DataFrame([
+            _stt_row("a", "de-DE", 0.10, entity=0.05),
+            _stt_row("a", "fr-FR", 0.12, entity=0.20),
+            _stt_row("b", "de-DE", 0.20, entity=None),
+            _stt_row("b", "fr-FR", 0.25, entity=0.30),
+        ])
 
         output = plot.plot_overview(frame, tmp_path / "overview.png")
 

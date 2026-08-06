@@ -11,8 +11,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TypedDict
 
-import pytest
 from google.cloud.speech_v2.types import cloud_speech
+import pytest
 
 from audio_harness.config import BenchmarkConfig
 from audio_harness.endpointing import (
@@ -90,9 +90,7 @@ class TestEventModel:
                 "expected": EventKind.SEGMENT_FINAL,
             },
             "explicit kind wins": {
-                "partial": Partial(
-                    t_s=0.3, text="", is_final=False, kind=EventKind.EOU
-                ),
+                "partial": Partial(t_s=0.3, text="", is_final=False, kind=EventKind.EOU),
                 "expected": EventKind.EOU,
             },
         }
@@ -107,12 +105,8 @@ class TestEventModel:
         timeline.record("hello", is_final=False)
 
         kinds = [p.kind for p in timeline.partials]
-        assert kinds == [EventKind.EOU, EventKind.INTERIM], (
-            "blank keepalives stay dropped; bare EOU markers are kept"
-        )
-        assert timeline.ttft_s == timeline.partials[1].t_s, (
-            "a textless EOU marker must not register as the first token"
-        )
+        assert kinds == [EventKind.EOU, EventKind.INTERIM], "blank keepalives stay dropped; bare EOU markers are kept"
+        assert timeline.ttft_s == timeline.partials[1].t_s, "a textless EOU marker must not register as the first token"
 
     def test_churn_ignores_bare_eou_markers(self) -> None:
         partials = [
@@ -120,9 +114,7 @@ class TestEventModel:
             Partial(t_s=0.2, text="", is_final=False, kind=EventKind.EOU),
             Partial(t_s=0.3, text="hell", is_final=False),
         ]
-        assert partial_instability(partials) == 0.0, (
-            "a textless marker between two growing partials is not a rewrite"
-        )
+        assert partial_instability(partials) == 0.0, "a textless marker between two growing partials is not a rewrite"
 
 
 class TestFalseCutoff:
@@ -155,9 +147,7 @@ class TestFalseCutoff:
             "decoding boundary, not an end-of-utterance decision"
         )
         assert summary.false_cutoff_rate == 0.0
-        assert summary.finals_in_pauses == 1, (
-            "it still appears in the descriptive final-event count"
-        )
+        assert summary.finals_in_pauses == 1, "it still appears in the descriptive final-event count"
         assert summary.eou_latency_s == [pytest.approx(0.4)]
         assert summary.premature_eous == 0
 
@@ -244,9 +234,7 @@ class TestRankedScope:
                 ws_rtt_s=[0.05],
             ),
         ]
-        markdown = render_endpointing_markdown(
-            summaries, floors={"capable": 0.021, "opaque": 0.021}
-        )
+        markdown = render_endpointing_markdown(summaries, floors={"capable": 0.021, "opaque": 0.021})
 
         ranked, _, descriptive = markdown.partition("no captured EOU signal")
         assert "capable" in ranked
@@ -286,18 +274,14 @@ class TestJsonlRoundTrip:
         )
         assert reloaded.endpoint_config == {"min_turn_silence": 400}
 
-    def test_legacy_records_without_kind_stay_segment_finals(
-        self, tmp_path: Path
-    ) -> None:
+    def test_legacy_records_without_kind_stay_segment_finals(self, tmp_path: Path) -> None:
         results = [_result(partials=[Partial(t_s=2.2, text="hello", is_final=True)])]
         path = write_stt_results(results, tmp_path)
         raw = path.read_text(encoding="utf-8").replace(', "kind": "segment_final"', "")
         path.write_text(raw, encoding="utf-8")
 
         (loaded,) = read_stt_results(path)
-        assert loaded.partials[0].kind == EventKind.SEGMENT_FINAL, (
-            "pre-migration records derive kind from is_final"
-        )
+        assert loaded.partials[0].kind == EventKind.SEGMENT_FINAL, "pre-migration records derive kind from is_final"
 
 
 class TestAdapterEventMapping:
@@ -425,9 +409,7 @@ class TestAdapterEventMapping:
         timeline.start()
         _record_response(
             cloud_speech.StreamingRecognizeResponse(
-                speech_event_type=(
-                    cloud_speech.StreamingRecognizeResponse.SpeechEventType.SPEECH_ACTIVITY_END
-                )
+                speech_event_type=(cloud_speech.StreamingRecognizeResponse.SpeechEventType.SPEECH_ACTIVITY_END)
             ),
             timeline,
         )
@@ -440,8 +422,7 @@ class TestLoopbackFloor:
     async def test_floor_is_small_and_positive(self) -> None:
         floor = await measure_loopback_floor(20, clip_s=0.2, rounds=2)
         assert 0.0 <= floor < 0.25, (
-            "a local echo answered instantly; anything above 250ms means the "
-            "client stack itself is broken"
+            "a local echo answered instantly; anything above 250ms means the client stack itself is broken"
         )
 
 
@@ -453,9 +434,7 @@ class TestLaneConfig:
         options = {entry.name: entry.options for entry in config.stt}
 
         assert options["deepgram-nova3"]["utterance_end_ms"] == 1000
-        assert (
-            options["speechmatics-enhanced"]["end_of_utterance_silence_trigger"] == 0.7
-        )
+        assert options["speechmatics-enhanced"]["end_of_utterance_silence_trigger"] == 0.7
         assert options["soniox-rt-v5"]["enable_endpoint_detection"] is True
         assert options["google-chirp3"]["enable_voice_activity_events"] is True
         assert all(entry.modes == ["stream"] for entry in config.stt)
@@ -472,10 +451,8 @@ LIVE_FLAG = "AUDIO_HARNESS_TEST_ENDPOINTING_LIVE"
 
 
 @pytest.mark.skipif(
-    not __import__("os").environ.get(LIVE_FLAG)
-    or not __import__("os").environ.get("DEEPGRAM_API_KEY"),
-    reason=f"live smoke needs {LIVE_FLAG}=1 and DEEPGRAM_API_KEY "
-    "(one ~6s clip, fractions of a cent)",
+    not __import__("os").environ.get(LIVE_FLAG) or not __import__("os").environ.get("DEEPGRAM_API_KEY"),
+    reason=f"live smoke needs {LIVE_FLAG}=1 and DEEPGRAM_API_KEY (one ~6s clip, fractions of a cent)",
 )
 class TestLiveSmoke:
     """Minimal real-vendor pass: does the EOU capture read the real wire?

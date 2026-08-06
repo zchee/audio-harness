@@ -12,10 +12,11 @@ from urllib.parse import urlencode
 import orjson
 from websockets.asyncio.client import ClientConnection, connect
 
-from ..audio import decode_audio_duration
-from ..config import require_env
-from ..stt.base import raise_for_status
-from ..types import Mode, TtsPrompt, TtsResult
+from audio_harness.audio import decode_audio_duration
+from audio_harness.config import require_env
+from audio_harness.stt.base import raise_for_status
+from audio_harness.types import Mode, TtsPrompt, TtsResult
+
 from .base import (
     ChunkTimeline,
     TtsProvider,
@@ -24,6 +25,7 @@ from .base import (
     stamp_stream_timing,
     token_pieces,
 )
+
 
 HTTP_URL = "https://api.cartesia.ai/tts/bytes"
 WS_URL = "wss://api.cartesia.ai/tts/websocket"
@@ -112,9 +114,7 @@ class _CartesiaBase(TtsProvider):
         }
         return f"{WS_URL}?{urlencode(params)}"
 
-    async def _consume(
-        self, socket: ClientConnection, result: TtsResult, timeline: ChunkTimeline
-    ) -> None:
+    async def _consume(self, socket: ClientConnection, result: TtsResult, timeline: ChunkTimeline) -> None:
         """Drain one WebSocket generation into the timeline."""
         async for raw in socket:
             payload = orjson.loads(raw)
@@ -141,9 +141,7 @@ class _CartesiaBase(TtsProvider):
 
         return _finish_stream(result, timeline)
 
-    async def synthesize_incremental(
-        self, prompt: TtsPrompt, *, token_rate: float
-    ) -> TtsResult:
+    async def synthesize_incremental(self, prompt: TtsPrompt, *, token_rate: float) -> TtsResult:
         """Feed the transcript in word pieces over one WebSocket context.
 
         Cartesia's WebSocket accepts continuations: messages sharing a
@@ -189,9 +187,7 @@ def _finish(result: TtsResult, audio: bytes) -> TtsResult:
     """Attach audio to a result and derive its duration."""
     result.audio = audio
     result.encoding = "pcm_s16le"
-    result.audio_s = decode_audio_duration(
-        audio, encoding=result.encoding, sample_rate=result.sample_rate
-    )
+    result.audio_s = decode_audio_duration(audio, encoding=result.encoding, sample_rate=result.sample_rate)
     return result
 
 

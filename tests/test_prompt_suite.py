@@ -70,8 +70,7 @@ class TestJsonlRoundTrip:
                 category="entities",
                 license="generated",
                 source="tools/gen_entity_prompts.py",
-                annotated="Please transfer <currency>four hundred and twenty "
-                "dollars</currency>.",
+                annotated="Please transfer <currency>four hundred and twenty dollars</currency>.",
                 entity_class="currency",
             ),
         ]
@@ -119,9 +118,7 @@ class TestFlattenToPromptsTxt:
 
         assert path.read_text(encoding="utf-8") == ""
 
-    def test_flattened_file_loads_through_dataset_load_prompts(
-        self, tmp_path: Path
-    ) -> None:
+    def test_flattened_file_loads_through_dataset_load_prompts(self, tmp_path: Path) -> None:
         # The whole point of the flat form: it must work with the existing,
         # untouched loader — no dataset.py changes required.
         from audio_harness.config import DatasetConfig

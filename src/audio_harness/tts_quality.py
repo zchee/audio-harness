@@ -27,6 +27,7 @@ import soxr
 
 from .runner import read_tts_results
 
+
 DISTILL_MOS_SAMPLE_RATE = 16000
 """Distill-MOS's fixed input rate; other rates are resampled before scoring."""
 
@@ -88,9 +89,7 @@ class ProviderMosSummary:
         return delta is not None and delta < -REGRESSION_THRESHOLD
 
 
-def score_waveform(
-    samples: np.ndarray, sample_rate: int, *, model: Any = None
-) -> float:
+def score_waveform(samples: np.ndarray, sample_rate: int, *, model: Any = None) -> float:
     """Score mono float32 PCM with Distill-MOS.
 
     Args:
@@ -105,9 +104,7 @@ def score_waveform(
     import torch  # Lazy: the optional dependency is only needed to score.
 
     if sample_rate != DISTILL_MOS_SAMPLE_RATE:
-        samples = soxr.resample(
-            samples, sample_rate, DISTILL_MOS_SAMPLE_RATE, quality="HQ"
-        )
+        samples = soxr.resample(samples, sample_rate, DISTILL_MOS_SAMPLE_RATE, quality="HQ")
     net = model if model is not None else _load_model()
     x = torch.from_numpy(samples.astype(np.float32)).unsqueeze(0)
     with torch.no_grad():
@@ -150,9 +147,7 @@ def _load_model() -> Any:
     return model
 
 
-def score_directory(
-    directory: str | Path, *, score_fn: ScoreFn | None = None
-) -> list[ClipScore]:
+def score_directory(directory: str | Path, *, score_fn: ScoreFn | None = None) -> list[ClipScore]:
     """Score every WAV file directly inside ``directory``.
 
     Providers are recovered from the ``{provider}-{mode}-{prompt_id}.wav``
@@ -180,9 +175,7 @@ def score_directory(
     ]
 
 
-def score_results_file(
-    path: str | Path, *, score_fn: ScoreFn | None = None
-) -> list[ClipScore]:
+def score_results_file(path: str | Path, *, score_fn: ScoreFn | None = None) -> list[ClipScore]:
     """Score the audio referenced by a saved ``tts-results.jsonl``.
 
     Only records that succeeded and carry a recorded ``audio_path`` (the run
@@ -210,9 +203,7 @@ def score_results_file(
         file = Path(audio_path)
         if not file.is_file():
             continue
-        scores.append(
-            ClipScore(path=str(file), provider=result.provider, mos=score(file))
-        )
+        scores.append(ClipScore(path=str(file), provider=result.provider, mos=score(file)))
     return scores
 
 
@@ -240,9 +231,7 @@ def summarize(scores: Iterable[ClipScore]) -> list[ProviderMosSummary]:
     for score in scores:
         totals.setdefault(score.provider, []).append(score.mos)
     return [
-        ProviderMosSummary(
-            provider=provider, clips=len(values), mean_mos=sum(values) / len(values)
-        )
+        ProviderMosSummary(provider=provider, clips=len(values), mean_mos=sum(values) / len(values))
         for provider, values in sorted(totals.items())
     ]
 
@@ -259,9 +248,7 @@ def load_baseline(path: str | Path) -> dict[str, float]:
     file = Path(path)
     if not file.is_file():
         return {}
-    return {
-        str(key): float(value) for key, value in orjson.loads(file.read_bytes()).items()
-    }
+    return {str(key): float(value) for key, value in orjson.loads(file.read_bytes()).items()}
 
 
 def save_baseline(path: str | Path, summaries: Iterable[ProviderMosSummary]) -> Path:
@@ -281,9 +268,7 @@ def save_baseline(path: str | Path, summaries: Iterable[ProviderMosSummary]) -> 
     return file
 
 
-def apply_baseline(
-    summaries: list[ProviderMosSummary], baseline: dict[str, float]
-) -> list[ProviderMosSummary]:
+def apply_baseline(summaries: list[ProviderMosSummary], baseline: dict[str, float]) -> list[ProviderMosSummary]:
     """Attach recorded baseline means to freshly computed summaries.
 
     Args:

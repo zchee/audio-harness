@@ -123,9 +123,7 @@ class TestRuleTagging:
             },
             "currency and native hour": {
                 "raw": "오백원 내고 세 시에 만나",
-                "expected": (
-                    "<currency>오백원</currency> 내고 <number>세 시</number>에 만나"
-                ),
+                "expected": ("<currency>오백원</currency> 내고 <number>세 시</number>에 만나"),
             },
             "stopwords and bare syllables stay untagged": {
                 "raw": "만일 시간이 되면 사이에",
@@ -152,9 +150,7 @@ class TestRuleTagging:
             "ko-KR": "삼월 십오일에 오백원 내고 세 시에",
         }
         for language, reference in references.items():
-            assert strip_tags(autotag_reference(reference, language)) == reference, (
-                language
-            )
+            assert strip_tags(autotag_reference(reference, language)) == reference, language
 
 
 class TestMassiveGold:
@@ -169,15 +165,11 @@ class TestMassiveGold:
         assert "<name>olivier</name>" in annotated
 
     def test_unmapped_slots_dissolve(self) -> None:
-        annotated = annotate_massive(
-            "joue de la musique [music_genre : classique]", "fr-FR"
-        )
+        annotated = annotate_massive("joue de la musique [music_genre : classique]", "fr-FR")
         assert annotated == "joue de la musique classique"
 
     def test_rules_still_tag_the_untagged_remainder(self) -> None:
-        annotated = annotate_massive(
-            "commande quatre pizzas pour [person : anna]", "fr-FR"
-        )
+        annotated = annotate_massive("commande quatre pizzas pour [person : anna]", "fr-FR")
         assert "<number>quatre</number>" in annotated
         assert "<name>anna</name>" in annotated
 
@@ -206,9 +198,7 @@ class TestAnnotateRecord:
         gold = {("fr-FR", "42"): "appelle [person : olivier] maintenant"}
 
         assert annotate_record(record, gold)
-        assert record["reference_annotated"] == (
-            "appelle <name>olivier</name> maintenant"
-        )
+        assert record["reference_annotated"] == ("appelle <name>olivier</name> maintenant")
 
     def test_drifted_gold_falls_back_to_rules(self) -> None:
         """A gold annotation for different text would mis-place every span."""
@@ -216,9 +206,7 @@ class TestAnnotateRecord:
         gold = {("fr-FR", "42"): "appelle [person : olivier] maintenant"}
 
         assert annotate_record(record, gold)
-        assert record["reference_annotated"] == (
-            "règle un minuteur sur <number>cinq</number> minutes"
-        )
+        assert record["reference_annotated"] == ("règle un minuteur sur <number>cinq</number> minutes")
 
     def test_untaggable_reference_sets_nothing(self) -> None:
         record = self._record("va te coucher")
@@ -246,9 +234,7 @@ class TestScoringIntegration:
 
     def test_summarize_populates_entity_columns_from_auto_tags(self) -> None:
         reference = "the code is AB1234"
-        result = SttResult(
-            provider="p1", clip_id="c1", mode=Mode.STREAM, text="the code is AB1234"
-        )
+        result = SttResult(provider="p1", clip_id="c1", mode=Mode.STREAM, text="the code is AB1234")
         result.audio_s = 1.0
         result.raw["reference"] = reference
         result.raw["language"] = "en-US"

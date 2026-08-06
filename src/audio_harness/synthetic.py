@@ -32,6 +32,7 @@ from .config import SourceConfig
 from .dataset import DatasetError, load_source
 from .types import AudioClip
 
+
 DEFAULT_SEED = 20260806
 """Seed used when a synthetic source pins none, so runs stay reproducible."""
 
@@ -59,8 +60,7 @@ _ID_PREFIXES = {
 }
 
 _MUSAN_HINT = (
-    "download MUSAN (CC BY 4.0) with `uv run tools/fetch_musan.py` and point "
-    "noise_dir at the extracted noise directory"
+    "download MUSAN (CC BY 4.0) with `uv run tools/fetch_musan.py` and point noise_dir at the extracted noise directory"
 )
 
 
@@ -83,9 +83,7 @@ def condition_of(clip_id: str) -> str | None:
     return None
 
 
-def synthesize_source(
-    source: SourceConfig, *, sample_rate: int = 16000
-) -> list[AudioClip]:
+def synthesize_source(source: SourceConfig, *, sample_rate: int = 16000) -> list[AudioClip]:
     """Generate the clips a synthetic source describes.
 
     Args:
@@ -105,9 +103,7 @@ def synthesize_source(
     kind = source.synthetic
     seed = source.sample_seed if source.sample_seed is not None else DEFAULT_SEED
     if source.limit is None or source.limit <= 0:
-        raise DatasetError(
-            f"synthetic source {kind!r} needs a positive limit (the clip count)"
-        )
+        raise DatasetError(f"synthetic source {kind!r} needs a positive limit (the clip count)")
 
     if kind == "silence":
         duration = source.duration_s or DEFAULT_DURATION_S
@@ -139,8 +135,7 @@ def synthesize_source(
     if kind == "trailing_silence":
         trailing = source.trailing_silence_s or DEFAULT_TRAILING_SILENCE_S
         return [
-            trailing_silence_clip(base, trailing_s=trailing)
-            for base in _base_clips(source, sample_rate=sample_rate)
+            trailing_silence_clip(base, trailing_s=trailing) for base in _base_clips(source, sample_rate=sample_rate)
         ]
 
     if kind == "low_snr":
@@ -151,15 +146,10 @@ def synthesize_source(
             for index, base in enumerate(_base_clips(source, sample_rate=sample_rate))
         ]
 
-    raise DatasetError(
-        f"unknown synthetic source kind {kind!r}; expected one of "
-        f"{', '.join(CONDITIONS)}"
-    )
+    raise DatasetError(f"unknown synthetic source kind {kind!r}; expected one of {', '.join(CONDITIONS)}")
 
 
-def silence_clip(
-    index: int, *, duration_s: float, sample_rate: int, language: str
-) -> AudioClip:
+def silence_clip(index: int, *, duration_s: float, sample_rate: int, language: str) -> AudioClip:
     """Build a clip of pure digital silence.
 
     The correct transcript for silence is nothing at all; the reference is the
@@ -249,12 +239,10 @@ def trailing_silence_clip(base: AudioClip, *, trailing_s: float) -> AudioClip:
     Returns:
         The extended clip; ``speech_end_s`` still marks the original speech.
     """
-    samples = np.concatenate(
-        [
-            _pcm_to_float(base.pcm),
-            np.zeros(int(base.sample_rate * trailing_s), dtype=np.float32),
-        ]
-    )
+    samples = np.concatenate([
+        _pcm_to_float(base.pcm),
+        np.zeros(int(base.sample_rate * trailing_s), dtype=np.float32),
+    ])
     return _to_clip(
         samples,
         clip_id=f"trailsil-{base.clip_id}",
@@ -307,9 +295,7 @@ def low_snr_clip(
     )
 
 
-def mix_at_snr(
-    speech: np.ndarray, noise: np.ndarray, *, snr_db: float, sample_rate: int
-) -> np.ndarray:
+def mix_at_snr(speech: np.ndarray, noise: np.ndarray, *, snr_db: float, sample_rate: int) -> np.ndarray:
     """Mix speech and noise so active speech sits ``snr_db`` above the noise.
 
     The SNR is computed against the RMS of *voiced* frames only. Scaling
@@ -358,10 +344,7 @@ def _active_rms(samples: np.ndarray, sample_rate: int) -> float:
 def _base_clips(source: SourceConfig, *, sample_rate: int) -> list[AudioClip]:
     """Load the real utterances a derived condition builds on."""
     if not source.parquet and not source.manifest:
-        raise DatasetError(
-            f"synthetic source {source.synthetic!r} needs a parquet or "
-            f"manifest of base utterances"
-        )
+        raise DatasetError(f"synthetic source {source.synthetic!r} needs a parquet or manifest of base utterances")
     return load_source(replace(source, synthetic=None), sample_rate=sample_rate)
 
 
@@ -372,9 +355,7 @@ def _noise_files(noise_dir: str | None) -> list[Path]:
     root = Path(noise_dir)
     if not root.is_dir():
         raise DatasetError(f"noise_dir not found: {root}; {_MUSAN_HINT}")
-    files = sorted(
-        path for path in root.rglob("*") if path.suffix.lower() in {".wav", ".flac"}
-    )
+    files = sorted(path for path in root.rglob("*") if path.suffix.lower() in {".wav", ".flac"})
     if not files:
         raise DatasetError(f"noise_dir contains no audio files: {root}; {_MUSAN_HINT}")
     return files

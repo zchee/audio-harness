@@ -22,10 +22,10 @@ download, no model license, fully reproducible.
 
 from __future__ import annotations
 
-import re
-import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
+import re
+import unicodedata
 
 from .entities import strip_tags
 from .normalize import (
@@ -35,6 +35,7 @@ from .normalize import (
     _KO_NUMERAL_STOPWORDS,
     normalizer_for,
 )
+
 
 MASSIVE_SLOT_CLASSES: dict[str, str] = {
     "date": "date",
@@ -160,9 +161,7 @@ _CURRENCY_WORDS = {
 
 _YEAR = re.compile(r"\b(?:19|20)\d{2}\b")
 _NUMERIC_DATE = re.compile(r"\b\d{1,2}[/.]\d{1,2}(?:[/.]\d{2,4})?\b")
-_MIXED_ID = re.compile(
-    r"\b(?=[0-9a-z]*\d)(?=[0-9a-z]*[a-z])[0-9a-z]{3,}\b", re.IGNORECASE
-)
+_MIXED_ID = re.compile(r"\b(?=[0-9a-z]*\d)(?=[0-9a-z]*[a-z])[0-9a-z]{3,}\b", re.IGNORECASE)
 _LONG_DIGITS = re.compile(r"\b\d{7,}\b")
 
 _KO_SINO_RUN = r"[영공일이삼사오육칠팔구십백천만억]+"
@@ -172,16 +171,14 @@ _KO_AFTER = r"(?=[에은는이가을를도로의와과부까마쯤]|[^가-힣]|$
 _KO_DATE = re.compile(rf"(?<![가-힣])(?:{_KO_SINO_RUN}|\d+)\s?[년월일]{_KO_AFTER}")
 _KO_CURRENCY = re.compile(rf"(?<![가-힣])(?:{_KO_SINO_RUN}|\d+)\s?원{_KO_AFTER}")
 _KO_OTHER_COUNTERS = "|".join(
-    counter
-    for counter in dict.fromkeys(_KO_COUNTERS + _KO_NATIVE_COUNTERS)
-    if counter not in {"년", "월", "일", "원"}
+    counter for counter in dict.fromkeys(_KO_COUNTERS + _KO_NATIVE_COUNTERS) if counter not in {"년", "월", "일", "원"}
 )
 _KO_NUMBER = re.compile(
     rf"(?<![가-힣])(?:{_KO_SINO_RUN}|{'|'.join(_KO_NATIVE)})\s?"
     rf"(?:{_KO_OTHER_COUNTERS}){_KO_AFTER}"
 )
 
-_CAP_WORD = re.compile(r"^[A-ZÀ-Þ][a-zà-þ'’]+$")  # noqa: RUF001 - vendors emit typographic apostrophes in names
+_CAP_WORD = re.compile(r"^[A-ZÀ-Þ][a-zà-þ'’]+$")  # ruff: ignore[ambiguous-unicode-character-string] - vendors emit typographic apostrophes in names
 _SENTENCE_END = re.compile(r"[.!?]$")
 
 
@@ -305,11 +302,7 @@ def _rule_spans(text: str, language: str) -> list[_Span]:
             (_KO_CURRENCY, "currency"),
             (_KO_NUMBER, "number"),
         ):
-            spans += [
-                span
-                for span in _regex_spans(text, pattern, label)
-                if _ko_licensed(text[span.start : span.end])
-            ]
+            spans += [span for span in _regex_spans(text, pattern, label) if _ko_licensed(text[span.start : span.end])]
     spans += _regex_spans(text, _YEAR, "date")
     spans += _regex_spans(text, _NUMERIC_DATE, "date")
     spans += _month_spans(text, primary)
@@ -349,10 +342,7 @@ def _with_currency_words(text: str, numbers: list[_Span], primary: str) -> list[
 
 
 def _regex_spans(text: str, pattern: re.Pattern[str], label: str) -> list[_Span]:
-    return [
-        _Span(m.start(), m.end(), label, _PRIORITY[label])
-        for m in pattern.finditer(text)
-    ]
+    return [_Span(m.start(), m.end(), label, _PRIORITY[label]) for m in pattern.finditer(text)]
 
 
 def _ko_licensed(span_text: str) -> bool:
@@ -458,9 +448,7 @@ def _name_spans(text: str, primary: str) -> list[_Span]:
         word = _trim(token.group(0))
         sentence_initial = index == 0 or bool(_SENTENCE_END.search(previous_end))
         is_name = (
-            bool(_CAP_WORD.match(word))
-            and word.lower() not in months
-            and not (sentence_initial and run_start is None)
+            bool(_CAP_WORD.match(word)) and word.lower() not in months and not (sentence_initial and run_start is None)
         )
         if is_name:
             if run_start is None:
@@ -490,8 +478,5 @@ def _resolve(spans: list[_Span]) -> list[_Span]:
 def _render(text: str, spans: list[_Span]) -> str:
     """Insert tags around the chosen spans, right to left."""
     for span in reversed(spans):
-        text = (
-            f"{text[: span.start]}<{span.label}>{text[span.start : span.end]}"
-            f"</{span.label}>{text[span.end :]}"
-        )
+        text = f"{text[: span.start]}<{span.label}>{text[span.start : span.end]}</{span.label}>{text[span.end :]}"
     return text

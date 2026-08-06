@@ -9,11 +9,13 @@ from urllib.parse import urlencode
 import orjson
 from websockets.asyncio.client import ClientConnection
 
-from ..audio import wrap_wav
-from ..config import require_env
-from ..types import AudioClip, EventKind, Mode, SttResult
+from audio_harness.audio import wrap_wav
+from audio_harness.config import require_env
+from audio_harness.types import AudioClip, EventKind, Mode, SttResult
+
 from .base import StreamTimeline, SttProvider, raise_for_status, register
 from .ws import HandleMessage, StreamProtocolError, run_stream
+
 
 BATCH_URL = "https://api.elevenlabs.io/v1/speech-to-text"
 STREAM_URL = "wss://api.elevenlabs.io/v1/speech-to-text/realtime"
@@ -62,9 +64,7 @@ class ElevenLabsScribeV2(SttProvider):
         result.raw["response"] = payload
         return result
 
-    async def transcribe_stream(
-        self, clip: AudioClip, *, chunk_ms: int, realtime: bool
-    ) -> SttResult:
+    async def transcribe_stream(self, clip: AudioClip, *, chunk_ms: int, realtime: bool) -> SttResult:
         """Stream base64 PCM frames over the realtime socket.
 
         Raises:
@@ -86,22 +86,18 @@ class ElevenLabsScribeV2(SttProvider):
         }
 
         def encode(chunk: bytes) -> str:
-            return orjson.dumps(
-                {
-                    "message_type": "input_audio_chunk",
-                    "audio_base_64": base64.b64encode(chunk).decode("ascii"),
-                }
-            ).decode()
+            return orjson.dumps({
+                "message_type": "input_audio_chunk",
+                "audio_base_64": base64.b64encode(chunk).decode("ascii"),
+            }).decode()
 
         async def commit(socket: ClientConnection) -> None:
             await socket.send(
-                orjson.dumps(
-                    {
-                        "message_type": "input_audio_chunk",
-                        "audio_base_64": "",
-                        "commit": True,
-                    }
-                ).decode()
+                orjson.dumps({
+                    "message_type": "input_audio_chunk",
+                    "audio_base_64": "",
+                    "commit": True,
+                }).decode()
             )
 
         vad = str(params["commit_strategy"]) == "vad"

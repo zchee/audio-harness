@@ -9,8 +9,8 @@ A mock would happily confirm whatever timing the driver claimed.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from collections.abc import AsyncIterator
+import contextlib
 
 import orjson
 import pytest
@@ -81,9 +81,7 @@ class Server:
                 await partial_task
 
         if self.fail_with is not None:
-            await socket.send(
-                orjson.dumps({"type": "error", "detail": self.fail_with}).decode()
-            )
+            await socket.send(orjson.dumps({"type": "error", "detail": self.fail_with}).decode())
             return
 
         if self.never_finalize:
@@ -91,11 +89,7 @@ class Server:
 
         await asyncio.sleep(self.finalize_delay_s)
         with contextlib.suppress(websockets.ConnectionClosed):
-            await socket.send(
-                orjson.dumps(
-                    {"type": "transcript", "text": "hello world", "final": True}
-                ).decode()
-            )
+            await socket.send(orjson.dumps({"type": "transcript", "text": "hello world", "final": True}).decode())
             if self.send_done:
                 await socket.send(orjson.dumps({"type": "done"}).decode())
 
@@ -104,11 +98,7 @@ class Server:
         await asyncio.sleep(self.partial_after_s)
         for text in ("hello", "hello wor", "hello world"):
             with contextlib.suppress(websockets.ConnectionClosed):
-                await socket.send(
-                    orjson.dumps(
-                        {"type": "transcript", "text": text, "final": False}
-                    ).decode()
-                )
+                await socket.send(orjson.dumps({"type": "transcript", "text": text, "final": False}).decode())
             await asyncio.sleep(0.05)
 
 
@@ -168,9 +158,7 @@ class TestAudioDelivery:
 class TestTiming:
     """Timing semantics are the reason this harness exists."""
 
-    async def test_ttft_measures_first_partial_not_first_final(
-        self, server: tuple[Server, str]
-    ) -> None:
+    async def test_ttft_measures_first_partial_not_first_final(self, server: tuple[Server, str]) -> None:
         handler, url = server
         handler.partial_after_s = 0.08
         timeline = await drive(url, make_clip(0.4))
@@ -182,9 +170,7 @@ class TestTiming:
             "must genuinely overlap rather than run in sequence"
         )
 
-    async def test_finalize_measures_from_last_audio_byte(
-        self, server: tuple[Server, str]
-    ) -> None:
+    async def test_finalize_measures_from_last_audio_byte(self, server: tuple[Server, str]) -> None:
         handler, url = server
         handler.finalize_delay_s = 0.25
         timeline = await drive(url, make_clip(0.4))
@@ -196,9 +182,7 @@ class TestTiming:
         assert timeline.audio_end_s is not None
         assert timeline.audio_end_s == pytest.approx(0.4, abs=0.12)
 
-    async def test_longer_clip_does_not_inflate_finalize(
-        self, server: tuple[Server, str]
-    ) -> None:
+    async def test_longer_clip_does_not_inflate_finalize(self, server: tuple[Server, str]) -> None:
         handler, url = server
         handler.finalize_delay_s = 0.15
 
@@ -207,13 +191,9 @@ class TestTiming:
 
         assert short.finalize_s is not None
         assert long.finalize_s is not None
-        assert abs(long.finalize_s - short.finalize_s) < 0.15, (
-            "finalization latency must be independent of clip length"
-        )
+        assert abs(long.finalize_s - short.finalize_s) < 0.15, "finalization latency must be independent of clip length"
 
-    async def test_timestamps_increase_monotonically(
-        self, server: tuple[Server, str]
-    ) -> None:
+    async def test_timestamps_increase_monotonically(self, server: tuple[Server, str]) -> None:
         _, url = server
         timeline = await drive(url, make_clip(0.4))
         stamps = [p.t_s for p in timeline.partials]
@@ -225,18 +205,14 @@ class TestTiming:
 class TestTranscriptAssembly:
     """Interim and final hypotheses must be separable after the fact."""
 
-    async def test_partials_and_finals_are_both_recorded(
-        self, server: tuple[Server, str]
-    ) -> None:
+    async def test_partials_and_finals_are_both_recorded(self, server: tuple[Server, str]) -> None:
         _, url = server
         timeline = await drive(url, make_clip(0.4))
 
         assert [p for p in timeline.partials if not p.is_final], "expected interims"
         assert [p for p in timeline.partials if p.is_final], "expected a final"
 
-    async def test_concat_finals_builds_the_transcript(
-        self, server: tuple[Server, str]
-    ) -> None:
+    async def test_concat_finals_builds_the_transcript(self, server: tuple[Server, str]) -> None:
         _, url = server
         timeline = await drive(url, make_clip(0.3))
 
@@ -250,9 +226,7 @@ class TestTranscriptAssembly:
         timeline.record("", is_final=True)
 
         assert timeline.partials == []
-        assert timeline.ttft_s is None, (
-            "a blank keepalive must not register as a first token"
-        )
+        assert timeline.ttft_s is None, "a blank keepalive must not register as a first token"
 
 
 class TestFailureHandling:
@@ -265,9 +239,7 @@ class TestFailureHandling:
         with pytest.raises(StreamProtocolError, match="quota exceeded"):
             await drive(url, make_clip(0.1))
 
-    async def test_missing_final_stops_after_the_grace_period(
-        self, server: tuple[Server, str]
-    ) -> None:
+    async def test_missing_final_stops_after_the_grace_period(self, server: tuple[Server, str]) -> None:
         handler, url = server
         handler.never_finalize = True
 
@@ -276,14 +248,10 @@ class TestFailureHandling:
         assert timeline.finalize_s is None, "no final means no finalization latency"
         assert timeline.ttft_s is not None, "interims still count as measurements"
 
-    async def test_missing_done_message_still_terminates(
-        self, server: tuple[Server, str]
-    ) -> None:
+    async def test_missing_done_message_still_terminates(self, server: tuple[Server, str]) -> None:
         handler, url = server
         handler.send_done = False
         handler.finalize_delay_s = 0.05
 
-        timeline = await asyncio.wait_for(
-            drive(url, make_clip(0.2), finalize_timeout_s=0.5), timeout=5.0
-        )
+        timeline = await asyncio.wait_for(drive(url, make_clip(0.2), finalize_timeout_s=0.5), timeout=5.0)
         assert timeline.concat_finals() == "hello world"

@@ -25,11 +25,12 @@ call. ``tools/gen_common_voice_prompts.py`` is the network shell.
 
 from __future__ import annotations
 
-import random
 from collections.abc import Iterable
+import random
 
 from .normalize import uses_character_metric
 from .prompt_suite import LOCALES, SuitePrompt
+
 
 CATEGORY = "general"
 LICENSE = "CC0-1.0"
@@ -91,9 +92,7 @@ def sample_sentences(candidates: list[str], *, count: int, seed: int) -> list[st
     return shuffled[:count]
 
 
-def build_prompts(
-    subtag: str, sentences: list[str], source_files: list[str]
-) -> list[SuitePrompt]:
+def build_prompts(subtag: str, sentences: list[str], source_files: list[str]) -> list[SuitePrompt]:
     """Turn selected sentences into ordered, ID'd, provenance-tagged prompts.
 
     Args:

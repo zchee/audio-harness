@@ -6,11 +6,13 @@ import os
 import time
 from urllib.parse import urlencode
 
-from ..audio import decode_audio_duration
-from ..config import require_env
-from ..stt.base import raise_for_status
-from ..types import Mode, TtsPrompt, TtsResult
+from audio_harness.audio import decode_audio_duration
+from audio_harness.config import require_env
+from audio_harness.stt.base import raise_for_status
+from audio_harness.types import Mode, TtsPrompt, TtsResult
+
 from .base import ChunkTimeline, TtsProvider, register, stamp_stream_timing
+
 
 SPEAK_URL = "https://api.deepgram.com/v1/speak"
 
@@ -59,9 +61,7 @@ class DeepgramAura2(TtsProvider):
         """Request audio and read the whole body before returning."""
         result = self._result(prompt, Mode.BATCH)
         started = time.perf_counter()
-        response = await self.http.post(
-            self._url(), headers=self._headers(), json={"text": prompt.text}
-        )
+        response = await self.http.post(self._url(), headers=self._headers(), json={"text": prompt.text})
         raise_for_status(response, self.key)
         result.ttfb_s = None
         result.total_s = time.perf_counter() - started
@@ -88,7 +88,5 @@ def _finish(result: TtsResult, audio: bytes) -> TtsResult:
     """Attach audio to a result and derive its duration."""
     result.audio = audio
     result.encoding = "pcm_s16le"
-    result.audio_s = decode_audio_duration(
-        audio, encoding=result.encoding, sample_rate=result.sample_rate
-    )
+    result.audio_s = decode_audio_duration(audio, encoding=result.encoding, sample_rate=result.sample_rate)
     return result

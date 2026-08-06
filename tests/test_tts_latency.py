@@ -9,8 +9,8 @@ load-pass machinery around it.
 from __future__ import annotations
 
 import base64
-import os
 from collections.abc import AsyncIterator
+import os
 from pathlib import Path
 
 import numpy as np
@@ -28,6 +28,7 @@ from audio_harness.tts.base import (
     token_pieces,
 )
 from audio_harness.types import Mode, TtsPrompt, TtsResult
+
 
 RATE = 24000
 
@@ -48,9 +49,7 @@ def _isolated_results_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
 def make_pcm(silence_s: float, tone_s: float, rate: int = RATE) -> bytes:
     """Mono 16-bit PCM: leading silence followed by a 220 Hz tone."""
     t = np.linspace(0, tone_s, int(rate * tone_s), endpoint=False)
-    samples = np.concatenate(
-        [np.zeros(int(rate * silence_s)), 0.5 * np.sin(2 * np.pi * 220 * t)]
-    ).astype(np.float32)
+    samples = np.concatenate([np.zeros(int(rate * silence_s)), 0.5 * np.sin(2 * np.pi * 220 * t)]).astype(np.float32)
     return (np.clip(samples, -1.0, 1.0) * 32767).astype("<i2").tobytes()
 
 
@@ -90,15 +89,11 @@ class TestOnsetDetection:
 
     def test_leading_silence_is_skipped(self) -> None:
         samples = np.frombuffer(make_pcm(0.2, 0.3), dtype="<i2").astype(np.float32)
-        assert detect_speech_onset_s(samples / 32768.0, RATE) == pytest.approx(
-            0.2, abs=0.05
-        )
+        assert detect_speech_onset_s(samples / 32768.0, RATE) == pytest.approx(0.2, abs=0.05)
 
     def test_immediate_speech_starts_at_zero(self) -> None:
         samples = np.frombuffer(make_pcm(0.0, 0.3), dtype="<i2").astype(np.float32)
-        assert detect_speech_onset_s(samples / 32768.0, RATE) == pytest.approx(
-            0.0, abs=0.05
-        )
+        assert detect_speech_onset_s(samples / 32768.0, RATE) == pytest.approx(0.0, abs=0.05)
 
     def test_quiet_audio_is_not_treated_as_silence(self) -> None:
         """The threshold is relative to the clip's own peak, not absolute."""
@@ -131,7 +126,8 @@ class TestStampStreamTiming:
         """AC3: 200 ms of leading silence yields TTFA - TTFB >= 180 ms."""
         result = stamped([make_pcm(0.2, 0.3)], [0.05])
 
-        assert result.ttfb_s is not None and result.ttfa_s is not None
+        assert result.ttfb_s is not None
+        assert result.ttfa_s is not None
         assert result.ttfb_s == pytest.approx(0.05)
         assert result.ttfa_s - result.ttfb_s >= 0.18, (
             "the first byte was silence; the audible onset is 200 ms of "
@@ -242,9 +238,7 @@ class _FakeIncrementalTts(_FakeLatencyTts):
     vendor = "fake-incremental"
     supports_input_streaming = True
 
-    async def synthesize_incremental(
-        self, prompt: TtsPrompt, *, token_rate: float
-    ) -> TtsResult:
+    async def synthesize_incremental(self, prompt: TtsPrompt, *, token_rate: float) -> TtsResult:
         result = await self.synthesize_stream(prompt)
         result.raw["input_streaming"] = True
         result.raw["token_rate"] = token_rate
@@ -252,19 +246,12 @@ class _FakeIncrementalTts(_FakeLatencyTts):
 
 
 def _prompts(count: int = 2) -> list[TtsPrompt]:
-    return [
-        TtsPrompt(
-            prompt_id=f"p{index}", text=f"prompt number {index}", language="en-US"
-        )
-        for index in range(count)
-    ]
+    return [TtsPrompt(prompt_id=f"p{index}", text=f"prompt number {index}", language="en-US") for index in range(count)]
 
 
 def _config(name: str, **run_overrides: object) -> BenchmarkConfig:
     run = {"repeats": 1, "warmup": 1, "timeout_s": 10.0, **run_overrides}
-    return BenchmarkConfig.from_dict(
-        {"tts": [{"name": name, "modes": ["stream"]}], "run": run}
-    )
+    return BenchmarkConfig.from_dict({"tts": [{"name": name, "modes": ["stream"]}], "run": run})
 
 
 class TestWarmColdSplit:
@@ -352,12 +339,10 @@ class TestLoadPass:
         assert len(loaded) == 2
 
     async def test_batch_mode_never_gets_a_load_pass(self) -> None:
-        config = BenchmarkConfig.from_dict(
-            {
-                "tts": [{"name": "fake-latency-tts", "modes": ["batch"]}],
-                "run": {"repeats": 1, "warmup": 0, "tts_load_concurrency": 2},
-            }
-        )
+        config = BenchmarkConfig.from_dict({
+            "tts": [{"name": "fake-latency-tts", "modes": ["batch"]}],
+            "run": {"repeats": 1, "warmup": 0, "tts_load_concurrency": 2},
+        })
 
         results = await runner.run_tts(config, _prompts(1))
 
@@ -446,9 +431,7 @@ class TestReportView:
         assert rows["stream x2"]["prompts"] == 1
 
     def test_markdown_renders_the_new_columns(self) -> None:
-        markdown = report.render_tts_markdown(
-            report.tts_summary_frame(self._results(), "en-US")
-        )
+        markdown = report.render_tts_markdown(report.tts_summary_frame(self._results(), "en-US"))
 
         assert "TTFA p50" in markdown
         assert "Gap p99" in markdown
@@ -472,12 +455,10 @@ class FakeCartesiaServer:
                 half = len(self.pcm) // 2 // 2 * 2
                 for piece in (self.pcm[:half], self.pcm[half:]):
                     await socket.send(
-                        orjson.dumps(
-                            {
-                                "type": "chunk",
-                                "data": base64.b64encode(piece).decode(),
-                            }
-                        ).decode()
+                        orjson.dumps({
+                            "type": "chunk",
+                            "data": base64.b64encode(piece).decode(),
+                        }).decode()
                     )
                 await socket.send(orjson.dumps({"type": "done"}).decode())
                 return
@@ -502,9 +483,7 @@ class TestCartesiaProtocol:
 
     PROMPT = TtsPrompt(prompt_id="p1", text="hello wonderful world", language="en-US")
 
-    async def test_plain_stream_populates_chunk_timing(
-        self, cartesia_ws: FakeCartesiaServer
-    ) -> None:
+    async def test_plain_stream_populates_chunk_timing(self, cartesia_ws: FakeCartesiaServer) -> None:
         adapter = tts.create("cartesia-sonic35")
 
         result = await adapter.synthesize_stream(self.PROMPT)
@@ -513,13 +492,9 @@ class TestCartesiaProtocol:
         assert len(result.chunk_t_s) == 2
         assert result.ttfb_s is not None
         assert result.ttfa_s is not None
-        assert result.ttfa_s - result.ttfb_s >= 0.18, (
-            "the canned clip leads with 200 ms of silence; TTFA must see it"
-        )
+        assert result.ttfa_s - result.ttfb_s >= 0.18, "the canned clip leads with 200 ms of silence; TTFA must see it"
 
-    async def test_incremental_feeds_one_context_and_closes_it(
-        self, cartesia_ws: FakeCartesiaServer
-    ) -> None:
+    async def test_incremental_feeds_one_context_and_closes_it(self, cartesia_ws: FakeCartesiaServer) -> None:
         adapter = tts.create("cartesia-sonic35")
 
         result = await adapter.synthesize_incremental(self.PROMPT, token_rate=400.0)
@@ -530,9 +505,9 @@ class TestCartesiaProtocol:
         messages = cartesia_ws.messages
         pieces = token_pieces(self.PROMPT.text)
         assert len(messages) == len(pieces) + 1, "every piece plus the closing frame"
-        assert {str(m["context_id"]) for m in messages} == {
-            "cartesia-sonic35-p1-incremental"
-        }, "continuations only work inside one context"
+        assert {str(m["context_id"]) for m in messages} == {"cartesia-sonic35-p1-incremental"}, (
+            "continuations only work inside one context"
+        )
         assert [m["continue"] for m in messages] == [True] * len(pieces) + [False]
         assert messages[-1]["transcript"] == ""
         assert "".join(str(m["transcript"]) for m in messages[:-1]) == self.PROMPT.text
@@ -549,8 +524,7 @@ def _needs(*names: str) -> pytest.MarkDecorator:
 
 @pytest.mark.skipif(
     not os.environ.get(LIVE_FLAG),
-    reason=f"set {LIVE_FLAG}=1 to run one short live synthesis per vendor "
-    "(fractions of a cent each)",
+    reason=f"set {LIVE_FLAG}=1 to run one short live synthesis per vendor (fractions of a cent each)",
 )
 class TestLiveStreamSmoke:
     """One short prompt per adapter against the real vendor endpoint.
@@ -576,7 +550,8 @@ class TestLiveStreamSmoke:
         assert result.ok, result.error
         assert result.audio_s > 0
         assert result.chunk_t_s, "a streamed result must carry chunk arrivals"
-        assert result.ttfb_s is not None and result.ttfb_s > 0
+        assert result.ttfb_s is not None
+        assert result.ttfb_s > 0
         if result.ttfa_s is not None:
             assert result.ttfa_s >= result.ttfb_s
         if len(result.chunk_t_s) >= 2:

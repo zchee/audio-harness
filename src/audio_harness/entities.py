@@ -20,13 +20,14 @@ vouch for the occurrence that was misheard.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
+import re
 
 import jiwer
 
 from .metrics import ZERO_COUNTS, ErrorCounts
 from .normalize import comparison_fold_for, normalizer_for, uses_character_metric
+
 
 ENTITY_CLASSES = ("number", "date", "currency", "id", "name")
 """Tag vocabulary: cardinal numbers, dates, currency amounts, alphanumeric
@@ -126,9 +127,7 @@ def _tokenize(text: str, language: str) -> list[str]:
     return normalized.split()
 
 
-def score_entities(
-    annotated_reference: str, hypothesis: str, language: str
-) -> dict[str, EntityClassScore]:
+def score_entities(annotated_reference: str, hypothesis: str, language: str) -> dict[str, EntityClassScore]:
     """Score every tagged entity in one reference against a hypothesis.
 
     The full transcripts are aligned and each entity's errors are read off

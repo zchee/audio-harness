@@ -76,9 +76,7 @@ class TestAnnotatedTagsAreWellFormed:
     """The annotated form must round-trip through entities.py's own parser."""
 
     @pytest.mark.parametrize("subtag", sorted(LOCALES))
-    def test_annotated_form_parses_to_exactly_one_tagged_span(
-        self, subtag: str
-    ) -> None:
+    def test_annotated_form_parses_to_exactly_one_tagged_span(self, subtag: str) -> None:
         prompts = generate_locale(subtag, count_per_class=1, seed=3)
 
         for prompt in prompts:

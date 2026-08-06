@@ -18,6 +18,7 @@ from . import (
 )
 from .base import StreamTimeline, SttProvider, available, create, family_of, register
 
+
 __all__ = [
     "StreamTimeline",
     "SttProvider",

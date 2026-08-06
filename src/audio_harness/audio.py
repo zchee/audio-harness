@@ -9,18 +9,19 @@ chunk on a wall-clock deadline.
 from __future__ import annotations
 
 import asyncio
-import time
-import wave
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
+import time
+import wave
 
 import numpy as np
 import soundfile as sf
 import soxr
 
 from .types import AudioClip
+
 
 BYTES_PER_SAMPLE = 2
 """Width of one mono sample in the harness' canonical pcm_s16le format."""
@@ -146,9 +147,7 @@ SPEECH_THRESHOLD = 0.02
 """Frame energy, relative to the clip's loudest frame, counted as speech."""
 
 
-def detect_speech_end_s(
-    samples: np.ndarray, sample_rate: int, *, frame_ms: int = SPEECH_FRAME_MS
-) -> float:
+def detect_speech_end_s(samples: np.ndarray, sample_rate: int, *, frame_ms: int = SPEECH_FRAME_MS) -> float:
     """Return the offset of the last voiced frame, in seconds.
 
     Uses per-frame RMS against a threshold relative to the clip's own peak, so
@@ -179,9 +178,7 @@ def detect_speech_end_s(
     return float((voiced[-1] + 1) * frame_ms / 1000)
 
 
-def detect_speech_onset_s(
-    samples: np.ndarray, sample_rate: int, *, frame_ms: int = SPEECH_FRAME_MS
-) -> float | None:
+def detect_speech_onset_s(samples: np.ndarray, sample_rate: int, *, frame_ms: int = SPEECH_FRAME_MS) -> float | None:
     """Return the offset of the first voiced frame, in seconds.
 
     The mirror of :func:`detect_speech_end_s`, used by the TTS lane to locate

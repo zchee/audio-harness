@@ -14,11 +14,13 @@ from typing import Any
 import orjson
 from websockets.asyncio.client import ClientConnection
 
-from ..audio import wrap_wav
-from ..config import require_env
-from ..types import AudioClip, EventKind, Mode, SttResult
+from audio_harness.audio import wrap_wav
+from audio_harness.config import require_env
+from audio_harness.types import AudioClip, EventKind, Mode, SttResult
+
 from .base import StreamTimeline, SttProvider, raise_for_status, register
 from .ws import StreamProtocolError, run_stream
+
 
 BATCH_URL = "https://asr.api.speechmatics.com/v2/jobs"
 STREAM_URL = "wss://eu2.rt.speechmatics.com/v2"
@@ -51,9 +53,7 @@ class _SpeechmaticsBase(SttProvider):
     def _transcription_config(self, clip: AudioClip) -> dict[str, Any]:
         return {
             "language": clip.language.split("-")[0],
-            "operating_point": self.options.get(
-                "operating_point", self.operating_point
-            ),
+            "operating_point": self.options.get("operating_point", self.operating_point),
         }
 
     async def transcribe_batch(self, clip: AudioClip) -> SttResult:
@@ -101,9 +101,7 @@ class _SpeechmaticsBase(SttProvider):
         raise_for_status(transcript, self.key)
         return transcript.text.strip()
 
-    async def transcribe_stream(
-        self, clip: AudioClip, *, chunk_ms: int, realtime: bool
-    ) -> SttResult:
+    async def transcribe_stream(self, clip: AudioClip, *, chunk_ms: int, realtime: bool) -> SttResult:
         """Stream PCM over the v2 realtime socket, tracking sequence numbers."""
         result = self._result(clip, Mode.STREAM)
         timeline = StreamTimeline()
@@ -115,23 +113,19 @@ class _SpeechmaticsBase(SttProvider):
             config["max_delay"] = float(self.options["max_delay"])
         eou_trigger = self.options.get("end_of_utterance_silence_trigger")
         if eou_trigger:
-            config["conversation_config"] = {
-                "end_of_utterance_silence_trigger": float(eou_trigger)
-            }
+            config["conversation_config"] = {"end_of_utterance_silence_trigger": float(eou_trigger)}
 
         async def start_recognition(socket: ClientConnection) -> None:
             await socket.send(
-                orjson.dumps(
-                    {
-                        "message": "StartRecognition",
-                        "audio_format": {
-                            "type": "raw",
-                            "encoding": "pcm_s16le",
-                            "sample_rate": clip.sample_rate,
-                        },
-                        "transcription_config": config,
-                    }
-                ).decode()
+                orjson.dumps({
+                    "message": "StartRecognition",
+                    "audio_format": {
+                        "type": "raw",
+                        "encoding": "pcm_s16le",
+                        "sample_rate": clip.sample_rate,
+                    },
+                    "transcription_config": config,
+                }).decode()
             )
 
         def count_chunk(chunk: bytes) -> bytes:
@@ -140,11 +134,7 @@ class _SpeechmaticsBase(SttProvider):
             return chunk
 
         async def end_of_stream(socket: ClientConnection) -> None:
-            await socket.send(
-                orjson.dumps(
-                    {"message": "EndOfStream", "last_seq_no": sent_chunks}
-                ).decode()
-            )
+            await socket.send(orjson.dumps({"message": "EndOfStream", "last_seq_no": sent_chunks}).decode())
 
         await run_stream(
             url=str(self.options.get("stream_url", STREAM_URL)),
@@ -193,9 +183,7 @@ def _handle_message(payload: Any, timeline: StreamTimeline) -> bool:
         timeline.record("", is_final=False, kind=EventKind.EOU)
         return False
     if message == "Error":
-        raise StreamProtocolError(
-            f"speechmatics: {payload.get('type')}: {payload.get('reason')}"
-        )
+        raise StreamProtocolError(f"speechmatics: {payload.get('type')}: {payload.get('reason')}")
     if message not in {"AddTranscript", "AddPartialTranscript"}:
         return False
 

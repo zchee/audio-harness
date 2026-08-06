@@ -34,6 +34,7 @@ from pathlib import Path
 
 import orjson
 
+
 CATEGORIES = ("interview", "general", "entities")
 """The three prompt-suite layers, in the order the plan introduces them."""
 

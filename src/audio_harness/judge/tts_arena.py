@@ -35,24 +35,24 @@ by construction, which is the honest reading of the evidence.
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import itertools
-import random
-import re
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass, field
+import hashlib
+import itertools
 from pathlib import Path
+import random
+import re
 
+from google import genai
+from google.genai import errors as genai_errors, types as genai_types
 import numpy as np
 import orjson
 import soxr
-from google import genai
-from google.genai import errors as genai_errors
-from google.genai import types as genai_types
 
-from ..audio import _float_to_pcm16, read_audio_samples, wrap_wav
-from ..config import require_env
-from ..types import TtsPrompt
+from audio_harness.audio import _float_to_pcm16, read_audio_samples, wrap_wav
+from audio_harness.config import require_env
+from audio_harness.types import TtsPrompt
+
 
 JUDGE_MODEL = "gemini-2.5-flash"
 """Pinned audio-in judge model. Changing it invalidates every cached verdict."""
@@ -71,16 +71,13 @@ ASPECTS = ("naturalness", "prosody", "artifacts")
 
 _ASPECT_FOCUS: dict[str, str] = {
     "naturalness": (
-        "Judge which clip sounds more natural: closer to a fluent human "
-        "speaker and less obviously synthetic."
+        "Judge which clip sounds more natural: closer to a fluent human speaker and less obviously synthetic."
     ),
     "prosody": (
-        "Judge which clip has better prosody: rhythm, stress, intonation "
-        "and phrasing appropriate to the text."
+        "Judge which clip has better prosody: rhythm, stress, intonation and phrasing appropriate to the text."
     ),
     "artifacts": (
-        "Judge which clip has fewer audio artifacts: glitches, clicks, "
-        "buzzing, distortion, dropouts or robotic timbre."
+        "Judge which clip has fewer audio artifacts: glitches, clicks, buzzing, distortion, dropouts or robotic timbre."
     ),
 }
 
@@ -312,10 +309,7 @@ class GateReport:
             return f"gate passed - ranked (n={self.n_systems} systems)"
         failed = [c.name for c in self.criteria if c.status == "fail"]
         if failed:
-            return (
-                f"experimental - not ranked (n={self.n_systems} systems; "
-                f"failed: {', '.join(failed)})"
-            )
+            return f"experimental - not ranked (n={self.n_systems} systems; failed: {', '.join(failed)})"
         return f"experimental (panel pending; n={self.n_systems} systems)"
 
 
@@ -363,9 +357,7 @@ class ArenaRun:
         ) / 1e6
 
 
-def load_arena_prompts(
-    specs: Sequence[str], *, language: str, seed: int
-) -> list[TtsPrompt]:
+def load_arena_prompts(specs: Sequence[str], *, language: str, seed: int) -> list[TtsPrompt]:
     """Build the arena prompt set from ``path[:count]`` file specs.
 
     Prompt ids are ``{file stem}-{line number:03d}``, so the same line always
@@ -404,9 +396,7 @@ def load_arena_prompts(
 
         lines = [
             (number, line.strip())
-            for number, line in enumerate(
-                path.read_text(encoding="utf-8").splitlines(), start=1
-            )
+            for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1)
             if line.strip()
         ]
         if not lines:
@@ -415,17 +405,14 @@ def load_arena_prompts(
             rng = random.Random(f"{seed}:{stem}")
             lines = sorted(rng.sample(lines, count))
         prompts.extend(
-            TtsPrompt(prompt_id=f"{stem}-{number:03d}", text=text, language=language)
-            for number, text in lines
+            TtsPrompt(prompt_id=f"{stem}-{number:03d}", text=text, language=language) for number, text in lines
         )
     if not prompts:
         raise ArenaError("no prompt files given")
     return prompts
 
 
-def load_system_audio(
-    audio_dir: str | Path, system: str, prompt_id: str
-) -> np.ndarray | None:
+def load_system_audio(audio_dir: str | Path, system: str, prompt_id: str) -> np.ndarray | None:
     """Load one saved synthesis as mono float at :data:`ARENA_SAMPLE_RATE`.
 
     Reads the ``{system}-batch-{prompt_id}.wav`` file written by
@@ -445,9 +432,7 @@ def load_system_audio(
     return samples.astype(np.float32)
 
 
-def pair_wav_bytes(
-    first: np.ndarray, second: np.ndarray, *, gap_s: float = PAIR_GAP_S
-) -> bytes:
+def pair_wav_bytes(first: np.ndarray, second: np.ndarray, *, gap_s: float = PAIR_GAP_S) -> bytes:
     """Concatenate two clips into the single WAV a judge call hears.
 
     The AudioJudge protocol judges one audio file holding both renditions —
@@ -529,9 +514,7 @@ def _gemini_judge(model: str) -> JudgeCall:
     return judge
 
 
-def _cache_key(
-    model: str, aspect: str, prompt_id: str, first: str, second: str, wav: bytes
-) -> str:
+def _cache_key(model: str, aspect: str, prompt_id: str, first: str, second: str, wav: bytes) -> str:
     """Idempotency key for one judge call.
 
     Hashing the pair WAV ties the key to the actual audio judged: a
@@ -632,7 +615,7 @@ async def run_arena(
             if samples is None:
                 run.missing_audio.append(f"{system}:{prompt.prompt_id}")
             else:
-                audio[(system, prompt.prompt_id)] = samples
+                audio[system, prompt.prompt_id] = samples
 
     jobs: list[tuple[str, str, str, str, bytes]] = []
     for prompt in prompts:
@@ -641,15 +624,13 @@ async def run_arena(
                 continue
             if (two, prompt.prompt_id) not in audio:
                 continue
-            forward = pair_wav_bytes(
-                audio[(one, prompt.prompt_id)], audio[(two, prompt.prompt_id)]
-            )
-            backward = pair_wav_bytes(
-                audio[(two, prompt.prompt_id)], audio[(one, prompt.prompt_id)]
-            )
+            forward = pair_wav_bytes(audio[one, prompt.prompt_id], audio[two, prompt.prompt_id])
+            backward = pair_wav_bytes(audio[two, prompt.prompt_id], audio[one, prompt.prompt_id])
             for aspect in ASPECTS:
-                jobs.append((aspect, prompt.prompt_id, one, two, forward))
-                jobs.append((aspect, prompt.prompt_id, two, one, backward))
+                jobs.extend((
+                    (aspect, prompt.prompt_id, one, two, forward),
+                    (aspect, prompt.prompt_id, two, one, backward),
+                ))
 
     cache_file = Path(cache_path)
     cache_file.parent.mkdir(parents=True, exist_ok=True)
@@ -659,9 +640,7 @@ async def run_arena(
     write_lock = asyncio.Lock()
     done = 0
 
-    async def one_job(
-        aspect: str, prompt_id: str, first: str, second: str, wav: bytes
-    ) -> Verdict:
+    async def one_job(aspect: str, prompt_id: str, first: str, second: str, wav: bytes) -> Verdict:
         nonlocal done
         key = _cache_key(model, aspect, prompt_id, first, second, wav)
         hit = cache.get(key)
@@ -684,9 +663,7 @@ async def run_arena(
         async with limiter:
             for attempt in range(_JUDGE_ATTEMPTS):
                 try:
-                    reply = await asyncio.wait_for(
-                        judge_call(wav, instruction), timeout=call_timeout_s
-                    )
+                    reply = await asyncio.wait_for(judge_call(wav, instruction), timeout=call_timeout_s)
                 except genai_errors.APIError as exc:
                     verdict.error = f"judge call failed: {exc}"
                     code = getattr(exc, "code", None)
@@ -715,20 +692,18 @@ async def run_arena(
             async with write_lock:
                 with cache_file.open("ab") as handle:
                     handle.write(
-                        orjson.dumps(
-                            {
-                                "key": key,
-                                "aspect": verdict.aspect,
-                                "prompt_id": verdict.prompt_id,
-                                "first": verdict.first,
-                                "second": verdict.second,
-                                "winner": verdict.winner,
-                                "model": verdict.model,
-                                "prompt_tokens": verdict.prompt_tokens,
-                                "output_tokens": verdict.output_tokens,
-                                "raw_text": verdict.raw_text,
-                            }
-                        )
+                        orjson.dumps({
+                            "key": key,
+                            "aspect": verdict.aspect,
+                            "prompt_id": verdict.prompt_id,
+                            "first": verdict.first,
+                            "second": verdict.second,
+                            "winner": verdict.winner,
+                            "model": verdict.model,
+                            "prompt_tokens": verdict.prompt_tokens,
+                            "output_tokens": verdict.output_tokens,
+                            "raw_text": verdict.raw_text,
+                        })
                     )
                     handle.write(b"\n")
         else:
@@ -738,7 +713,7 @@ async def run_arena(
             on_progress(done, len(jobs))
         return verdict
 
-    run.verdicts = list(await asyncio.gather(*(one_job(*job) for job in jobs)))
+    run.verdicts = list(await asyncio.gather(*itertools.starmap(one_job, jobs)))
     return run
 
 
@@ -766,9 +741,7 @@ _BT_MAX_ITER = 1000
 _BT_TOLERANCE = 1e-10
 
 
-def bt_scores(
-    comparisons: Iterable[Comparison], systems: Sequence[str]
-) -> dict[str, float]:
+def bt_scores(comparisons: Iterable[Comparison], systems: Sequence[str]) -> dict[str, float]:
     """Fit Bradley-Terry log-strengths by the Hunter (2004) MM algorithm.
 
     Ties contribute half a win to each side. Strengths are normalized to a
@@ -800,12 +773,8 @@ def bt_scores(
         for i in range(n):
             played = games[i] > 0
             if played.any():
-                denominators[i] = (
-                    games[i][played] / (strengths[i] + strengths[played])
-                ).sum()
-        updated = np.where(
-            denominators > 0, totals / np.maximum(denominators, STRENGTH_FLOOR), 1.0
-        )
+                denominators[i] = (games[i][played] / (strengths[i] + strengths[played])).sum()
+        updated = np.where(denominators > 0, totals / np.maximum(denominators, STRENGTH_FLOOR), 1.0)
         updated = np.maximum(updated, STRENGTH_FLOOR)
         updated /= np.exp(np.mean(np.log(updated)))
         if np.max(np.abs(np.log(updated) - np.log(strengths))) < _BT_TOLERANCE:
@@ -842,7 +811,7 @@ def bootstrap_bt(
         by_prompt.setdefault(comparison.prompt_id, []).append(comparison)
     prompt_ids = sorted(by_prompt)
     if not prompt_ids:
-        return {system: (0.0, 0.0) for system in systems}
+        return dict.fromkeys(systems, (0.0, 0.0))
 
     rng = random.Random(seed)
     samples: dict[str, list[float]] = {system: [] for system in systems}
@@ -901,14 +870,8 @@ def ci_separated_pairs(scores: Sequence[BtScore]) -> list[tuple[str, str]]:
     systems Spearman over full rankings quantizes, so separation — not rank
     correlation — is the pre-registered agreement test.
     """
-    return [
-        (a.system, b.system)
-        for a, b in itertools.combinations(scores, 2)
-        if a.ci_low > b.ci_high
-    ] + [
-        (b.system, a.system)
-        for a, b in itertools.combinations(scores, 2)
-        if b.ci_low > a.ci_high
+    return [(a.system, b.system) for a, b in itertools.combinations(scores, 2) if a.ci_low > b.ci_high] + [
+        (b.system, a.system) for a, b in itertools.combinations(scores, 2) if b.ci_low > a.ci_high
     ]
 
 
@@ -952,9 +915,7 @@ def load_panel(path: str | Path) -> list[PanelVote]:
     if not file.is_file():
         raise ArenaError(f"panel file not found: {file}")
     votes: list[PanelVote] = []
-    for number, line in enumerate(
-        file.read_text(encoding="utf-8").splitlines(), start=1
-    ):
+    for number, line in enumerate(file.read_text(encoding="utf-8").splitlines(), start=1):
         if not line.strip():
             continue
         record = orjson.loads(line)
@@ -969,9 +930,7 @@ def load_panel(path: str | Path) -> list[PanelVote]:
         except KeyError as exc:
             raise ArenaError(f"{file}:{number}: missing panel field {exc}") from exc
         if vote.winner not in ("first", "second", "tie"):
-            raise ArenaError(
-                f"{file}:{number}: winner must be first/second/tie, got {vote.winner!r}"
-            )
+            raise ArenaError(f"{file}:{number}: winner must be first/second/tie, got {vote.winner!r}")
         votes.append(vote)
     return votes
 
@@ -1023,16 +982,11 @@ def inter_rater_agreement(
             continue
         labels_a = [by_rater[rater_a][item] for item in shared]
         labels_b = [by_rater[rater_b][item] for item in shared]
-        observed = sum(a == b for a, b in zip(labels_a, labels_b, strict=True)) / len(
-            shared
-        )
+        observed = sum(a == b for a, b in zip(labels_a, labels_b, strict=True)) / len(shared)
         agreements.append(observed)
 
         categories = sorted(set(labels_a) | set(labels_b))
-        expected = sum(
-            (labels_a.count(c) / len(shared)) * (labels_b.count(c) / len(shared))
-            for c in categories
-        )
+        expected = sum((labels_a.count(c) / len(shared)) * (labels_b.count(c) / len(shared)) for c in categories)
         if expected < 1.0:
             kappas.append((observed - expected) / (1.0 - expected))
 
@@ -1086,9 +1040,7 @@ def spearman_rho(a: Sequence[float], b: Sequence[float]) -> float | None:
 _EXACT_PERMUTATION_MAX_N = 8
 
 
-def exact_permutation_p(
-    a: Sequence[float], b: Sequence[float], *, seed: int = 0
-) -> float | None:
+def exact_permutation_p(a: Sequence[float], b: Sequence[float], *, seed: int = 0) -> float | None:
     """One-sided permutation p for the observed Spearman rho.
 
     Exhaustive over every permutation up to n=:data:`_EXACT_PERMUTATION_MAX_N`
@@ -1160,11 +1112,7 @@ def evaluate_gate(
         )
     else:
         human_scores = human_bt(panel, systems)
-        discordant = [
-            (better, worse)
-            for better, worse in separated
-            if human_scores[better] < human_scores[worse]
-        ]
+        discordant = [(better, worse) for better, worse in separated if human_scores[better] < human_scores[worse]]
         percent, kappa = inter_rater_agreement(panel)
         judge_vector = [score.log_strength for score in scores]
         human_vector = [human_scores[score.system] for score in scores]
@@ -1188,9 +1136,7 @@ def evaluate_gate(
             status, prefix = "fail", f"discordant CI-separated pair(s) [{pairs}]: "
         else:
             status, prefix = "pass", ""
-        human_criterion = Criterion(
-            name="human-panel agreement", status=status, detail=prefix + descriptive
-        )
+        human_criterion = Criterion(name="human-panel agreement", status=status, detail=prefix + descriptive)
 
     if second_family_scores is None:
         family_criterion = Criterion(
@@ -1212,10 +1158,7 @@ def evaluate_gate(
         family_criterion = Criterion(
             name="cross-family judge agreement",
             status="pass" if ok else "fail",
-            detail=(
-                f"rho {_fmt(rho)} vs second judge family "
-                f"(gate >= {CROSS_FAMILY_RHO_GATE})"
-            ),
+            detail=(f"rho {_fmt(rho)} vs second judge family (gate >= {CROSS_FAMILY_RHO_GATE})"),
         )
 
     rate = flips.rate
@@ -1282,10 +1225,7 @@ def render_arena_markdown(
         "| Gate criterion | Status | Detail |",
         "|---|---|---|",
     ]
-    lines.extend(
-        f"| {criterion.name} | {criterion.status} | {criterion.detail} |"
-        for criterion in gate.criteria
-    )
+    lines.extend(f"| {criterion.name} | {criterion.status} | {criterion.detail} |" for criterion in gate.criteria)
     lines += [
         "",
         f"Calls: {run.live_calls} live + {run.cached_calls} cached, "
@@ -1327,21 +1267,19 @@ def write_arena_outputs(
     with results_path.open("wb") as handle:
         for verdict in run.verdicts:
             handle.write(
-                orjson.dumps(
-                    {
-                        "aspect": verdict.aspect,
-                        "prompt_id": verdict.prompt_id,
-                        "first": verdict.first,
-                        "second": verdict.second,
-                        "winner": verdict.winner,
-                        "model": verdict.model,
-                        "cached": verdict.cached,
-                        "prompt_tokens": verdict.prompt_tokens,
-                        "output_tokens": verdict.output_tokens,
-                        "raw_text": verdict.raw_text,
-                        "error": verdict.error,
-                    }
-                )
+                orjson.dumps({
+                    "aspect": verdict.aspect,
+                    "prompt_id": verdict.prompt_id,
+                    "first": verdict.first,
+                    "second": verdict.second,
+                    "winner": verdict.winner,
+                    "model": verdict.model,
+                    "cached": verdict.cached,
+                    "prompt_tokens": verdict.prompt_tokens,
+                    "output_tokens": verdict.output_tokens,
+                    "raw_text": verdict.raw_text,
+                    "error": verdict.error,
+                })
             )
             handle.write(b"\n")
 

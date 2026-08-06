@@ -8,11 +8,13 @@ from urllib.parse import urlencode
 import orjson
 from websockets.asyncio.client import ClientConnection
 
-from ..audio import wrap_wav
-from ..config import require_env
-from ..types import AudioClip, EventKind, Mode, SttResult
+from audio_harness.audio import wrap_wav
+from audio_harness.config import require_env
+from audio_harness.types import AudioClip, EventKind, Mode, SttResult
+
 from .base import StreamTimeline, SttProvider, raise_for_status, register
 from .ws import run_stream
+
 
 BATCH_URL = "https://api.deepgram.com/v1/listen"
 STREAM_URL = "wss://api.deepgram.com/v1/listen"
@@ -69,9 +71,7 @@ class DeepgramNova3(SttProvider):
         result.raw["response"] = payload
         return result
 
-    async def transcribe_stream(
-        self, clip: AudioClip, *, chunk_ms: int, realtime: bool
-    ) -> SttResult:
+    async def transcribe_stream(self, clip: AudioClip, *, chunk_ms: int, realtime: bool) -> SttResult:
         """Stream PCM over the listen WebSocket with interim results enabled."""
         result = self._result(clip, Mode.STREAM)
         timeline = StreamTimeline()
@@ -115,9 +115,7 @@ class DeepgramNova3(SttProvider):
         # speech_final events exist on every stream — the lane is always
         # EOU-capable. The effective knob values are recorded because a
         # ranking is only comparable when each lane's configuration is known.
-        result.raw["eou_source"] = (
-            "speech_final+utterance_end" if utterance_end_ms else "speech_final"
-        )
+        result.raw["eou_source"] = "speech_final+utterance_end" if utterance_end_ms else "speech_final"
         result.raw["endpoint_config"] = {
             "endpointing": endpointing if endpointing is not None else 10,
             "utterance_end_ms": utterance_end_ms,

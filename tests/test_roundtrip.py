@@ -10,8 +10,8 @@ computation, and the legacy-file migration path.
 from __future__ import annotations
 
 import os
-import warnings
 from pathlib import Path
+import warnings
 
 import orjson
 import pytest
@@ -105,14 +105,12 @@ class TestRoundtripConfig:
 
     def test_legacy_scalar_mapping_parses_with_deprecation(self) -> None:
         with pytest.warns(DeprecationWarning, match="single-judge"):
-            config = BenchmarkConfig.from_dict(
-                {
-                    "roundtrip_stt": {
-                        "name": "deepgram-nova3",
-                        "options": {"smart_format": False},
-                    }
+            config = BenchmarkConfig.from_dict({
+                "roundtrip_stt": {
+                    "name": "deepgram-nova3",
+                    "options": {"smart_format": False},
                 }
-            )
+            })
         assert [judge.name for judge in config.roundtrip_stt] == ["deepgram-nova3"]
         assert config.roundtrip_stt[0].options == {"smart_format": False}
 
@@ -124,9 +122,7 @@ class TestRoundtripConfig:
     def test_list_form_parses_without_warning(self) -> None:
         with warnings.catch_warnings():
             warnings.simplefilter("error")
-            config = BenchmarkConfig.from_dict(
-                {"roundtrip_stt": [{"name": "deepgram-nova3"}, "whisper-local"]}
-            )
+            config = BenchmarkConfig.from_dict({"roundtrip_stt": [{"name": "deepgram-nova3"}, "whisper-local"]})
         assert [judge.name for judge in config.roundtrip_stt] == [
             "deepgram-nova3",
             "whisper-local",
@@ -177,14 +173,12 @@ class TestScoreRoundtrip:
     """Verdicts land under raw["roundtrip"] in config order."""
 
     async def test_every_judge_writes_a_verdict_in_config_order(self) -> None:
-        config = BenchmarkConfig.from_dict(
-            {
-                "roundtrip_stt": [
-                    {"name": "fake-echo-judge"},
-                    {"name": "fake-broken-judge"},
-                ]
-            }
-        )
+        config = BenchmarkConfig.from_dict({
+            "roundtrip_stt": [
+                {"name": "fake-echo-judge"},
+                {"name": "fake-broken-judge"},
+            ]
+        })
         result = _tts_result("fake-openai-tts")
         prompt = TtsPrompt(prompt_id="p1", text="hello world", language="en-US")
 
@@ -203,15 +197,12 @@ class TestScoreRoundtrip:
         }
         assert verdicts[1]["text"] is None
         assert "RuntimeError: boom" in str(verdicts[1]["error"]), (
-            "a judge failure must be recorded on the verdict, not lose the "
-            "other judge's score"
+            "a judge failure must be recorded on the verdict, not lose the other judge's score"
         )
 
     async def test_failed_synthesis_is_never_judged(self) -> None:
         config = BenchmarkConfig.from_dict({"roundtrip_stt": ["fake-echo-judge"]})
-        result = TtsResult(
-            provider="fake-openai-tts", prompt_id="p1", mode=Mode.BATCH, error="boom"
-        )
+        result = TtsResult(provider="fake-openai-tts", prompt_id="p1", mode=Mode.BATCH, error="boom")
 
         await runner.score_roundtrip(config, [result], {})
 
@@ -251,9 +242,7 @@ class TestRankedScore:
         row = report.tts_summary_frame([result], "en-US").to_dicts()[0]
 
         assert row["roundtrip_error_rate"] == pytest.approx(0.5)
-        assert row["rt[whisper-local]"].endswith("†"), (
-            "whisper-local shares OpenAI lineage with this candidate"
-        )
+        assert row["rt[whisper-local]"].endswith("†"), "whisper-local shares OpenAI lineage with this candidate"
 
     def test_divergent_judges_are_flagged(self) -> None:
         result = _judged_result(
@@ -294,8 +283,7 @@ class TestRankedScore:
 
         assert row["rt[whisper-local]"] == "—"
         assert row["roundtrip_error_rate"] is None, (
-            "with the only cross-family judge failed, the lane has no ranked "
-            "score rather than a same-family one"
+            "with the only cross-family judge failed, the lane has no ranked score rather than a same-family one"
         )
 
     def test_markdown_renders_judge_columns_and_divergence(self) -> None:
@@ -307,9 +295,7 @@ class TestRankedScore:
             ],
         )
 
-        markdown = report.render_tts_markdown(
-            report.tts_summary_frame([result], "en-US")
-        )
+        markdown = report.render_tts_markdown(report.tts_summary_frame([result], "en-US"))
 
         assert "RT deepgram-nova3" in markdown
         assert "RT whisper-local" in markdown
@@ -358,8 +344,7 @@ class TestResultsFiles:
 
         assert loaded[0].raw["roundtrip"] == verdicts
         assert loaded[0].ok, (
-            "audio bytes are not persisted, so the recorded duration is the "
-            "evidence that audio existed"
+            "audio bytes are not persisted, so the recorded duration is the evidence that audio existed"
         )
 
     def test_legacy_file_reads_as_a_one_judge_lane(self, tmp_path: Path) -> None:
@@ -383,13 +368,9 @@ class TestResultsFiles:
 
         loaded = runner.read_tts_results(file)
 
-        assert loaded[0].raw["roundtrip"] == [
-            {"provider": "deepgram-nova3", "text": "hello world", "error": None}
-        ]
+        assert loaded[0].raw["roundtrip"] == [{"provider": "deepgram-nova3", "text": "hello world", "error": None}]
 
-    def test_results_kind_is_detected_from_the_first_record(
-        self, tmp_path: Path
-    ) -> None:
+    def test_results_kind_is_detected_from_the_first_record(self, tmp_path: Path) -> None:
         tts_file = tmp_path / "tts-results.jsonl"
         tts_file.write_bytes(orjson.dumps({"provider": "x", "prompt_id": "p"}) + b"\n")
         stt_file = tmp_path / "stt-results.jsonl"
@@ -411,8 +392,7 @@ class TestWhisperLocalAdapter:
 
 @pytest.mark.skipif(
     not os.environ.get("AUDIO_HARNESS_TEST_WHISPER"),
-    reason="set AUDIO_HARNESS_TEST_WHISPER=1 to run the pinned local model "
-    "(~3 GB first-time download)",
+    reason="set AUDIO_HARNESS_TEST_WHISPER=1 to run the pinned local model (~3 GB first-time download)",
 )
 class TestWhisperLocalLive:
     """Live inference through the pinned mlx model."""

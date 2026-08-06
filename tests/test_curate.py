@@ -38,13 +38,9 @@ class TestYodasParsing:
     """Timing comes from utterance keys; filters reject junk."""
 
     def test_parses_offsets_from_centisecond_keys(self) -> None:
-        shard = _yodas_shard(
-            _many({"vid01-00000-00000018-00000450": "elég hosszú mondat ez ide"})
-        )
+        shard = _yodas_shard(_many({"vid01-00000-00000018-00000450": "elég hosszú mondat ez ide"}))
 
-        candidates = parse_yodas_text_shard(
-            shard, subset="hu000", shard="00000000", language="hu-HU"
-        )
+        candidates = parse_yodas_text_shard(shard, subset="hu000", shard="00000000", language="hu-HU")
 
         first = candidates[0]
         assert first.start_s == 0.18
@@ -77,21 +73,12 @@ class TestYodasParsing:
         }
         for name, case in tests.items():
             shard = _yodas_shard(_many({case["key"]: case["text"]}))
-            candidates = parse_yodas_text_shard(
-                shard, subset="hu000", shard="00000000", language="hu-HU"
-            )
+            candidates = parse_yodas_text_shard(shard, subset="hu000", shard="00000000", language="hu-HU")
             assert all(c.utt_id != case["key"] for c in candidates), name
 
     def test_short_videos_are_not_talk_content(self) -> None:
-        shard = _yodas_shard(
-            {"vid01-00000-00000018-00000450": "elég hosszú mondat ez ide"}
-        )
-        assert (
-            parse_yodas_text_shard(
-                shard, subset="hu000", shard="00000000", language="hu-HU"
-            )
-            == []
-        )
+        shard = _yodas_shard({"vid01-00000-00000018-00000450": "elég hosszú mondat ez ide"})
+        assert parse_yodas_text_shard(shard, subset="hu000", shard="00000000", language="hu-HU") == []
 
 
 class TestGranaryParsing:
@@ -99,15 +86,13 @@ class TestGranaryParsing:
 
     def test_parses_rows_and_skips_partial_lines(self) -> None:
         lines = [
-            orjson.dumps(
-                {
-                    "utt_id": "de000_x_1",
-                    "text": "ein ausreichend langer satz",
-                    "duration": 4.2,
-                    "original_source_id": "srcvid",
-                    "dataset_source": "ytc",
-                }
-            ).decode(),
+            orjson.dumps({
+                "utt_id": "de000_x_1",
+                "text": "ein ausreichend langer satz",
+                "duration": 4.2,
+                "original_source_id": "srcvid",
+                "dataset_source": "ytc",
+            }).decode(),
             '{"utt_id": "truncat',
         ]
 
@@ -118,11 +103,7 @@ class TestGranaryParsing:
         assert candidates[0].end_s == 4.2
 
     def test_duration_filter_applies(self) -> None:
-        lines = [
-            orjson.dumps(
-                {"utt_id": "u1", "text": "kurzer aber valider text", "duration": 0.8}
-            ).decode()
-        ]
+        lines = [orjson.dumps({"utt_id": "u1", "text": "kurzer aber valider text", "duration": 0.8}).decode()]
         assert parse_granary_lines(lines, subset="ytc", language="de-DE") == []
 
 
@@ -152,18 +133,14 @@ class TestSampling:
         assert first == second
 
     def test_per_video_cap_holds(self) -> None:
-        pool = [_candidate("one-video", f"u{i}") for i in range(50)] + [
-            _candidate(f"v{i}", f"w{i}") for i in range(40)
-        ]
+        pool = [_candidate("one-video", f"u{i}") for i in range(50)] + [_candidate(f"v{i}", f"w{i}") for i in range(40)]
 
         chosen = sample_candidates(pool, count=40, seed=7)
 
         from collections import Counter
 
         counts = Counter(c.video_id for c in chosen)
-        assert counts["one-video"] <= 3, (
-            "thirty clips from one episode would measure one microphone"
-        )
+        assert counts["one-video"] <= 3, "thirty clips from one episode would measure one microphone"
 
     def test_sample_meets_the_lane_minimum_when_the_pool_allows(self) -> None:
         pool = [_candidate(f"v{i}", f"u{i}") for i in range(120)]
@@ -177,9 +154,7 @@ class TestManifestRows:
         row = manifest_row(_candidate("vid", "utt"))
 
         assert row["license"] == "CC-BY-3.0"
-        assert row["gold_status"] == "unverified", (
-            "only the human CER<5% review may promote a language to gold"
-        )
+        assert row["gold_status"] == "unverified", "only the human CER<5% review may promote a language to gold"
         assert row["duration_s"] == 5.0
         assert row["language"] == "de-DE"
 

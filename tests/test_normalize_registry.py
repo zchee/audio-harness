@@ -155,9 +155,7 @@ class TestGermanNormalization:
             },
         }
         for name, case in tests.items():
-            assert normalize_german(case["raw"]) == normalize_german(case["same_as"]), (
-                name
-            )
+            assert normalize_german(case["raw"]) == normalize_german(case["same_as"]), name
 
     def test_hyphenated_compounds_still_split_to_match_spaced_refs(self) -> None:
         """Golden-diff clips 11131/1871: references space these compounds, so
@@ -234,9 +232,7 @@ class TestFrenchNormalization:
             },
         }
         for name, case in tests.items():
-            assert normalize_french(case["raw"]) == normalize_french(case["same_as"]), (
-                name
-            )
+            assert normalize_french(case["raw"]) == normalize_french(case["same_as"]), name
 
 
 class TestSpanishNormalization:
@@ -275,9 +271,7 @@ class TestJapaneseKanaFold:
 
     def test_katakana_folds_onto_hiragana(self) -> None:
         assert fold_kana("アイウ") == "あいう"
-        assert fold_kana("コーヒー") == "こーひー", (
-            "the prolonged sound mark is shared by both scripts"
-        )
+        assert fold_kana("コーヒー") == "こーひー", "the prolonged sound mark is shared by both scripts"
 
     def test_normalizer_output_keeps_the_script_distinction(self) -> None:
         """The fold is a scoring equivalence, not a canonical form — a human

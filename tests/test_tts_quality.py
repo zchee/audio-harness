@@ -106,9 +106,7 @@ class TestScoreDirectory:
 class TestScoreResultsFile:
     """The results-file route reads saved audio through the runner's own paths."""
 
-    def _result(
-        self, provider: str, mode: Mode, prompt_id: str, *, error: str | None = None
-    ) -> TtsResult:
+    def _result(self, provider: str, mode: Mode, prompt_id: str, *, error: str | None = None) -> TtsResult:
         # audio_s must be nonzero: read_tts_results() drops the raw audio
         # bytes and TtsResult.ok falls back to audio_s as evidence a run
         # actually produced audio (see runner.py:read_tts_results).
@@ -132,9 +130,7 @@ class TestScoreResultsFile:
 
         scores = score_results_file(path, score_fn=lambda _p: 4.2)
 
-        assert {s.provider for s in scores} == {"vendorA", "vendorB"}, (
-            "the errored result must not contribute a score"
-        )
+        assert {s.provider for s in scores} == {"vendorA", "vendorB"}, "the errored result must not contribute a score"
         assert len(scores) == 2
 
     def test_run_without_saved_audio_yields_nothing(self, tmp_path: Path) -> None:
@@ -143,9 +139,7 @@ class TestScoreResultsFile:
 
         assert score_results_file(path, score_fn=lambda _p: 4.2) == []
 
-    def test_moved_or_deleted_audio_is_skipped_not_errored(
-        self, tmp_path: Path
-    ) -> None:
+    def test_moved_or_deleted_audio_is_skipped_not_errored(self, tmp_path: Path) -> None:
         results = [self._result("vendorA", Mode.BATCH, "p1")]
         path = write_tts_results(results, tmp_path, save_audio=True)
         for wav_file in (path.parent / "audio").glob("*.wav"):
@@ -221,9 +215,7 @@ class TestAlertThreshold:
     """The alert is a tripwire against a provider's own history, not a rank."""
 
     def test_drop_past_threshold_alerts(self) -> None:
-        summary = ProviderMosSummary(
-            provider="vendorA", clips=1, mean_mos=3.0, baseline_mos=3.31
-        )
+        summary = ProviderMosSummary(provider="vendorA", clips=1, mean_mos=3.0, baseline_mos=3.31)
         assert summary.alert
 
     def test_drop_exactly_at_threshold_does_not_alert(self) -> None:
@@ -236,9 +228,7 @@ class TestAlertThreshold:
         assert not summary.alert
 
     def test_improvement_never_alerts(self) -> None:
-        summary = ProviderMosSummary(
-            provider="vendorA", clips=1, mean_mos=4.5, baseline_mos=3.0
-        )
+        summary = ProviderMosSummary(provider="vendorA", clips=1, mean_mos=4.5, baseline_mos=3.0)
         assert not summary.alert
 
     def test_no_baseline_never_alerts(self) -> None:
@@ -255,9 +245,7 @@ class TestRunGuardrail:
         baseline_path = tmp_path / "baseline.json"
         save_baseline(baseline_path, [ProviderMosSummary("vendorA", 5, 4.0)])
 
-        summaries = run_guardrail(
-            tmp_path, baseline_path=baseline_path, score_fn=lambda _p: 3.0
-        )
+        summaries = run_guardrail(tmp_path, baseline_path=baseline_path, score_fn=lambda _p: 3.0)
 
         assert len(summaries) == 1
         assert summaries[0].alert, "3.0 vs a 4.0 baseline is a 1.0-point drop"
@@ -276,9 +264,7 @@ class TestRunGuardrail:
         path = write_tts_results(results, tmp_path, save_audio=True)
         baseline_path = tmp_path / "baseline.json"
 
-        summaries = run_guardrail(
-            path, baseline_path=baseline_path, score_fn=lambda _p: 4.0
-        )
+        summaries = run_guardrail(path, baseline_path=baseline_path, score_fn=lambda _p: 4.0)
 
         assert summaries[0].provider == "vendorA"
         assert summaries[0].baseline_mos is None
@@ -296,9 +282,7 @@ class TestRunGuardrail:
 
         assert load_baseline(baseline_path) == {"vendorA": 3.8}
 
-    def test_without_update_baseline_the_file_is_left_untouched(
-        self, tmp_path: Path
-    ) -> None:
+    def test_without_update_baseline_the_file_is_left_untouched(self, tmp_path: Path) -> None:
         _wav(tmp_path / "vendorA-batch-p1.wav")
         baseline_path = tmp_path / "baseline.json"
         save_baseline(baseline_path, [ProviderMosSummary("vendorA", 1, 4.0)])

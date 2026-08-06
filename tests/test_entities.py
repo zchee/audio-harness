@@ -25,9 +25,7 @@ class TestAnnotationParsing:
     """Inline tags mark entity spans without altering the transcript."""
 
     def test_segments_cover_the_whole_string(self) -> None:
-        segments = parse_annotated(
-            "pay <currency>$20</currency> by <date>May 1st</date>"
-        )
+        segments = parse_annotated("pay <currency>$20</currency> by <date>May 1st</date>")
         assert segments == [
             ("pay ", None),
             ("$20", "currency"),
@@ -51,43 +49,29 @@ class TestPerClassScoring:
     """Each entity class scores through the shared ITN."""
 
     def test_number_folds_before_judging(self) -> None:
-        scores = score_entities(
-            "<number>four hundred and twenty</number> dollars", "420 dollars", "en-US"
-        )
+        scores = score_entities("<number>four hundred and twenty</number> dollars", "420 dollars", "en-US")
         assert scores["number"].counts.errors == 0
         assert scores["number"].exact_match_rate == 1.0
 
     def test_date_ordinals_fold_before_judging(self) -> None:
-        scores = score_entities(
-            "meet on <date>February third</date>", "meet on february 3rd", "en-US"
-        )
+        scores = score_entities("meet on <date>February third</date>", "meet on february 3rd", "en-US")
         assert scores["date"].exact_match_rate == 1.0
 
     def test_currency_symbol_and_words_agree(self) -> None:
-        scores = score_entities(
-            "it costs <currency>twenty five dollars</currency>", "it costs $25", "en-US"
-        )
+        scores = score_entities("it costs <currency>twenty five dollars</currency>", "it costs $25", "en-US")
         assert scores["currency"].exact_match_rate == 1.0
 
     def test_id_digit_dictation_merges_before_judging(self) -> None:
-        scores = score_entities(
-            "code <id>nine one seven three</id>", "code 9173", "en-US"
-        )
+        scores = score_entities("code <id>nine one seven three</id>", "code 9173", "en-US")
         assert scores["id"].exact_match_rate == 1.0
 
     def test_id_single_digit_error_is_caught(self) -> None:
-        scores = score_entities(
-            "code <id>nine one seven three</id>", "code 9273", "en-US"
-        )
-        assert scores["id"].counts == ErrorCounts(1, 0, 0, 1), (
-            "the merged id is one token, and it is wrong"
-        )
+        scores = score_entities("code <id>nine one seven three</id>", "code 9273", "en-US")
+        assert scores["id"].counts == ErrorCounts(1, 0, 0, 1), "the merged id is one token, and it is wrong"
         assert scores["id"].exact_match_rate == 0.0
 
     def test_name_substitution_scores_per_token(self) -> None:
-        scores = score_entities(
-            "this is <name>Samantha Lee</name>", "this is Samantha Leigh", "en-US"
-        )
+        scores = score_entities("this is <name>Samantha Lee</name>", "this is Samantha Leigh", "en-US")
         assert scores["name"].counts == ErrorCounts(1, 0, 0, 2)
         assert scores["name"].error_rate == pytest.approx(0.5)
         assert scores["name"].exact_match_rate == 0.0
@@ -97,16 +81,12 @@ class TestAlignmentAttribution:
     """Errors land on the entity only when alignment puts them there."""
 
     def test_deleted_entity_counts_every_token(self) -> None:
-        scores = score_entities(
-            "my name is <name>Anna Maria</name>", "my name is", "en-US"
-        )
+        scores = score_entities("my name is <name>Anna Maria</name>", "my name is", "en-US")
         assert scores["name"].counts == ErrorCounts(0, 2, 0, 2)
         assert scores["name"].error_rate == pytest.approx(1.0)
 
     def test_insertion_inside_an_entity_counts_against_it(self) -> None:
-        scores = score_entities(
-            "I am <name>Anna Maria</name>", "I am Anna von Maria", "en-US"
-        )
+        scores = score_entities("I am <name>Anna Maria</name>", "I am Anna von Maria", "en-US")
         assert scores["name"].counts.insertions == 1
         assert scores["name"].exact_match_rate == 0.0
 
@@ -116,9 +96,7 @@ class TestAlignmentAttribution:
             "a total is 90 exactly",
             "en-US",
         )
-        assert scores["number"].counts.errors == 0, (
-            "context words changed; the entity itself was perfect"
-        )
+        assert scores["number"].counts.errors == 0, "context words changed; the entity itself was perfect"
         assert scores["number"].exact_match_rate == 1.0
 
     def test_repeated_value_cannot_vouch_for_a_misheard_occurrence(self) -> None:
@@ -129,8 +107,7 @@ class TestAlignmentAttribution:
         )
         assert scores["number"].occurrences == 2
         assert scores["number"].exact_matches == 1, (
-            "alignment judges each occurrence in place; substring search "
-            "would have credited both"
+            "alignment judges each occurrence in place; substring search would have credited both"
         )
 
     def test_character_metric_language_scores_per_character(self) -> None:
@@ -195,9 +172,7 @@ class TestSummarizeWiring:
         assert summarize([result], "en-US")[0].entities == {}
 
     def test_entity_columns_render_in_the_report(self) -> None:
-        results = [
-            _result("code 9173", "code <id>nine one seven three</id>", "code 9173")
-        ]
+        results = [_result("code 9173", "code <id>nine one seven three</id>", "code 9173")]
 
         markdown = render_stt_markdown(stt_summary_frame(results, "en-US"))
 

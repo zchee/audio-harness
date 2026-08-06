@@ -10,17 +10,19 @@ to those four callbacks.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from collections.abc import Awaitable, Callable
+import contextlib
 from typing import Any
 
 import orjson
 import websockets
 from websockets.asyncio.client import ClientConnection, connect
 
-from ..audio import pace_chunks
-from ..types import AudioClip
+from audio_harness.audio import pace_chunks
+from audio_harness.types import AudioClip
+
 from .base import StreamTimeline
+
 
 OnOpen = Callable[[ClientConnection], Awaitable[None]]
 """Sends the session-configuration message, if the vendor needs one."""

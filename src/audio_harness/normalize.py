@@ -13,10 +13,11 @@ algorithm.
 
 from __future__ import annotations
 
-import re
-import unicodedata
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+import re
+import unicodedata
+
 
 _PUNCT_CATEGORIES = frozenset({"Pc", "Pd", "Pe", "Pf", "Pi", "Po", "Ps", "Sm", "Sk"})
 _WHITESPACE_RUN = re.compile(r"\s+")
@@ -128,9 +129,7 @@ def _fold_hyphens(text: str, join_fragments: frozenset[str]) -> str:
 
     def fold(match: re.Match[str]) -> str:
         fragments = match.group(0).split("-")
-        join = any(
-            len(fragment) == 1 or fragment in join_fragments for fragment in fragments
-        )
+        join = any(len(fragment) == 1 or fragment in join_fragments for fragment in fragments)
         return ("" if join else " ").join(fragments)
 
     return _HYPHEN_GROUP.sub(fold, text)
@@ -155,13 +154,9 @@ def _spell_currency(text: str, rules: WordRules) -> str:
     """
     words = rules.currency_words
     if rules.currency_lead is not None:
-        text = rules.currency_lead.sub(
-            lambda m: f"{m.group(2)} {words[m.group(1)]}", text
-        )
+        text = rules.currency_lead.sub(lambda m: f"{m.group(2)} {words[m.group(1)]}", text)
     if rules.currency_trail is not None:
-        text = rules.currency_trail.sub(
-            lambda m: f"{m.group(1)} {words[m.group(2)]}", text
-        )
+        text = rules.currency_trail.sub(lambda m: f"{m.group(1)} {words[m.group(2)]}", text)
     return text
 
 
@@ -295,10 +290,7 @@ def _normalize_ordinals(tokens: list[str], rules: WordRules) -> list[str]:
     that has nothing to do with what was said.
     """
     suffix = rules.ordinal_suffix
-    return [
-        rules.ordinals.get(token, suffix.sub(r"\1", token) if suffix else token)
-        for token in tokens
-    ]
+    return [rules.ordinals.get(token, suffix.sub(r"\1", token) if suffix else token) for token in tokens]
 
 
 def _merge_digit_runs(tokens: list[str]) -> list[str]:
@@ -330,9 +322,7 @@ def _merge_digit_runs(tokens: list[str]) -> list[str]:
 
 def _strip_punctuation(text: str) -> str:
     """Drop punctuation and symbol characters, keeping letters and digits."""
-    return "".join(
-        char for char in text if unicodedata.category(char) not in _PUNCT_CATEGORIES
-    )
+    return "".join(char for char in text if unicodedata.category(char) not in _PUNCT_CATEGORIES)
 
 
 def _normalize_words(text: str, rules: WordRules) -> str:
@@ -881,12 +871,8 @@ _KO_NATIVE_COUNTERS = (
 )
 
 _KO_COUNTER_ALT = "|".join(_KO_COUNTERS)
-_KO_SINO_PATTERN = re.compile(
-    rf"(?<![가-힣])([영공일이삼사오육칠팔구십백천만억]+)\s?({_KO_COUNTER_ALT})"
-)
-_KO_NATIVE_PATTERN = re.compile(
-    rf"(?<![가-힣])({'|'.join(_KO_NATIVE)})\s?({'|'.join(_KO_NATIVE_COUNTERS)})"
-)
+_KO_SINO_PATTERN = re.compile(rf"(?<![가-힣])([영공일이삼사오육칠팔구십백천만억]+)\s?({_KO_COUNTER_ALT})")
+_KO_NATIVE_PATTERN = re.compile(rf"(?<![가-힣])({'|'.join(_KO_NATIVE)})\s?({'|'.join(_KO_NATIVE_COUNTERS)})")
 _KO_DIGIT_COUNTER = re.compile(rf"(\d+)\s+({_KO_COUNTER_ALT})")
 _KO_MONTH_NAMES = (
     # 6월 and 10월 have irregular month readings that drop a final consonant,
@@ -947,9 +933,7 @@ def normalize_korean(text: str) -> str:
     for pattern, replacement in _KO_MONTH_NAMES:
         text = pattern.sub(replacement, text)
     text = _KO_SINO_PATTERN.sub(_fold_sino_korean, text)
-    text = _KO_NATIVE_PATTERN.sub(
-        lambda m: f"{_KO_NATIVE[m.group(1)]}{m.group(2)}", text
-    )
+    text = _KO_NATIVE_PATTERN.sub(lambda m: f"{_KO_NATIVE[m.group(1)]}{m.group(2)}", text)
     text = _KO_DIGIT_COUNTER.sub(r"\1\2", text)
     text = _strip_punctuation(text)
     return _WHITESPACE_RUN.sub(" ", text).strip()

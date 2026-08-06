@@ -10,11 +10,13 @@ from urllib.parse import urlencode
 import orjson
 from websockets.asyncio.client import ClientConnection
 
-from ..audio import wrap_wav
-from ..config import require_env
-from ..types import AudioClip, EventKind, Mode, SttResult
+from audio_harness.audio import wrap_wav
+from audio_harness.config import require_env
+from audio_harness.types import AudioClip, EventKind, Mode, SttResult
+
 from .base import StreamTimeline, SttProvider, raise_for_status, register
 from .ws import StreamProtocolError, run_stream
+
 
 API_BASE = "https://api.assemblyai.com/v2"
 STREAM_URL = "wss://streaming.assemblyai.com/v3/ws"
@@ -111,9 +113,7 @@ class AssemblyAIUniversal35Pro(SttProvider):
                 return payload
             await asyncio.sleep(POLL_INTERVAL_S)
 
-    async def transcribe_stream(
-        self, clip: AudioClip, *, chunk_ms: int, realtime: bool
-    ) -> SttResult:
+    async def transcribe_stream(self, clip: AudioClip, *, chunk_ms: int, realtime: bool) -> SttResult:
         """Stream PCM over the v3 streaming socket and collect turn events."""
         result = self._result(clip, Mode.STREAM)
         timeline = StreamTimeline()
@@ -187,10 +187,7 @@ class _TurnHandler:
         kind = payload.get("type")
 
         if kind == "Error" or payload.get("error"):
-            raise StreamProtocolError(
-                f"assemblyai: "
-                f"{payload.get('error') or payload.get('message') or payload}"
-            )
+            raise StreamProtocolError(f"assemblyai: {payload.get('error') or payload.get('message') or payload}")
         if kind == "Termination":
             return True
         if kind != "Turn":

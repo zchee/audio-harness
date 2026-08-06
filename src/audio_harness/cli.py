@@ -8,15 +8,15 @@ from pathlib import Path
 from typing import Annotated
 
 import orjson
-import typer
 from rich.console import Console
 from rich.table import Table
+import typer
 
-from . import doctor as doctor_module
-from . import report, runner, stt, tts
+from . import doctor as doctor_module, report, runner, stt, tts
 from .config import PRICING_CHECKED, BenchmarkConfig, ConfigError
 from .dataset import DatasetError, load_clips, load_prompts
 from .types import SttResult, TtsResult
+
 
 app = typer.Typer(
     add_completion=False,
@@ -93,17 +93,13 @@ def validate_roundtrip_judges(config: BenchmarkConfig) -> None:
     for judge in config.roundtrip_stt:
         if judge.name not in stt.available():
             raise ConfigError(
-                f"roundtrip_stt: unknown STT provider {judge.name!r}; "
-                f"available: {', '.join(stt.available())}"
+                f"roundtrip_stt: unknown STT provider {judge.name!r}; available: {', '.join(stt.available())}"
             )
         judge_families[judge.name] = stt.family_of(judge.name)
 
     for candidate in config.tts:
         if candidate.name not in tts.available():
-            raise ConfigError(
-                f"tts: unknown TTS provider {candidate.name!r}; "
-                f"available: {', '.join(tts.available())}"
-            )
+            raise ConfigError(f"tts: unknown TTS provider {candidate.name!r}; available: {', '.join(tts.available())}")
         family = tts.family_of(candidate.name)
         if all(judge_family == family for judge_family in judge_families.values()):
             raise ConfigError(
@@ -121,9 +117,9 @@ def _progress() -> runner.Progress:
     failed: dict[tuple[str, str], int] = {}
 
     def on_start(provider: str, mode: str, total: int) -> None:
-        totals[(provider, mode)] = total
-        done[(provider, mode)] = 0
-        failed[(provider, mode)] = 0
+        totals[provider, mode] = total
+        done[provider, mode] = 0
+        failed[provider, mode] = 0
         console.print(f"[dim]start[/dim] {provider} [cyan]{mode}[/cyan] ({total} runs)")
 
     def on_result(provider: str, mode: str, ok: bool) -> None:
@@ -140,9 +136,7 @@ def _progress() -> runner.Progress:
 
 @app.command()
 def doctor(
-    env_file: Annotated[
-        Path, typer.Option(help="Dotenv file to load before checking.")
-    ] = Path(DEFAULT_ENV_FILE),
+    env_file: Annotated[Path, typer.Option(help="Dotenv file to load before checking.")] = Path(DEFAULT_ENV_FILE),
 ) -> None:
     """Verify every provider credential with a cheap authenticated request."""
     load_env_file(env_file)
@@ -208,9 +202,7 @@ def providers() -> None:
 @app.command("stt")
 def stt_command(
     config_path: Annotated[Path, typer.Argument(help="Benchmark YAML config.")],
-    env_file: Annotated[Path, typer.Option(help="Dotenv file.")] = Path(
-        DEFAULT_ENV_FILE
-    ),
+    env_file: Annotated[Path, typer.Option(help="Dotenv file.")] = Path(DEFAULT_ENV_FILE),
 ) -> None:
     """Run the speech-to-text benchmark."""
     load_env_file(env_file)
@@ -226,10 +218,7 @@ def stt_command(
         raise typer.Exit(code=2) from exc
 
     total_audio = sum(clip.duration_s for clip in clips)
-    console.print(
-        f"Loaded {len(clips)} clips ({total_audio:.1f}s audio), "
-        f"language {config.dataset.language}"
-    )
+    console.print(f"Loaded {len(clips)} clips ({total_audio:.1f}s audio), language {config.dataset.language}")
 
     results = asyncio.run(runner.run_stt(config, clips, _progress()))
     path = runner.write_stt_results(results, config.run.output_dir)
@@ -242,12 +231,8 @@ def stt_command(
 @app.command("tts")
 def tts_command(
     config_path: Annotated[Path, typer.Argument(help="Benchmark YAML config.")],
-    env_file: Annotated[Path, typer.Option(help="Dotenv file.")] = Path(
-        DEFAULT_ENV_FILE
-    ),
-    save_audio: Annotated[
-        bool, typer.Option(help="Write synthesized WAV files next to results.")
-    ] = True,
+    env_file: Annotated[Path, typer.Option(help="Dotenv file.")] = Path(DEFAULT_ENV_FILE),
+    save_audio: Annotated[bool, typer.Option(help="Write synthesized WAV files next to results.")] = True,
 ) -> None:
     """Run the text-to-speech benchmark."""
     load_env_file(env_file)
@@ -275,15 +260,11 @@ def tts_command(
         if config.roundtrip_stt:
             judges = ", ".join(judge.name for judge in config.roundtrip_stt)
             console.print(f"Scoring intelligibility via [cyan]{judges}[/cyan]")
-            await runner.score_roundtrip(
-                config, results, {p.prompt_id: p for p in prompts}
-            )
+            await runner.score_roundtrip(config, results, {p.prompt_id: p for p in prompts})
         return results
 
     results = asyncio.run(execute())
-    path = runner.write_tts_results(
-        results, config.run.output_dir, save_audio=save_audio
-    )
+    path = runner.write_tts_results(results, config.run.output_dir, save_audio=save_audio)
 
     frame = report.tts_summary_frame(results, config.dataset.language)
     markdown = report.render_tts_markdown(frame)
@@ -310,9 +291,7 @@ def _results_kind(path: Path) -> str:
     return "stt"
 
 
-def _fold_lanes[R: SttResult | TtsResult](
-    by_lane: dict[tuple[str, str], list[R]], loaded: list[R]
-) -> int:
+def _fold_lanes[R: SttResult | TtsResult](by_lane: dict[tuple[str, str], list[R]], loaded: list[R]) -> int:
     """Fold one results file into the per-lane map, later files winning.
 
     Returns:
@@ -325,8 +304,7 @@ def _fold_lanes[R: SttResult | TtsResult](
         earlier = by_lane.get(lane)
         if earlier is not None:
             console.print(
-                f"[yellow]superseded[/yellow] {lane[0]} {lane[1]}"
-                f" — {len(earlier)} earlier runs replaced by {len(runs)}"
+                f"[yellow]superseded[/yellow] {lane[0]} {lane[1]} — {len(earlier)} earlier runs replaced by {len(runs)}"
             )
         by_lane[lane] = runs
     return len(loaded)
@@ -338,15 +316,9 @@ def report_command(
         list[Path],
         typer.Argument(help="One or more stt-results.jsonl / tts-results.jsonl."),
     ],
-    language: Annotated[
-        str, typer.Option(help="BCP-47 tag driving normalization and metric choice.")
-    ] = "en-US",
-    plots: Annotated[
-        bool, typer.Option(help="Render Pareto and latency charts as PNGs.")
-    ] = True,
-    latency_metric: Annotated[
-        str, typer.Option(help="Latency axis for charts: finalize or ttft.")
-    ] = "finalize",
+    language: Annotated[str, typer.Option(help="BCP-47 tag driving normalization and metric choice.")] = "en-US",
+    plots: Annotated[bool, typer.Option(help="Render Pareto and latency charts as PNGs.")] = True,
+    latency_metric: Annotated[str, typer.Option(help="Latency axis for charts: finalize or ttft.")] = "finalize",
 ) -> None:
     """Re-render a report from saved results, merging several runs if given.
 
@@ -394,9 +366,7 @@ def report_command(
             console.print()
             console.print(snr_markdown)
             snr_path = results[0].parent / "snr-report.md"
-            snr_path.write_text(
-                f"# SNR robustness\n\n{snr_markdown}\n", encoding="utf-8"
-            )
+            snr_path.write_text(f"# SNR robustness\n\n{snr_markdown}\n", encoding="utf-8")
             console.print(f"[dim]snr report:[/dim]  {snr_path}")
 
         from . import endpointing
@@ -412,9 +382,7 @@ def report_command(
         if plots:
             from . import metrics, plot
 
-            charts = plot.render_all(
-                frame, results[0].parent / "charts", metric=latency_metric
-            )
+            charts = plot.render_all(frame, results[0].parent / "charts", metric=latency_metric)
             hallucination = plot.plot_hallucination(
                 list(metrics.summarize_hallucination(merged_stt, language)),
                 results[0].parent / "charts" / "hallucination.png",
@@ -441,9 +409,7 @@ def report_command(
         if plots:
             from . import plot
 
-            tts_chart = plot.plot_tts_latency(
-                tts_frame, results[0].parent / "charts" / "tts_latency.png"
-            )
+            tts_chart = plot.plot_tts_latency(tts_frame, results[0].parent / "charts" / "tts_latency.png")
             if tts_chart is not None:
                 console.print(f"[dim]chart:[/dim]       {tts_chart}")
 
@@ -456,9 +422,7 @@ def _emit(results_path: Path, title: str, markdown: str) -> None:
     console.print(report.LEGEND)
 
     report_path = results_path.parent / f"{title.lower()}-report.md"
-    report_path.write_text(
-        f"# {title} benchmark\n\n{markdown}\n\n{report.LEGEND}\n", encoding="utf-8"
-    )
+    report_path.write_text(f"# {title} benchmark\n\n{markdown}\n\n{report.LEGEND}\n", encoding="utf-8")
     console.print()
     console.print(f"[dim]raw results:[/dim] {results_path}")
     console.print(f"[dim]report:[/dim]      {report_path}")
@@ -498,9 +462,7 @@ def guardrail_command(
         raise typer.Exit(code=2)
 
     try:
-        summaries = tts_quality.run_guardrail(
-            source, baseline_path=baseline, update_baseline=update_baseline
-        )
+        summaries = tts_quality.run_guardrail(source, baseline_path=baseline, update_baseline=update_baseline)
     except RuntimeError as exc:
         console.print(f"[red]guardrail error:[/red] {exc}")
         raise typer.Exit(code=2) from exc
@@ -553,18 +515,12 @@ def guardrail_command(
 
 @app.command("tts-arena")
 def tts_arena_command(
-    config_path: Annotated[
-        Path, typer.Argument(help="Benchmark YAML config listing the TTS candidates.")
-    ],
+    config_path: Annotated[Path, typer.Argument(help="Benchmark YAML config listing the TTS candidates.")],
     prompt_files: Annotated[
         list[str],
-        typer.Argument(
-            help="Prompt files, each optionally suffixed :count for a seeded sample."
-        ),
+        typer.Argument(help="Prompt files, each optionally suffixed :count for a seeded sample."),
     ],
-    env_file: Annotated[Path, typer.Option(help="Dotenv file.")] = Path(
-        DEFAULT_ENV_FILE
-    ),
+    env_file: Annotated[Path, typer.Option(help="Dotenv file.")] = Path(DEFAULT_ENV_FILE),
     panel: Annotated[
         Path | None,
         typer.Option(help="Human-panel votes JSONL for gate criterion (i)."),
@@ -572,15 +528,9 @@ def tts_arena_command(
     judge_model: Annotated[
         str, typer.Option(help="Audio-in judge model; pinned, part of cache keys.")
     ] = "gemini-2.5-flash",
-    seed: Annotated[
-        int, typer.Option(help="Seed for prompt sampling and bootstrap CIs.")
-    ] = 20260806,
-    max_calls: Annotated[
-        int, typer.Option(help="Refuse to schedule more judge calls than this.")
-    ] = 2000,
-    concurrency: Annotated[
-        int, typer.Option(help="Concurrent judge calls in flight.")
-    ] = 8,
+    seed: Annotated[int, typer.Option(help="Seed for prompt sampling and bootstrap CIs.")] = 20260806,
+    max_calls: Annotated[int, typer.Option(help="Refuse to schedule more judge calls than this.")] = 2000,
+    concurrency: Annotated[int, typer.Option(help="Concurrent judge calls in flight.")] = 8,
     reuse_audio: Annotated[
         Path | None,
         typer.Option(
@@ -620,20 +570,14 @@ def tts_arena_command(
             raise typer.Exit(code=2)
 
     try:
-        prompts = tts_arena.load_arena_prompts(
-            prompt_files, language=config.dataset.language, seed=seed
-        )
+        prompts = tts_arena.load_arena_prompts(prompt_files, language=config.dataset.language, seed=seed)
         votes = tts_arena.load_panel(panel) if panel is not None else None
     except tts_arena.ArenaError as exc:
         console.print(f"[red]arena error:[/red] {exc}")
         raise typer.Exit(code=2) from exc
 
     output_dir = Path(config.run.output_dir)
-    expected = [
-        f"{system}-batch-{prompt.prompt_id}.wav"
-        for system in systems
-        for prompt in prompts
-    ]
+    expected = [f"{system}-batch-{prompt.prompt_id}.wav" for system in systems for prompt in prompts]
 
     def complete_audio_dir() -> Path | None:
         """Newest timestamped run directory already holding every WAV."""
@@ -650,13 +594,9 @@ def tts_arena_command(
             raise typer.Exit(code=2)
         console.print(f"[dim]reusing synthesized audio:[/dim] {audio_dir}")
     else:
-        console.print(
-            f"Synthesizing {len(prompts)} prompts x {len(systems)} candidates (batch)"
-        )
+        console.print(f"Synthesizing {len(prompts)} prompts x {len(systems)} candidates (batch)")
         results = asyncio.run(runner.run_tts(config, prompts, _progress()))
-        results_path = runner.write_tts_results(
-            results, config.run.output_dir, save_audio=True
-        )
+        results_path = runner.write_tts_results(results, config.run.output_dir, save_audio=True)
         audio_dir = results_path.parent / "audio"
         failed = [r for r in results if not r.ok]
         if failed:
@@ -726,12 +666,8 @@ def tts_arena_command(
 
 @app.command("sim")
 def sim_command(
-    config_path: Annotated[
-        Path, typer.Argument(help="Simulated-interview YAML config.")
-    ],
-    env_file: Annotated[Path, typer.Option(help="Dotenv file.")] = Path(
-        DEFAULT_ENV_FILE
-    ),
+    config_path: Annotated[Path, typer.Argument(help="Simulated-interview YAML config.")],
+    env_file: Annotated[Path, typer.Option(help="Dotenv file.")] = Path(DEFAULT_ENV_FILE),
     estimate_only: Annotated[
         bool,
         typer.Option("--estimate-only", help="Print the expected spend and exit."),
@@ -790,9 +726,7 @@ def sim_command(
         raise typer.Exit(code=2) from exc
 
     try:
-        outcome = asyncio.run(
-            sim_interview.run_sim(bench, sim, llm=llm, tts=tts_fn, progress=_progress())
-        )
+        outcome = asyncio.run(sim_interview.run_sim(bench, sim, llm=llm, tts=tts_fn, progress=_progress()))
     except ConfigError as exc:
         console.print(f"[red]sim error:[/red] {exc}")
         raise typer.Exit(code=2) from exc
@@ -808,27 +742,19 @@ def sim_command(
         except (FileNotFoundError, ValueError) as exc:
             console.print(f"[red]gate error:[/red] {exc}")
             raise typer.Exit(code=2) from exc
-        composite = sim_interview.composite_ranking(
-            merged, [entry.name for entry in bench.stt]
-        )
+        composite = sim_interview.composite_ranking(merged, [entry.name for entry in bench.stt])
         gate = sim_interview.evaluate_gate(
             outcome.vendor_scores,
             composite,
             threshold=float(gate_raw.get("rho_threshold", 0.8)),
         )
 
-    sim_path, gate_path, report_path = sim_interview.write_sim_outputs(
-        outcome, gate, results_path
-    )
+    sim_path, gate_path, report_path = sim_interview.write_sim_outputs(outcome, gate, results_path)
     console.print()
     console.print(sim_interview.render_sim_markdown(outcome, gate))
     console.print(
         "Actual spend: "
-        + ", ".join(
-            f"{name} ${usd:.2f}"
-            for name, usd in sorted(outcome.spend.items())
-            if name != "total"
-        )
+        + ", ".join(f"{name} ${usd:.2f}" for name, usd in sorted(outcome.spend.items()) if name != "total")
         + f" — total ${outcome.spend['total']:.2f} "
         f"({outcome.usage.calls} LLM calls, seed {outcome.seed})"
     )
@@ -849,9 +775,7 @@ def judge_semantic_command(
         list[Path],
         typer.Argument(help="One or more stt-results.jsonl files to merge and judge."),
     ],
-    language: Annotated[
-        str, typer.Option(help="Fallback BCP-47 tag for results that recorded none.")
-    ] = "en-US",
+    language: Annotated[str, typer.Option(help="Fallback BCP-47 tag for results that recorded none.")] = "en-US",
     anchor: Annotated[
         Path | None,
         typer.Option(help="Human anchor CSV (clip_id, provider, human_label)."),
@@ -860,15 +784,9 @@ def judge_semantic_command(
         Path | None,
         typer.Option(help="Vote cache JSONL; defaults next to the first results file."),
     ] = None,
-    max_calls: Annotated[
-        int, typer.Option(help="Hard cap on live judge calls for this run.")
-    ] = 4800,
-    semascore: Annotated[
-        bool, typer.Option(help="Compute the deterministic SeMaScore fallback.")
-    ] = True,
-    env_file: Annotated[Path, typer.Option(help="Dotenv file.")] = Path(
-        DEFAULT_ENV_FILE
-    ),
+    max_calls: Annotated[int, typer.Option(help="Hard cap on live judge calls for this run.")] = 4800,
+    semascore: Annotated[bool, typer.Option(help="Compute the deterministic SeMaScore fallback.")] = True,
+    env_file: Annotated[Path, typer.Option(help="Dotenv file.")] = Path(DEFAULT_ENV_FILE),
 ) -> None:
     """Judge saved STT transcripts for semantic fidelity (experimental lane).
 
@@ -927,19 +845,13 @@ def judge_semantic_command(
         else:
 
             def semascore_fn(item: semantic.JudgeItem) -> float | None:
-                return semantic.semascore(
-                    item.reference, item.hypothesis, item.language, embed
-                )
+                return semantic.semascore(item.reference, item.hypothesis, item.language, embed)
 
     console.print(
         f"Judging {len(items)} items with [cyan]{semantic.JUDGE_MODEL}[/cyan] "
         f"({len(items) * semantic.VOTES_PER_ITEM} votes max, cap {max_calls})"
     )
-    cache_path = (
-        cache_file
-        if cache_file is not None
-        else results[0].parent / "semantic-cache.jsonl"
-    )
+    cache_path = cache_file if cache_file is not None else results[0].parent / "semantic-cache.jsonl"
     try:
         judgements, stats = semantic.run_judge(
             items,
@@ -953,18 +865,12 @@ def judge_semantic_command(
         raise typer.Exit(code=1) from exc
 
     gates = semantic.evaluate_gates(judgements, anchor_map)
-    out_path = semantic.write_semantic_results(
-        judgements, gates, stats, results[0].parent / "semantic-results.jsonl"
-    )
-    markdown = semantic.render_semantic_markdown(
-        semantic.summarize_semantic(judgements), gates
-    )
+    out_path = semantic.write_semantic_results(judgements, gates, stats, results[0].parent / "semantic-results.jsonl")
+    markdown = semantic.render_semantic_markdown(semantic.summarize_semantic(judgements), gates)
     console.print()
     console.print(markdown)
     report_path = results[0].parent / "semantic-report.md"
-    report_path.write_text(
-        f"# Semantic-fidelity judge (experimental)\n\n{markdown}\n", encoding="utf-8"
-    )
+    report_path.write_text(f"# Semantic-fidelity judge (experimental)\n\n{markdown}\n", encoding="utf-8")
     console.print()
     console.print(
         f"[dim]judge spend:[/dim] {stats.live_calls} live calls "
