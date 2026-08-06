@@ -8,30 +8,30 @@ authors = [
 ]
 requires-python = ">=3.14"
 dependencies = [
-    "httpx[http2]>=0.28",
-    "websockets>=14.0",
-    "jiwer>=3.1",
-    "numpy>=2.1",
-    "soundfile>=0.13",
-    "soxr>=0.5",
-    "polars>=1.20",
-    "orjson>=3.10",
-    "rich>=13.9",
-    "typer>=0.15",
-    "pyyaml>=6.0",
-    "google-auth>=2.37",
-    "google-cloud-speech>=2.31",
-    "google-genai>=1.0",
-    "matplotlib>=3.10",
-    "adjusttext>=1.3",
+    "httpx[http2]>=0.28.1",
+    "websockets>=16.1.1",
+    "jiwer>=4.0.0",
+    "numpy>=2.4.6",
+    "soundfile>=0.14.0",
+    "soxr>=1.1.0",
+    "polars>=1.43.2",
+    "orjson>=3.11.9",
+    "rich>=15.0.0",
+    "typer>=0.27.1",
+    "pyyaml>=6.0.3",
+    "google-auth>=2.56.3",
+    "google-cloud-speech>=2.40.0",
+    "google-genai>=2.17.0",
+    "matplotlib>=3.11.1",
+    "adjusttext>=1.4.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.3",
-    "pytest-asyncio>=0.25",
-    "ruff>=0.9",
-    "mypy>=1.14",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.16.1",
+    "mypy>=2.3.0",
 ]
 # Local Whisper round-trip judge (Apple Silicon; see stt/whisper_local.py).
 # The numba floor keeps resolution on a line with Python 3.14 wheels; without
@@ -39,7 +39,7 @@ dev = [
 # on Python < 3.10.
 judge-whisper = [
     "mlx-whisper>=0.4.3",
-    "numba>=0.66",
+    "numba>=0.66.0",
 ]
 # Distill-MOS perceptual regression guardrail (see tts_quality.py). CPU-only,
 # no GPU required; pulls in torch as a transitive dependency.
@@ -49,8 +49,8 @@ guardrail-mos = [
 # SeMaScore fallback encoder for the semantic judge (judge/semantic.py):
 # roberta-base at a pinned revision, CPU inference only.
 judge-semantic = [
-    "transformers>=4.48",
-    "torch>=2.6",
+    "transformers>=5.14.1",
+    "torch>=2.13.0",
 ]
 # Simulated-interview persona voice (sim/interview.py): Kokoro pinned at
 # 0.9.4, out-of-suite so no STT lane is scored on its own family's voice.
@@ -66,8 +66,8 @@ sim-kokoro = [
 # templates, Babel for CLDR-backed locale date/currency formatting.
 prompt-suite = [
     "num2words>=0.5.14",
-    "faker>=40.0",
-    "babel>=2.18",
+    "faker>=40.36.0",
+    "babel>=2.18.0",
 ]
 
 [project.scripts]
