@@ -96,6 +96,12 @@ class _CartesiaBase(TtsProvider):
             },
             json=self._body(prompt),
         ) as response:
+            if response.status_code >= 400:
+                # raise_for_status reads response.text; on a streamed response
+                # that raises ResponseNotRead unless the body is buffered
+                # first, which would replace the vendor's error with a
+                # confusing one about our own HTTP client.
+                await response.aread()
             raise_for_status(response, self.key)
             async for chunk in response.aiter_bytes():
                 if not chunk:

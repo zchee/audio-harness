@@ -46,19 +46,19 @@ dataset:
   silence_spans_column: silence_spans
   words_column: words          # no plain transcript column; words are joined
   sources:
-    - parquet: data/hf/eot-bench-data/en/validation-*.parquet
+    - parquet: data/hf/eot-bench-data/data/en/validation-*.parquet
       language: en-US
       limit: 50
       sample_seed: 20260806
-    - parquet: data/hf/eot-bench-data/ja/validation-*.parquet
+    - parquet: data/hf/eot-bench-data/data/ja/validation-*.parquet
       language: ja-JP
       limit: 50
       sample_seed: 20260806
-    - parquet: data/hf/eot-bench-data/de/validation-*.parquet
+    - parquet: data/hf/eot-bench-data/data/de/validation-*.parquet
       language: de-DE
       limit: 50
       sample_seed: 20260806
-    - parquet: data/hf/eot-bench-data/fr/validation-*.parquet
+    - parquet: data/hf/eot-bench-data/data/fr/validation-*.parquet
       language: fr-FR
       limit: 50
       sample_seed: 20260806

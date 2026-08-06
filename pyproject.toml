@@ -126,6 +126,11 @@ combine-as-imports = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+filterwarnings = [
+    # google-genai touches typing internals that Python 3.14 deprecates; the
+    # noise is upstream's to fix and drowns real warnings in test output.
+    "ignore:'_UnionGenericAlias' is deprecated:DeprecationWarning",
+]
 
 [tool.ty.environment]
 python-version = "3.14"

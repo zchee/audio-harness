@@ -120,6 +120,13 @@ _CHECKS: tuple[_HttpCheck, ...] = (
         url="https://generativelanguage.googleapis.com/v1beta/models",
         header="x-goog-api-key",
     ),
+    _HttpCheck(
+        provider="Inworld",
+        env_var="INWORLD_API_KEY",
+        url="https://api.inworld.ai/voices/v1/voices?pageSize=1",
+        header="Authorization",
+        template="Basic {key}",
+    ),
 )
 
 

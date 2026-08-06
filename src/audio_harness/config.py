@@ -91,6 +91,16 @@ TTS_PRICING: dict[str, TtsPricing] = {
         per_audio_minute=0.015,
         note="$10/M audio tokens at 25 tokens/s, plus $0.50/M input text tokens",
     ),
+    "elevenlabs-flash25": TtsPricing(
+        per_million_chars=50.0,
+        note="Flash/Turbo rate ($0.05/1k chars pay-as-you-go); Multilingual v2 "
+        "costs roughly double per character; verified 2026-08-07",
+    ),
+    "inworld-tts2": TtsPricing(
+        per_million_chars=25.0,
+        note="on-demand (no subscription) rate; paid plan tiers step down to "
+        "$12.50/M, enterprise as low as $5/M; verified 2026-08-07",
+    ),
 }
 
 

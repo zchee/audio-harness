@@ -17,6 +17,14 @@ tts:
     modes: [batch, stream]
   - name: gemini-tts
     modes: [batch, stream]
+  - name: inworld-tts2
+    modes: [batch, stream]
+  - name: elevenlabs-flash25
+    modes: [batch, stream]
+    options:
+      # "Sarah" (premade). Pinned in config, not env, so every run of this
+      # file scores the same voice.
+      voice_id: EXAVITQu4vr4xnSDxMaL
 
 dataset:
   prompts: data/prompts-en.txt

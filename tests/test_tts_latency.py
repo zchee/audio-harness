@@ -13,6 +13,7 @@ from collections.abc import AsyncIterator
 import os
 from pathlib import Path
 
+import httpx
 import numpy as np
 import orjson
 import pytest
@@ -21,6 +22,7 @@ from websockets.asyncio.server import ServerConnection, serve
 from audio_harness import report, runner, tts
 from audio_harness.audio import detect_speech_onset_s, wav_data_offset, wrap_wav
 from audio_harness.config import BenchmarkConfig
+from audio_harness.stt.base import ProviderHttpError
 from audio_harness.tts import cartesia
 from audio_harness.tts.base import (
     ChunkTimeline,
@@ -512,6 +514,78 @@ class TestCartesiaProtocol:
         assert messages[-1]["transcript"] == ""
         assert "".join(str(m["transcript"]) for m in messages[:-1]) == self.PROMPT.text
         assert result.audio_s > 0
+
+
+class _UnreadByteStream(httpx.AsyncByteStream):
+    """An async byte stream that has *not* been buffered at construction.
+
+    ``httpx.Response(content=...)`` eagerly reads a ``ByteStream`` body the
+    moment it is built, which would make an unread-response bug untestable —
+    ``.text`` would never raise. A real network response streamed through
+    ``client.stream()`` is unread until something calls ``aread()`` or
+    iterates it, which is what this fake reproduces.
+    """
+
+    def __init__(self, body: bytes) -> None:
+        self._body = body
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        yield self._body
+
+
+class TestCartesiaBatchErrorHandling:
+    """A real HTTP error must surface its body, not crash on an unread stream.
+
+    ``synthesize`` reads the batch endpoint through ``http.stream`` (to time
+    TTFB), so a vendor error response is still unread when ``raise_for_status``
+    inspects it; without buffering the body first that raises
+    ``httpx.ResponseNotRead`` instead of the vendor's actual error.
+    """
+
+    async def test_http_error_is_raised_with_the_body(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("CARTESIA_API_KEY", "test-key")
+        monkeypatch.setenv("CARTESIA_VOICE_ID", "test-voice")
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(400, stream=_UnreadByteStream(b'{"error": "invalid voice"}'))
+
+        adapter = tts.create("cartesia-sonic35")
+        adapter._http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+        with pytest.raises(ProviderHttpError, match="invalid voice"):
+            await adapter.synthesize(TtsPrompt(prompt_id="p1", text="hello world", language="en-US"))
+
+
+class TestDeepgramProtocol:
+    """The ``/speak`` streaming endpoint: chunk assembly and error handling."""
+
+    async def test_chunks_are_assembled_on_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("DEEPGRAM_API_KEY", "test-key")
+        audio = make_pcm(0.0, 0.1)
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, content=audio)
+
+        adapter = tts.create("deepgram-aura2")
+        adapter._http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+        result = await adapter.synthesize_stream(TtsPrompt(prompt_id="p1", text="hello world", language="en-US"))
+
+        assert result.ok, result.error
+        assert result.audio == audio
+
+    async def test_http_error_is_raised_with_the_body(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A real error must surface as ``ProviderHttpError``, not ``ResponseNotRead``."""
+        monkeypatch.setenv("DEEPGRAM_API_KEY", "test-key")
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(401, stream=_UnreadByteStream(b'{"err_msg": "invalid api key"}'))
+
+        adapter = tts.create("deepgram-aura2")
+        adapter._http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+        with pytest.raises(ProviderHttpError, match="invalid api key"):
+            await adapter.synthesize_stream(TtsPrompt(prompt_id="p1", text="hello world", language="en-US"))
 
 
 LIVE_FLAG = "AUDIO_HARNESS_TEST_TTS_LIVE"
