@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 from typing import Annotated
 
+import orjson
 import typer
 from rich.console import Console
 from rich.table import Table
@@ -63,6 +64,53 @@ def _load_config(path: Path) -> BenchmarkConfig:
     except ConfigError as exc:
         console.print(f"[red]config error:[/red] {exc}")
         raise typer.Exit(code=2) from exc
+
+
+def validate_roundtrip_judges(config: BenchmarkConfig) -> None:
+    """Reject judge sets that cannot score every TTS lane fairly.
+
+    A recognizer decodes its own vendor family's voices best, so a lane ranked
+    by a same-family judge is flattered rather than measured. Every candidate
+    therefore needs at least one judge from a different family; same-family
+    judges are allowed but only ever count as diagnostics.
+
+    This lives in the CLI load path rather than in ``config.py`` because
+    resolving a family needs the adapter registries, and ``config.py`` cannot
+    import those without a circular import through ``require_env``.
+
+    Args:
+        config: Parsed benchmark definition.
+
+    Raises:
+        ConfigError: If a judge or candidate key is unknown, or if some
+            candidate has no cross-family judge.
+    """
+    if not config.roundtrip_stt or not config.tts:
+        return
+
+    judge_families: dict[str, str] = {}
+    for judge in config.roundtrip_stt:
+        if judge.name not in stt.available():
+            raise ConfigError(
+                f"roundtrip_stt: unknown STT provider {judge.name!r}; "
+                f"available: {', '.join(stt.available())}"
+            )
+        judge_families[judge.name] = stt.family_of(judge.name)
+
+    for candidate in config.tts:
+        if candidate.name not in tts.available():
+            raise ConfigError(
+                f"tts: unknown TTS provider {candidate.name!r}; "
+                f"available: {', '.join(tts.available())}"
+            )
+        family = tts.family_of(candidate.name)
+        if all(judge_family == family for judge_family in judge_families.values()):
+            raise ConfigError(
+                f"roundtrip_stt: every judge shares family {family!r} with "
+                f"TTS candidate {candidate.name!r}, so its lane would be "
+                f"scored by its own vendor's recognizer. Add a judge from "
+                f"another family (e.g. whisper-local)."
+            )
 
 
 def _progress() -> runner.Progress:
@@ -208,6 +256,12 @@ def tts_command(
         raise typer.Exit(code=2)
 
     try:
+        validate_roundtrip_judges(config)
+    except ConfigError as exc:
+        console.print(f"[red]config error:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+
+    try:
         prompts = load_prompts(config.dataset)
     except DatasetError as exc:
         console.print(f"[red]dataset error:[/red] {exc}")
@@ -217,10 +271,9 @@ def tts_command(
 
     async def execute() -> list[object]:
         results = await runner.run_tts(config, prompts, _progress())
-        if config.roundtrip_stt is not None:
-            console.print(
-                f"Scoring intelligibility via [cyan]{config.roundtrip_stt.name}[/cyan]"
-            )
+        if config.roundtrip_stt:
+            judges = ", ".join(judge.name for judge in config.roundtrip_stt)
+            console.print(f"Scoring intelligibility via [cyan]{judges}[/cyan]")
             await runner.score_roundtrip(
                 config, results, {p.prompt_id: p for p in prompts}
             )
@@ -236,10 +289,27 @@ def tts_command(
     _emit(path, "TTS", markdown)
 
 
+def _results_kind(path: Path) -> str:
+    """Detect whether a results file holds STT or TTS runs.
+
+    The two schemas share a file naming convention but not a key set, so the
+    first record decides: TTS records carry a ``prompt_id``, STT records a
+    ``clip_id``. An empty file defaults to STT and fails later with the
+    ordinary "no results" path.
+    """
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        record = orjson.loads(line)
+        return "tts" if "prompt_id" in record else "stt"
+    return "stt"
+
+
 @app.command("report")
 def report_command(
     results: Annotated[
-        list[Path], typer.Argument(help="One or more stt-results.jsonl files.")
+        list[Path],
+        typer.Argument(help="One or more stt-results.jsonl / tts-results.jsonl."),
     ],
     language: Annotated[
         str, typer.Option(help="BCP-47 tag driving normalization and metric choice.")
@@ -255,18 +325,25 @@ def report_command(
 
     The API calls are the expensive part of a benchmark. This re-scores what
     is already on disk, so a normalization change or a provider added in a
-    later run costs nothing to fold in.
+    later run costs nothing to fold in. STT and TTS files may be mixed; each
+    kind merges and reports separately, and legacy single-judge TTS files
+    fold in as one-judge lanes.
 
     When the same provider and mode appears in more than one file, the later
     file wins. That is what makes "re-run the one provider that failed, then
     merge" work: without it the superseded run would be averaged back in and
     the fix would look half-effective.
     """
-    by_lane: dict[tuple[str, str], list[object]] = {}
+    by_lane: dict[str, dict[tuple[str, str], list[object]]] = {"stt": {}, "tts": {}}
     for path in results:
         try:
-            loaded = runner.read_stt_results(path)
-        except (FileNotFoundError, ValueError) as exc:
+            kind = _results_kind(path)
+            loaded = (
+                runner.read_tts_results(path)
+                if kind == "tts"
+                else runner.read_stt_results(path)
+            )
+        except (ValueError, OSError) as exc:
             console.print(f"[red]results error:[/red] {exc}")
             raise typer.Exit(code=2) from exc
 
@@ -274,36 +351,44 @@ def report_command(
         for item in loaded:
             lanes.setdefault((item.provider, str(item.mode)), []).append(item)
         for lane, runs in lanes.items():
-            if lane in by_lane:
+            earlier = by_lane[kind].get(lane)
+            if earlier is not None:
                 console.print(
                     f"[yellow]superseded[/yellow] {lane[0]} {lane[1]}"
-                    f" — {len(by_lane[lane])} earlier runs replaced by {len(runs)}"
+                    f" — {len(earlier)} earlier runs replaced by {len(runs)}"
                 )
-            by_lane[lane] = runs
-        console.print(f"[dim]loaded[/dim] {len(loaded):4d} runs from {path}")
+            by_lane[kind][lane] = runs
+        console.print(f"[dim]loaded[/dim] {len(loaded):4d} {kind} runs from {path}")
 
-    merged = [item for runs in by_lane.values() for item in runs]
-    if not merged:
+    merged_stt = [item for runs in by_lane["stt"].values() for item in runs]
+    merged_tts = [item for runs in by_lane["tts"].values() for item in runs]
+    if not merged_stt and not merged_tts:
         console.print("[red]no results to report[/red]")
         raise typer.Exit(code=2)
 
-    frame = report.stt_summary_frame(merged, language)
-    markdown = report.render_stt_markdown(frame)
-    _emit(results[0], "STT", markdown)
+    if merged_stt:
+        frame = report.stt_summary_frame(merged_stt, language)
+        markdown = report.render_stt_markdown(frame)
+        _emit(results[0], "STT", markdown)
 
-    if plots:
-        from . import plot
+        if plots:
+            from . import plot
 
-        charts = plot.render_all(
-            frame, results[0].parent / "charts", metric=latency_metric
-        )
-        for chart in charts:
-            console.print(f"[dim]chart:[/dim]       {chart}")
-        if not charts:
-            console.print(
-                "[yellow]no charts rendered[/yellow] — charts need at least "
-                "two streaming providers with latency and accuracy"
+            charts = plot.render_all(
+                frame, results[0].parent / "charts", metric=latency_metric
             )
+            for chart in charts:
+                console.print(f"[dim]chart:[/dim]       {chart}")
+            if not charts:
+                console.print(
+                    "[yellow]no charts rendered[/yellow] — charts need at least "
+                    "two streaming providers with latency and accuracy"
+                )
+
+    if merged_tts:
+        tts_frame = report.tts_summary_frame(merged_tts, language)
+        tts_markdown = report.render_tts_markdown(tts_frame)
+        _emit(results[0], "TTS", tts_markdown)
 
 
 def _emit(results_path: Path, title: str, markdown: str) -> None:

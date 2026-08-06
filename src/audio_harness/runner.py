@@ -325,57 +325,69 @@ async def score_roundtrip(
     """Transcribe synthesized audio to estimate intelligibility.
 
     Naturalness cannot be measured without listeners, but intelligibility can:
-    feed the synthesized audio back through one fixed recognizer and compare
+    feed the synthesized audio back through fixed recognizers and compare
     against the prompt. A high round-trip error rate means the voice is hard to
-    decode. The recognizer is held constant across TTS providers so the score
-    is comparative, not absolute — it is a proxy, not a MOS.
+    decode. The judges are held constant across TTS providers so the score is
+    comparative, not absolute — it is a proxy, not a MOS.
 
-    Configure the recognizer with text formatting off. Otherwise its inverse
+    Every configured judge transcribes every clip. Judges must span vendor
+    families because a recognizer decodes its own vendor's voices best — the
+    report ranks each lane only by judges outside that lane's family and
+    demotes same-family scores to diagnostics.
+
+    Configure each recognizer with text formatting off. Otherwise its inverse
     text normalization rewrites spoken numbers into digits, every engine
     inherits the same rewrite, and the metric collapses to a constant that
     says nothing about the voices being compared.
 
-    The transcript is written to each result's ``raw`` under
-    ``roundtrip_text``; the metrics layer turns that into an error rate.
+    Verdicts land in each result's ``raw["roundtrip"]`` as a list of
+    ``{provider, text, error}`` mappings in config order; the report layer
+    turns those into error rates.
 
     Args:
         config: Benchmark definition, providing ``roundtrip_stt``.
         results: TTS results to score, mutated in place.
         prompts: Prompt lookup keyed by prompt id.
     """
-    if config.roundtrip_stt is None:
-        return
-
-    entry = config.roundtrip_stt
-    provider = stt.create(entry.name, entry.options)
-    try:
-        for result in results:
-            if not result.ok:
-                continue
-            prompt = prompts.get(result.prompt_id)
-            if prompt is None:
-                continue
-            clip = AudioClip(
-                clip_id=f"{result.provider}-{result.prompt_id}",
-                pcm=result.audio,
-                sample_rate=result.sample_rate,
-                duration_s=decode_audio_duration(
-                    result.audio,
-                    encoding=result.encoding,
+    for entry in config.roundtrip_stt:
+        provider = stt.create(entry.name, entry.options)
+        try:
+            for result in results:
+                if not result.ok:
+                    continue
+                prompt = prompts.get(result.prompt_id)
+                if prompt is None:
+                    continue
+                clip = AudioClip(
+                    clip_id=f"{result.provider}-{result.prompt_id}",
+                    pcm=result.audio,
                     sample_rate=result.sample_rate,
-                ),
-                reference=prompt.text,
-                language=prompt.language,
-                source_path="<synthesized>",
-            )
-            try:
-                transcription = await provider.transcribe_batch(clip)
-                result.raw["roundtrip_text"] = transcription.text
-                result.raw["roundtrip_provider"] = entry.name
-            except Exception as exc:
-                result.raw["roundtrip_error"] = f"{type(exc).__name__}: {exc}"
-    finally:
-        await provider.aclose()
+                    duration_s=decode_audio_duration(
+                        result.audio,
+                        encoding=result.encoding,
+                        sample_rate=result.sample_rate,
+                    ),
+                    reference=prompt.text,
+                    language=prompt.language,
+                    source_path="<synthesized>",
+                )
+                verdict: dict[str, object] = {
+                    "provider": entry.name,
+                    "text": None,
+                    "error": None,
+                }
+                try:
+                    transcription = await provider.transcribe_batch(clip)
+                    verdict["text"] = transcription.text
+                except Exception as exc:
+                    verdict["error"] = f"{type(exc).__name__}: {exc}"
+                verdicts = result.raw.get("roundtrip")
+                if not isinstance(verdicts, list):
+                    verdicts = []
+                    result.raw["roundtrip"] = verdicts
+                verdicts.append(verdict)
+        finally:
+            await provider.aclose()
 
 
 def write_stt_results(results: list[SttResult], output_dir: str | Path) -> Path:
@@ -395,6 +407,7 @@ def write_stt_results(results: list[SttResult], output_dir: str | Path) -> Path:
                         "mode": str(result.mode),
                         "text": result.text,
                         "reference": result.raw.get("reference", ""),
+                        "reference_annotated": result.raw.get("reference_annotated"),
                         "language": result.raw.get("language", ""),
                         "audio_s": result.audio_s,
                         "total_s": result.total_s,
@@ -445,8 +458,7 @@ def write_tts_results(
                         "rtf": result.rtf,
                         "error": result.error,
                         "text": result.raw.get("text", ""),
-                        "roundtrip_text": result.raw.get("roundtrip_text"),
-                        "roundtrip_provider": result.raw.get("roundtrip_provider"),
+                        "roundtrip": result.raw.get("roundtrip"),
                         "audio_path": audio_path,
                     }
                 )
@@ -503,8 +515,71 @@ def read_stt_results(path: str | Path) -> list[SttResult]:
         ]
         result.raw["reference"] = record.get("reference", "")
         result.raw["language"] = record.get("language", "")
+        if record.get("reference_annotated"):
+            result.raw["reference_annotated"] = record["reference_annotated"]
         if record.get("chunk_ms") is not None:
             result.raw["chunk_ms"] = record["chunk_ms"]
+        results.append(result)
+    return results
+
+
+def read_tts_results(path: str | Path) -> list[TtsResult]:
+    """Load TTS results back from a saved JSONL file.
+
+    Audio bytes are not restored — the JSONL stores a path, not samples — but
+    every scored field is, so a report can be re-rendered without paying for
+    synthesis again. Records written before the two-judge migration carry a
+    scalar ``roundtrip_text``/``roundtrip_provider`` pair; those are folded
+    into the ``roundtrip`` list so historical runs merge as one-judge lanes
+    rather than losing their score.
+
+    Args:
+        path: JSONL file written by :func:`write_tts_results`.
+
+    Returns:
+        The reconstructed results.
+
+    Raises:
+        FileNotFoundError: If the file does not exist.
+        ValueError: If a line is not valid JSON.
+    """
+    file = Path(path)
+    if not file.is_file():
+        raise FileNotFoundError(f"results file not found: {file}")
+
+    results: list[TtsResult] = []
+    for number, line in enumerate(file.read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip():
+            continue
+        try:
+            record = orjson.loads(line)
+        except orjson.JSONDecodeError as exc:
+            raise ValueError(f"{file}:{number}: invalid JSON") from exc
+
+        result = TtsResult(
+            provider=record["provider"],
+            prompt_id=record["prompt_id"],
+            mode=Mode(record["mode"]),
+            chars=int(record.get("chars") or 0),
+            audio_s=float(record.get("audio_s") or 0.0),
+            ttfb_s=record.get("ttfb_s"),
+            total_s=float(record.get("total_s") or 0.0),
+            error=record.get("error"),
+        )
+        result.raw["text"] = record.get("text", "")
+        roundtrip = record.get("roundtrip")
+        if isinstance(roundtrip, list):
+            result.raw["roundtrip"] = roundtrip
+        elif isinstance(record.get("roundtrip_text"), str):
+            result.raw["roundtrip"] = [
+                {
+                    "provider": record.get("roundtrip_provider") or "",
+                    "text": record["roundtrip_text"],
+                    "error": None,
+                }
+            ]
+        if record.get("audio_path"):
+            result.raw["audio_path"] = record["audio_path"]
         results.append(result)
     return results
 

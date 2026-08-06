@@ -8,6 +8,7 @@ re-verify against the vendor's pricing page before quoting a cost figure.
 from __future__ import annotations
 
 import os
+import warnings
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
@@ -253,11 +254,14 @@ class BenchmarkConfig:
         tts: TTS providers to exercise.
         dataset: Evaluation material.
         run: Execution parameters.
-        roundtrip_stt: STT provider used to score TTS intelligibility, or
-            ``None`` to skip round-trip scoring. Accepts a bare provider key
-            or a mapping with ``options``.
+        roundtrip_stt: STT judges that score TTS intelligibility, or an empty
+            list to skip round-trip scoring. The YAML accepts a list of
+            judges, or — deprecated — a single bare key or mapping, which is
+            parsed as a one-judge list. Judges should span vendor families:
+            a lane is ranked only by judges outside its own family, so a
+            same-family-only judge set leaves that lane unranked.
 
-            Turn the recognizer's text formatting **off**. With it on, a
+            Turn each recognizer's text formatting **off**. With it on, a
             spoken "four hundred and twenty dollars" comes back as "$420" and
             every TTS engine scores identically badly — the metric then
             measures the recognizer's number formatting, not the voice.
@@ -267,7 +271,7 @@ class BenchmarkConfig:
     tts: list[ProviderConfig] = field(default_factory=list)
     dataset: DatasetConfig = field(default_factory=DatasetConfig)
     run: RunConfig = field(default_factory=RunConfig)
-    roundtrip_stt: ProviderConfig | None = None
+    roundtrip_stt: list[ProviderConfig] = field(default_factory=list)
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> BenchmarkConfig:
@@ -306,13 +310,12 @@ class BenchmarkConfig:
         Raises:
             ConfigError: If a provider entry is malformed.
         """
-        roundtrip = raw.get("roundtrip_stt")
         return cls(
             stt=[_provider(entry) for entry in raw.get("stt", [])],
             tts=[_provider(entry) for entry in raw.get("tts", [])],
             dataset=_dataset(raw.get("dataset") or {}),
             run=RunConfig(**(raw.get("run") or {})),
-            roundtrip_stt=None if roundtrip is None else _provider(roundtrip),
+            roundtrip_stt=_roundtrip(raw.get("roundtrip_stt")),
         )
 
 
@@ -351,6 +354,27 @@ def _dataset(raw: dict[str, Any]) -> DatasetConfig:
         sources.append(SourceConfig(**merged))
 
     return DatasetConfig(**{**shared, "sources": sources})
+
+
+def _roundtrip(raw: Any) -> list[ProviderConfig]:
+    """Parse the round-trip judge list, still accepting the legacy scalar.
+
+    Existing configs name a single judge; they keep loading as a one-judge
+    list so saved benchmarks stay runnable, but a single judge cannot satisfy
+    the cross-family rule for its own family's lanes — hence the deprecation.
+    """
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return [_provider(entry) for entry in raw]
+    warnings.warn(
+        "roundtrip_stt: the single-judge scalar form is deprecated; list "
+        "judges spanning vendor families so every TTS lane gets a ranked "
+        "cross-family score",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return [_provider(raw)]
 
 
 def _provider(entry: Any) -> ProviderConfig:

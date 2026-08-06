@@ -139,6 +139,10 @@ class SttProvider(abc.ABC):
         vendor: Account the adapter bills against. Adapters sharing a vendor
             share concurrency limits, so the runner never lets two of them
             hold sessions at once against a plan that allows only one.
+        family: Model lineage used by judge/candidate coupling rules. Defaults
+            to ``vendor``, but the two are distinct on purpose: a local
+            Whisper bills nobody yet is still OpenAI-lineage, and scoring a
+            vendor's TTS with a same-lineage recognizer flatters that vendor.
         supports_batch: Whether :meth:`transcribe_batch` is implemented.
         supports_stream: Whether :meth:`transcribe_stream` is implemented.
         min_chunk_ms: Smallest audio frame the vendor accepts.
@@ -150,6 +154,7 @@ class SttProvider(abc.ABC):
 
     key: ClassVar[str]
     vendor: ClassVar[str] = ""
+    family: ClassVar[str] = ""
     supports_batch: ClassVar[bool] = False
     supports_stream: ClassVar[bool] = False
     min_chunk_ms: ClassVar[int] = 0
@@ -294,3 +299,18 @@ def create(key: str, options: dict[str, Any] | None = None) -> SttProvider:
 def available() -> list[str]:
     """Return every registered STT provider key, sorted."""
     return sorted(_REGISTRY)
+
+
+def family_of(key: str) -> str:
+    """Return the model family for an STT provider key.
+
+    Family — never the billing ``vendor`` field — is what the cross-family
+    judge rule compares, because lineage is what leaks shared strengths and
+    weaknesses between a judge and a candidate. An unregistered key forms its
+    own family, so results written by adapters that no longer exist still
+    render instead of crashing the report.
+    """
+    cls = _REGISTRY.get(key)
+    if cls is None:
+        return key
+    return cls.family or cls.vendor or cls.key

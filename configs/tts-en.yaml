@@ -2,9 +2,11 @@
 #
 #   uv run audio-harness tts configs/tts-en.yaml
 #
-# roundtrip_stt transcribes each synthesized clip with one fixed recognizer to
-# estimate intelligibility. Hold it constant across runs — changing it changes
-# every score.
+# roundtrip_stt lists the fixed recognizers that transcribe each synthesized
+# clip to estimate intelligibility. Hold the set constant across runs —
+# changing it changes every score. Judges must span vendor families: a lane
+# is ranked only by judges outside its own family, so deepgram-aura2 is
+# ranked by whisper-local while the deepgram judge stays diagnostic.
 
 tts:
   - name: cartesia-sonic35
@@ -23,11 +25,13 @@ dataset:
 
 # Text formatting MUST stay off here. With smart_format on, the recognizer
 # rewrites "four hundred and twenty dollars" as "$420" for every engine alike,
-# and the score stops discriminating between voices entirely.
+# and the score stops discriminating between voices entirely. whisper-local
+# needs the optional dependency group: uv sync --extra judge-whisper.
 roundtrip_stt:
-  name: deepgram-nova3
-  options:
-    smart_format: false
+  - name: deepgram-nova3
+    options:
+      smart_format: false
+  - name: whisper-local
 
 run:
   repeats: 3

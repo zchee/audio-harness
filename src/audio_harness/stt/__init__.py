@@ -6,8 +6,17 @@ any key that appears in a benchmark configuration.
 
 from __future__ import annotations
 
-from . import assemblyai, deepgram, elevenlabs, google, soniox, speechmatics, xai
-from .base import StreamTimeline, SttProvider, available, create, register
+from . import (
+    assemblyai,
+    deepgram,
+    elevenlabs,
+    google,
+    soniox,
+    speechmatics,
+    whisper_local,
+    xai,
+)
+from .base import StreamTimeline, SttProvider, available, create, family_of, register
 
 __all__ = [
     "StreamTimeline",
@@ -17,9 +26,11 @@ __all__ = [
     "create",
     "deepgram",
     "elevenlabs",
+    "family_of",
     "google",
     "register",
     "soniox",
     "speechmatics",
+    "whisper_local",
     "xai",
 ]

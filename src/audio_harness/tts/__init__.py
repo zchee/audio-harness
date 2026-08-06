@@ -7,7 +7,7 @@ any key that appears in a benchmark configuration.
 from __future__ import annotations
 
 from . import cartesia, deepgram, gemini
-from .base import TtsProvider, available, create, register
+from .base import TtsProvider, available, create, family_of, register
 
 __all__ = [
     "TtsProvider",
@@ -15,6 +15,7 @@ __all__ = [
     "cartesia",
     "create",
     "deepgram",
+    "family_of",
     "gemini",
     "register",
 ]

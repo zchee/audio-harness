@@ -166,8 +166,12 @@ class TtsResult:
 
     @property
     def ok(self) -> bool:
-        """Whether the run produced usable audio."""
-        return self.error is None and len(self.audio) > 0
+        """Whether the run produced usable audio.
+
+        Results loaded back from JSONL drop the audio bytes but keep the
+        measured duration, so either counts as evidence that audio existed.
+        """
+        return self.error is None and (len(self.audio) > 0 or self.audio_s > 0)
 
     @property
     def rtf(self) -> float | None:

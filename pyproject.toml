@@ -33,6 +33,14 @@ dev = [
     "ruff>=0.9",
     "mypy>=1.14",
 ]
+# Local Whisper round-trip judge (Apple Silicon; see stt/whisper_local.py).
+# The numba floor keeps resolution on a line with Python 3.14 wheels; without
+# it the resolver backtracks to numba 0.53 / llvmlite 0.36, which only build
+# on Python < 3.10.
+judge-whisper = [
+    "mlx-whisper>=0.4.3",
+    "numba>=0.66",
+]
 
 [project.scripts]
 audio-harness = "audio_harness.cli:main"

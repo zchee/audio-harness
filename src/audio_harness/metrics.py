@@ -11,11 +11,15 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from itertools import pairwise
+from typing import TYPE_CHECKING
 
 import jiwer
 
-from .normalize import normalizer_for, uses_character_metric
+from .normalize import comparison_fold_for, normalizer_for, uses_character_metric
 from .types import Partial, SttResult
+
+if TYPE_CHECKING:
+    from .entities import EntityClassScore
 
 
 @dataclass(slots=True, frozen=True)
@@ -62,9 +66,13 @@ ZERO_COUNTS = ErrorCounts(0, 0, 0, 0)
 def score_pair(reference: str, hypothesis: str, language: str) -> ErrorCounts:
     """Count edit operations between a reference and a hypothesis.
 
-    Both strings are normalized for ``language`` first. Languages written
-    without spaces are scored per character; every other language is scored
-    per word.
+    Both strings are normalized for ``language`` first, then pushed through
+    the language's comparison fold — an equivalence applied only for scoring,
+    such as Japanese kana folding, where script choice is vendor formatting
+    policy rather than recognition.
+
+    Languages written without spaces are scored per character; every other
+    language is scored per word.
 
     Args:
         reference: Ground-truth transcript.
@@ -75,7 +83,8 @@ def score_pair(reference: str, hypothesis: str, language: str) -> ErrorCounts:
         Edit counts for the pair.
     """
     normalize = normalizer_for(language)
-    ref, hyp = normalize(reference), normalize(hypothesis)
+    fold = comparison_fold_for(language)
+    ref, hyp = fold(normalize(reference)), fold(normalize(hypothesis))
 
     if uses_character_metric(language):
         ref_tokens = " ".join(ref)
@@ -166,6 +175,10 @@ class ProviderSummary:
             out of seven updates and zero out of forty-four are very different
             behaviours that a percentage alone flattens.
         audio_s: Total audio submitted, for cost estimation.
+        entities: Per-class entity scores, populated only for results whose
+            reference carries inline entity tags. Kept separate from
+            ``counts`` because a digit swap inside an account number and a
+            dropped filler word are the same edit but not the same failure.
     """
 
     provider: str
@@ -182,6 +195,7 @@ class ProviderSummary:
     interim_rate: list[float] = field(default_factory=list)
     audio_s: float = 0.0
     chunk_ms: int | None = None
+    entities: dict[str, EntityClassScore] = field(default_factory=dict)
 
     @property
     def error_rate(self) -> float | None:
@@ -256,5 +270,19 @@ def summarize(results: list[SttResult], language: str) -> list[ProviderSummary]:
             summary.counts = summary.counts + score_pair(
                 reference, result.text, clip_language
             )
+
+        annotated = result.raw.get("reference_annotated")
+        if isinstance(annotated, str) and annotated:
+            # Imported here, not at module top: entities.py reuses this
+            # module's ErrorCounts, so a top-level import would be circular.
+            from .entities import score_entities
+
+            for label, score in score_entities(
+                annotated, result.text, clip_language
+            ).items():
+                existing = summary.entities.get(label)
+                summary.entities[label] = (
+                    score if existing is None else existing + score
+                )
 
     return list(summaries.values())

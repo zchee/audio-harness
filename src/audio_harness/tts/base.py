@@ -23,6 +23,10 @@ class TtsProvider(abc.ABC):
         key: Registry key used in configuration files.
         vendor: Account the adapter bills against. Adapters sharing a vendor
             share concurrency limits.
+        family: Model lineage used by judge/candidate coupling rules. Defaults
+            to ``vendor``; kept separate because lineage and billing diverge
+            (an OpenAI-lineage voice served by a reseller must still never be
+            scored by an OpenAI-lineage recognizer).
         supports_batch: Whether :meth:`synthesize` is implemented.
         supports_stream: Whether :meth:`synthesize_stream` is implemented.
         default_sample_rate: Output rate requested when config says nothing.
@@ -30,6 +34,7 @@ class TtsProvider(abc.ABC):
 
     key: ClassVar[str]
     vendor: ClassVar[str] = ""
+    family: ClassVar[str] = ""
     supports_batch: ClassVar[bool] = False
     supports_stream: ClassVar[bool] = False
     default_sample_rate: ClassVar[int] = 24000
@@ -149,3 +154,16 @@ def create(key: str, options: dict[str, Any] | None = None) -> TtsProvider:
 def available() -> list[str]:
     """Return every registered TTS provider key, sorted."""
     return sorted(_REGISTRY)
+
+
+def family_of(key: str) -> str:
+    """Return the model family for a TTS provider key.
+
+    See :func:`audio_harness.stt.base.family_of`; the same coupling rule reads
+    both sides. An unregistered key forms its own family so historical results
+    keep rendering.
+    """
+    cls = _REGISTRY.get(key)
+    if cls is None:
+        return key
+    return cls.family or cls.vendor or cls.key
