@@ -1,0 +1,30 @@
+# E2 audio-LLM pairwise TTS arena, English lane (plan P4 step 17).
+#
+# This config pins the candidate set and where the arena writes; the prompt
+# mix is given on the command line so the id-stable per-file sampling stays
+# explicit, e.g.:
+#
+#   audio-harness tts-arena configs/tts-arena-en.yaml \
+#     data/prompts-en/interview.txt:20 \
+#     data/prompts-en/general.txt:15 \
+#     data/prompts-en/entities.txt:15
+#
+# Batch mode only: the arena judges audio quality, not streaming latency,
+# and batch output has no chunk-seam artifacts of the harness' own making.
+tts:
+  - name: cartesia-sonic35
+    modes: [batch]
+  - name: cartesia-sonic3
+    modes: [batch]
+  - name: deepgram-aura2
+    modes: [batch]
+  - name: gemini-tts
+    modes: [batch]
+
+dataset:
+  language: en-US
+
+run:
+  repeats: 1
+  warmup: 0
+  output_dir: results/arena-en

@@ -482,7 +482,13 @@ class TestLiveSmoke:
         ]
         config = BenchmarkConfig(
             stt=[ProviderConfig(name="deepgram-nova3", modes=["stream"])],
-            run=RunConfig(repeats=1, warmup=0, timeout_s=60.0, settle_ms=0),
+            run=RunConfig(
+                repeats=1,
+                warmup=0,
+                timeout_s=60.0,
+                settle_ms=0,
+                output_dir=str(tmp_path),
+            ),
         )
 
         results = await asyncio.wait_for(run_stt(config, clips), timeout=120.0)

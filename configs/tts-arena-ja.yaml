@@ -1,0 +1,27 @@
+# E2 audio-LLM pairwise TTS arena, Japanese lane (plan P4 step 17).
+#
+# Prompt mix on the command line, e.g.:
+#
+#   audio-harness tts-arena configs/tts-arena-ja.yaml \
+#     data/prompts-ja/general.txt:25 \
+#     data/prompts-ja/entities.txt:25
+#
+# Japanese interview questions are PENDING (data/prompts-ja/interview.PENDING.md),
+# so the ja mix covers general + entities only until they are authored.
+tts:
+  - name: cartesia-sonic35
+    modes: [batch]
+  - name: cartesia-sonic3
+    modes: [batch]
+  - name: deepgram-aura2
+    modes: [batch]
+  - name: gemini-tts
+    modes: [batch]
+
+dataset:
+  language: ja-JP
+
+run:
+  repeats: 1
+  warmup: 0
+  output_dir: results/arena-ja

@@ -46,6 +46,21 @@ judge-whisper = [
 guardrail-mos = [
     "distillmos>=0.9.1",
 ]
+# SeMaScore fallback encoder for the semantic judge (judge/semantic.py):
+# roberta-base at a pinned revision, CPU inference only.
+judge-semantic = [
+    "transformers>=4.48",
+    "torch>=2.6",
+]
+# Simulated-interview persona voice (sim/interview.py): Kokoro pinned at
+# 0.9.4, out-of-suite so no STT lane is scored on its own family's voice.
+# The en_core_web_sm wheel is load-bearing: misaki's English G2P otherwise
+# tries a runtime `pip install` of the spaCy model, which raises SystemExit
+# in uv-managed environments (no pip). Verified on Python 3.14.6/arm64.
+sim-kokoro = [
+    "kokoro==0.9.4",
+    "en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl",
+]
 # TTS prompt suite generators (tools/gen_entity_prompts.py): num2words for
 # spoken-form number/date/currency words, Faker for names and alphanumeric
 # templates, Babel for CLDR-backed locale date/currency formatting.
@@ -61,6 +76,12 @@ audio-harness = "audio_harness.cli:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+# The sim-kokoro extra pins the spaCy en_core_web_sm model by wheel URL
+# (spaCy models are not on PyPI); hatchling refuses direct references
+# without this switch.
+allow-direct-references = true
 
 [tool.ruff]
 line-length = 88

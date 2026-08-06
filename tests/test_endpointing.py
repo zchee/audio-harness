@@ -527,7 +527,13 @@ class TestLiveSmoke:
                     options={"endpointing": 300, "utterance_end_ms": 1000},
                 )
             ],
-            run=RunConfig(repeats=1, warmup=0, timeout_s=60.0, settle_ms=0),
+            run=RunConfig(
+                repeats=1,
+                warmup=0,
+                timeout_s=60.0,
+                settle_ms=0,
+                output_dir=str(tmp_path),
+            ),
         )
         results = await run_stt(config, [clip])
         assert len(results) == 1

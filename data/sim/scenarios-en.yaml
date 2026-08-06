@@ -1,0 +1,96 @@
+# Simulated-interview scenarios (plan P4 step 18, lane E3). English only:
+# non-English interview questions are PENDING (see interview_prompts.py) and
+# must not be backfilled with machine translations.
+#
+# Questions are the harness's own IP (license: own-IP, authored 2026-08-06).
+# Every slot names a value sampler (kind); ground truth is sampled per
+# persona at run time, never written here — the scenario is the schema, not
+# the data, which is what keeps the lane contamination-resistant.
+
+scenarios:
+  - id: job-application
+    language: en-US
+    description: a screening call for a software engineering job application
+    slots:
+      - name: full_name
+        kind: person
+        question: "Before we start, could you tell me your full name?"
+      - name: phone
+        kind: phone
+        question: "What's the best phone number to reach you at?"
+      - name: previous_company
+        kind: company
+        question: "What was the name of the company you worked at most recently?"
+      - name: years_experience
+        kind: small_count
+        question: "How many years of experience do you have in this field?"
+      - name: salary_expectation
+        kind: amount
+        question: "What annual salary are you expecting for this role?"
+      - name: start_date
+        kind: date
+        question: "When would you be able to start, if this moves forward?"
+      - name: reference_code
+        kind: code
+        question: "Could you read me the reference code from your application confirmation email?"
+      - name: team_size
+        kind: small_count
+        question: "How many people were on the largest team you've worked with?"
+
+  - id: insurance-claim
+    language: en-US
+    description: a first-notice-of-loss call for a home insurance claim
+    slots:
+      - name: policyholder
+        kind: person
+        question: "Can I have the policyholder's full name, please?"
+      - name: policy_number
+        kind: code
+        question: "Could you read me your policy number?"
+      - name: callback_phone
+        kind: phone
+        question: "What's a good callback number in case we get disconnected?"
+      - name: incident_date
+        kind: date
+        question: "On what date did the damage occur?"
+      - name: damage_estimate
+        kind: amount
+        question: "Do you have a rough estimate of the repair cost?"
+      - name: contractor
+        kind: company
+        question: "Which contractor gave you that estimate?"
+      - name: rooms_affected
+        kind: small_count
+        question: "How many rooms were affected by the damage?"
+      - name: claim_reference
+        kind: code
+        question: "Finally, could you read back the claim reference we sent you?"
+
+  - id: clinic-intake
+    language: en-US
+    description: a patient intake call for scheduling a clinic appointment
+    slots:
+      - name: patient_name
+        kind: person
+        question: "May I have the patient's full name?"
+      - name: contact_phone
+        kind: phone
+        question: "And a daytime phone number where we can reach you?"
+      - name: appointment_date
+        kind: date
+        question: "Which date would you prefer for the appointment?"
+      - name: insurance_provider
+        kind: company
+        question: "Who is your insurance provider?"
+      - name: member_id
+        kind: code
+        question: "Could you read me the member ID on your insurance card?"
+      - name: copay_amount
+        kind: amount
+        question: "What copay amount does your plan list for specialist visits?"
+      - name: symptom_duration
+        kind: small_count
+        question: "For how many days have you had these symptoms?"
+      - name: referral_code
+        kind: code
+        question: "Do you have the referral code from your primary care doctor?"

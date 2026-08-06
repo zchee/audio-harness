@@ -7,6 +7,14 @@ Two scheduling rules keep the measurements honest:
   benchmark is trying to measure.
 * Providers run **concurrently**, because they are independent services and
   serializing them would multiply wall-clock time for no gain in accuracy.
+
+One persistence rule keeps the measurements recoverable: completed lanes are
+**flushed to disk immediately**. The API calls are the expensive part of a
+benchmark, and writing results only at end-of-run meant an interrupted run
+lost every finished lane. Each lane's records now land in the run's results
+file the moment the lane completes, so a crash preserves finished lanes and a
+rerun of only the missing ones can be folded in by the report's supersede
+merge.
 """
 
 from __future__ import annotations
@@ -55,11 +63,17 @@ async def run_stt(
     Returns:
         One result per provider, mode, clip and repeat. Failed runs are
         included with their ``error`` set so failure rates stay visible.
+
+    Completed lanes are persisted under ``config.run.output_dir`` as the run
+    progresses, so an aborted run keeps every finished lane on disk in a file
+    :func:`read_stt_results` can load. :func:`write_stt_results` reuses the
+    same directory to land the canonical end-of-run file.
     """
     limiter = asyncio.Semaphore(config.run.provider_concurrency)
     vendors = _VendorLocks(config.run.vendor_concurrency)
+    sink = _LaneSink(_begin_run(config.run.output_dir, "stt-results.jsonl"))
     lanes = [
-        _stt_lane(entry, mode, clips, config.run, limiter, vendors, progress)
+        _stt_lane(entry, mode, clips, config.run, limiter, vendors, progress, sink)
         for entry in config.stt
         for mode in entry.modes
     ]
@@ -98,6 +112,7 @@ async def _stt_lane(
     limiter: asyncio.Semaphore,
     vendors: _VendorLocks,
     progress: Progress | None,
+    sink: _LaneSink,
 ) -> list[SttResult]:
     """Run one provider in one mode across every clip, sequentially."""
     provider = stt.create(entry.name, entry.options)
@@ -123,6 +138,7 @@ async def _stt_lane(
                         await asyncio.sleep(settle_ms / 1000)
         finally:
             await provider.aclose()
+        await sink.lane_done(b"".join(_stt_record(result) for result in results))
         return results
 
 
@@ -252,11 +268,18 @@ async def run_tts(
 
     Returns:
         One result per provider, mode, prompt and repeat.
+
+    Completed lanes are persisted under ``config.run.output_dir`` as the run
+    progresses, so an aborted run keeps every finished lane on disk in a file
+    :func:`read_tts_results` can load. The snapshots record metrics only —
+    synthesized audio files and round-trip verdicts are added by the
+    end-of-run :func:`write_tts_results`, which reuses the same directory.
     """
     limiter = asyncio.Semaphore(config.run.provider_concurrency)
     vendors = _VendorLocks(config.run.vendor_concurrency)
+    sink = _LaneSink(_begin_run(config.run.output_dir, "tts-results.jsonl"))
     lanes = [
-        _tts_lane(entry, mode, prompts, config.run, limiter, vendors, progress)
+        _tts_lane(entry, mode, prompts, config.run, limiter, vendors, progress, sink)
         for entry in config.tts
         for mode in entry.modes
     ]
@@ -272,6 +295,7 @@ async def _tts_lane(
     limiter: asyncio.Semaphore,
     vendors: _VendorLocks,
     progress: Progress | None,
+    sink: _LaneSink,
 ) -> list[TtsResult]:
     """Run one provider in one mode across every prompt, sequentially.
 
@@ -305,6 +329,7 @@ async def _tts_lane(
                 results.extend(await _tts_load_pass(provider, prompts, run))
         finally:
             await provider.aclose()
+        await sink.lane_done(b"".join(_tts_record(result, None) for result in results))
         return results
 
 
@@ -442,53 +467,98 @@ async def score_roundtrip(
             await provider.aclose()
 
 
+def _stt_record(result: SttResult) -> bytes:
+    """Serialize one STT result to its JSONL line, newline included.
+
+    Shared by the per-lane snapshots and :func:`write_stt_results` so the
+    crash artifact and the canonical file can never drift apart in format.
+    """
+    return (
+        orjson.dumps(
+            {
+                "provider": result.provider,
+                "clip_id": result.clip_id,
+                "mode": str(result.mode),
+                "text": result.text,
+                "reference": result.raw.get("reference", ""),
+                "reference_annotated": result.raw.get("reference_annotated"),
+                "license": result.raw.get("license"),
+                "gold_status": result.raw.get("gold_status"),
+                "language": result.raw.get("language", ""),
+                "audio_s": result.audio_s,
+                "total_s": result.total_s,
+                "ttft_s": result.ttft_s,
+                "finalize_s": result.finalize_s,
+                "rtf": result.rtf,
+                "chunk_ms": result.raw.get("chunk_ms"),
+                "speech_end_s": result.raw.get("speech_end_s"),
+                "pauses": result.raw.get("pauses"),
+                "ws_rtt_s": result.raw.get("ws_rtt_s"),
+                "eou_source": result.raw.get("eou_source"),
+                "endpoint_config": result.raw.get("endpoint_config"),
+                "error": result.error,
+                "partials": [
+                    {
+                        "t_s": p.t_s,
+                        "text": p.text,
+                        "is_final": p.is_final,
+                        "kind": p.kind,
+                    }
+                    for p in result.partials
+                ],
+            }
+        )
+        + b"\n"
+    )
+
+
 def write_stt_results(results: list[SttResult], output_dir: str | Path) -> Path:
     """Persist STT results as JSONL and return the file path.
 
     Interim hypotheses are kept so churn can be re-analysed without re-running
-    the benchmark, which is the expensive part.
+    the benchmark, which is the expensive part. When the results come from a
+    run that persisted its lanes incrementally, the canonical file lands in
+    that run's directory, replacing the lane snapshots.
     """
     path = _prepare(output_dir, "stt-results.jsonl")
     with path.open("wb") as handle:
         for result in results:
-            handle.write(
-                orjson.dumps(
-                    {
-                        "provider": result.provider,
-                        "clip_id": result.clip_id,
-                        "mode": str(result.mode),
-                        "text": result.text,
-                        "reference": result.raw.get("reference", ""),
-                        "reference_annotated": result.raw.get("reference_annotated"),
-                        "license": result.raw.get("license"),
-                        "gold_status": result.raw.get("gold_status"),
-                        "language": result.raw.get("language", ""),
-                        "audio_s": result.audio_s,
-                        "total_s": result.total_s,
-                        "ttft_s": result.ttft_s,
-                        "finalize_s": result.finalize_s,
-                        "rtf": result.rtf,
-                        "chunk_ms": result.raw.get("chunk_ms"),
-                        "speech_end_s": result.raw.get("speech_end_s"),
-                        "pauses": result.raw.get("pauses"),
-                        "ws_rtt_s": result.raw.get("ws_rtt_s"),
-                        "eou_source": result.raw.get("eou_source"),
-                        "endpoint_config": result.raw.get("endpoint_config"),
-                        "error": result.error,
-                        "partials": [
-                            {
-                                "t_s": p.t_s,
-                                "text": p.text,
-                                "is_final": p.is_final,
-                                "kind": p.kind,
-                            }
-                            for p in result.partials
-                        ],
-                    }
-                )
-            )
-            handle.write(b"\n")
+            handle.write(_stt_record(result))
     return path
+
+
+def _tts_record(result: TtsResult, audio_path: str | None) -> bytes:
+    """Serialize one TTS result to its JSONL line, newline included.
+
+    Shared by the per-lane snapshots — which pass no audio path, because
+    audio files are written at end of run — and :func:`write_tts_results`,
+    so the crash artifact and the canonical file can never drift in format.
+    """
+    return (
+        orjson.dumps(
+            {
+                "provider": result.provider,
+                "prompt_id": result.prompt_id,
+                "mode": str(result.mode),
+                "chars": result.chars,
+                "audio_s": result.audio_s,
+                "ttfb_s": result.ttfb_s,
+                "ttfa_s": result.ttfa_s,
+                "gap_p99_s": result.gap_p99_s,
+                "cold": result.cold,
+                "chunk_t_s": result.chunk_t_s,
+                "total_s": result.total_s,
+                "rtf": result.rtf,
+                "load": result.raw.get("load"),
+                "input_streaming": result.raw.get("input_streaming"),
+                "error": result.error,
+                "text": result.raw.get("text", ""),
+                "roundtrip": result.raw.get("roundtrip"),
+                "audio_path": audio_path,
+            }
+        )
+        + b"\n"
+    )
 
 
 def write_tts_results(
@@ -509,31 +579,7 @@ def write_tts_results(
                 target.write_bytes(wrap_wav(result.audio, result.sample_rate))
                 audio_path = str(target)
 
-            handle.write(
-                orjson.dumps(
-                    {
-                        "provider": result.provider,
-                        "prompt_id": result.prompt_id,
-                        "mode": str(result.mode),
-                        "chars": result.chars,
-                        "audio_s": result.audio_s,
-                        "ttfb_s": result.ttfb_s,
-                        "ttfa_s": result.ttfa_s,
-                        "gap_p99_s": result.gap_p99_s,
-                        "cold": result.cold,
-                        "chunk_t_s": result.chunk_t_s,
-                        "total_s": result.total_s,
-                        "rtf": result.rtf,
-                        "load": result.raw.get("load"),
-                        "input_streaming": result.raw.get("input_streaming"),
-                        "error": result.error,
-                        "text": result.raw.get("text", ""),
-                        "roundtrip": result.raw.get("roundtrip"),
-                        "audio_path": audio_path,
-                    }
-                )
-            )
-            handle.write(b"\n")
+            handle.write(_tts_record(result, audio_path))
     return path
 
 
@@ -684,8 +730,84 @@ def read_tts_results(path: str | Path) -> list[TtsResult]:
     return results
 
 
-def _prepare(output_dir: str | Path, filename: str) -> Path:
-    """Create the output directory and return a timestamped file path."""
+class _LaneSink:
+    """Persists each completed lane so an aborted run keeps its finished work.
+
+    Every lane completion rewrites the results file through a temporary path
+    and an atomic replace, so the file on disk always holds exactly the lanes
+    that finished — never a torn line from a crash mid-write. Lanes land in
+    completion order; the end-of-run writer replaces the file in canonical
+    config order, and the report's supersede merge keys on provider and mode,
+    so an interim file reports correctly either way.
+    """
+
+    __slots__ = ("_chunks", "_lock", "path")
+
+    def __init__(self, path: Path) -> None:
+        """Remember the file to maintain; nothing is written until a lane ends.
+
+        Args:
+            path: Results file inside the run's directory.
+        """
+        self.path = path
+        self._chunks: list[bytes] = []
+        self._lock = asyncio.Lock()
+
+    async def lane_done(self, records: bytes) -> None:
+        """Add one completed lane's serialized records and flush to disk.
+
+        The write runs off the event loop so a large flush cannot stall
+        concurrently streaming lanes and distort their latency measurements;
+        the lock serializes flushes from lanes finishing at the same moment.
+
+        Args:
+            records: The lane's JSONL lines, newline-terminated.
+        """
+        async with self._lock:
+            self._chunks.append(records)
+            payload = b"".join(self._chunks)
+            await asyncio.to_thread(self._flush, payload)
+
+    def _flush(self, payload: bytes) -> None:
+        """Replace the results file atomically with the given content."""
+        tmp = self.path.with_name(self.path.name + ".tmp")
+        tmp.write_bytes(payload)
+        tmp.replace(self.path)
+
+
+_ACTIVE_RUNS: dict[tuple[str, str], Path] = {}
+
+
+def _begin_run(output_dir: str | Path, filename: str) -> Path:
+    """Open a run's results file path at run start, remembering the directory.
+
+    Creating the timestamped directory up front lets lanes persist as they
+    finish; the registry entry lets the end-of-run writer land the canonical
+    file over the lane snapshots instead of opening a second directory.
+
+    Args:
+        output_dir: Root results directory from the run configuration.
+        filename: Results file name, which also namespaces the registry so
+            an STT and a TTS run against one root cannot collide.
+
+    Returns:
+        The results file path inside the freshly created run directory.
+    """
     directory = Path(output_dir) / time.strftime("%Y%m%d-%H%M%S")
     directory.mkdir(parents=True, exist_ok=True)
+    _ACTIVE_RUNS[(str(Path(output_dir)), filename)] = directory
+    return directory / filename
+
+
+def _prepare(output_dir: str | Path, filename: str) -> Path:
+    """Return the run's file path, creating a timestamped directory if needed.
+
+    A run that persisted its lanes incrementally already owns a directory;
+    the final write reuses it so the canonical file replaces the snapshots.
+    A standalone write — re-scoring, merging, tests — creates a fresh one.
+    """
+    directory = _ACTIVE_RUNS.pop((str(Path(output_dir)), filename), None)
+    if directory is None:
+        directory = Path(output_dir) / time.strftime("%Y%m%d-%H%M%S")
+        directory.mkdir(parents=True, exist_ok=True)
     return directory / filename

@@ -32,6 +32,19 @@ from audio_harness.types import Mode, TtsPrompt, TtsResult
 RATE = 24000
 
 
+@pytest.fixture(autouse=True)
+def _isolated_results_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep per-lane run snapshots out of the repository's results directory.
+
+    ``runner.run_tts`` persists completed lanes under the configured
+    ``output_dir`` — the relative ``results`` by default — the moment they
+    finish. These tests drive the runner with fake providers, so the working
+    directory moves into the test's own tmp dir to keep fake lanes from
+    mixing into real benchmark artifacts.
+    """
+    monkeypatch.chdir(tmp_path)
+
+
 def make_pcm(silence_s: float, tone_s: float, rate: int = RATE) -> bytes:
     """Mono 16-bit PCM: leading silence followed by a 220 Hz tone."""
     t = np.linspace(0, tone_s, int(rate * tone_s), endpoint=False)

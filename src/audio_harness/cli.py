@@ -540,6 +540,431 @@ def guardrail_command(
         raise typer.Exit(code=1)
 
 
+@app.command("tts-arena")
+def tts_arena_command(
+    config_path: Annotated[
+        Path, typer.Argument(help="Benchmark YAML config listing the TTS candidates.")
+    ],
+    prompt_files: Annotated[
+        list[str],
+        typer.Argument(
+            help="Prompt files, each optionally suffixed :count for a seeded sample."
+        ),
+    ],
+    env_file: Annotated[Path, typer.Option(help="Dotenv file.")] = Path(
+        DEFAULT_ENV_FILE
+    ),
+    panel: Annotated[
+        Path | None,
+        typer.Option(help="Human-panel votes JSONL for gate criterion (i)."),
+    ] = None,
+    judge_model: Annotated[
+        str, typer.Option(help="Audio-in judge model; pinned, part of cache keys.")
+    ] = "gemini-2.5-flash",
+    seed: Annotated[
+        int, typer.Option(help="Seed for prompt sampling and bootstrap CIs.")
+    ] = 20260806,
+    max_calls: Annotated[
+        int, typer.Option(help="Refuse to schedule more judge calls than this.")
+    ] = 2000,
+    concurrency: Annotated[
+        int, typer.Option(help="Concurrent judge calls in flight.")
+    ] = 8,
+    reuse_audio: Annotated[
+        Path | None,
+        typer.Option(
+            help="Judge saved WAVs from this directory instead of synthesizing "
+            "(useful when a candidate's lane fails for a language)."
+        ),
+    ] = None,
+) -> None:
+    """Rank TTS candidates with the pairwise audio-LLM arena (experimental).
+
+    AudioJudge protocol (arXiv:2507.12705): every unordered pair of
+    candidates is judged per prompt in both presentation orders by three
+    pinned aspect judges over concatenated pair audio, aggregated to a
+    system-level Bradley-Terry ranking with bootstrap CIs. The lane renders
+    "experimental - not ranked" until its three-criterion validity gate
+    passes; judge calls are cached, so re-runs only pay for what is new.
+
+    Synthesis is skipped when a timestamped run directory under the config's
+    output directory already holds every candidate WAV (or --reuse-audio
+    names one explicitly); otherwise a full batch synthesis pass runs (judge
+    caching makes the re-judging free).
+    """
+    from .judge import tts_arena
+
+    load_env_file(env_file)
+    config = _load_config(config_path)
+    systems = sorted({entry.name for entry in config.tts})
+    if len(systems) < 2:
+        console.print("[red]config error:[/red] the arena needs >= 2 tts candidates")
+        raise typer.Exit(code=2)
+    for entry in config.tts:
+        if "batch" not in entry.modes:
+            console.print(
+                f"[red]config error:[/red] arena candidate {entry.name} must "
+                "include batch mode — the arena judges saved batch audio"
+            )
+            raise typer.Exit(code=2)
+
+    try:
+        prompts = tts_arena.load_arena_prompts(
+            prompt_files, language=config.dataset.language, seed=seed
+        )
+        votes = tts_arena.load_panel(panel) if panel is not None else None
+    except tts_arena.ArenaError as exc:
+        console.print(f"[red]arena error:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+
+    output_dir = Path(config.run.output_dir)
+    expected = [
+        f"{system}-batch-{prompt.prompt_id}.wav"
+        for system in systems
+        for prompt in prompts
+    ]
+
+    def complete_audio_dir() -> Path | None:
+        """Newest timestamped run directory already holding every WAV."""
+        candidates = sorted(output_dir.glob("*/audio"), reverse=True)
+        for candidate in candidates:
+            if all((candidate / name).is_file() for name in expected):
+                return candidate
+        return None
+
+    audio_dir = reuse_audio if reuse_audio is not None else complete_audio_dir()
+    if audio_dir is not None:
+        if not audio_dir.is_dir():
+            console.print(f"[red]arena error:[/red] audio dir not found: {audio_dir}")
+            raise typer.Exit(code=2)
+        console.print(f"[dim]reusing synthesized audio:[/dim] {audio_dir}")
+    else:
+        console.print(
+            f"Synthesizing {len(prompts)} prompts x {len(systems)} candidates (batch)"
+        )
+        results = asyncio.run(runner.run_tts(config, prompts, _progress()))
+        results_path = runner.write_tts_results(
+            results, config.run.output_dir, save_audio=True
+        )
+        audio_dir = results_path.parent / "audio"
+        failed = [r for r in results if not r.ok]
+        if failed:
+            console.print(
+                f"[yellow]{len(failed)} synthesis run(s) failed; their pairs "
+                "will be skipped and reported as missing audio[/yellow]"
+            )
+
+    n_pairs = len(systems) * (len(systems) - 1) // 2
+    total_calls = n_pairs * len(prompts) * len(tts_arena.ASPECTS) * 2
+    if total_calls > max_calls:
+        console.print(
+            f"[red]arena error:[/red] {total_calls} judge calls scheduled "
+            f"exceeds --max-calls {max_calls}; shrink the prompt mix or "
+            "raise the cap deliberately"
+        )
+        raise typer.Exit(code=2)
+    console.print(
+        f"Judging {total_calls} calls ({n_pairs} pairs x {len(prompts)} prompts "
+        f"x {len(tts_arena.ASPECTS)} aspects x 2 orders) via "
+        f"[cyan]{judge_model}[/cyan]"
+    )
+
+    def on_progress(done: int, total: int) -> None:
+        if done % 100 == 0 or done == total:
+            console.print(f"[dim]judged[/dim] {done}/{total}")
+
+    run = asyncio.run(
+        tts_arena.run_arena(
+            audio_dir=audio_dir,
+            systems=systems,
+            prompts=prompts,
+            cache_path=output_dir / "judge-cache.jsonl",
+            model=judge_model,
+            concurrency=concurrency,
+            on_progress=on_progress,
+        )
+    )
+
+    scores = tts_arena.bt_table(run.verdicts, systems, seed=seed)
+    flips = tts_arena.order_flip_stats(run.verdicts)
+    gate = tts_arena.evaluate_gate(scores, flips, votes)
+    notes = []
+    if config.dataset.language.split("-")[0] == "ja":
+        notes.append(
+            "ja interview prompts are PENDING "
+            "(data/prompts-ja/interview.PENDING.md); the ja mix covers "
+            "general + entities only"
+        )
+
+    # Verdicts live next to the audio they judged; the cache spans run dirs.
+    results_path, summary_path, report_path = tts_arena.write_arena_outputs(
+        audio_dir.parent, run, scores, flips, gate, notes=notes
+    )
+    console.print()
+    console.print(tts_arena.render_arena_markdown(run, scores, gate, notes=notes))
+    console.print()
+    console.print(
+        f"Spend: {run.live_calls} live calls ({run.cached_calls} cached, "
+        f"{run.error_calls} errored), {run.live_prompt_tokens} prompt + "
+        f"{run.live_output_tokens} output tokens, est. ${run.est_usd:.2f}"
+    )
+    console.print(f"[dim]raw verdicts:[/dim] {results_path}")
+    console.print(f"[dim]summary:[/dim]      {summary_path}")
+    console.print(f"[dim]report:[/dim]       {report_path}")
+
+
+@app.command("sim")
+def sim_command(
+    config_path: Annotated[
+        Path, typer.Argument(help="Simulated-interview YAML config.")
+    ],
+    env_file: Annotated[Path, typer.Option(help="Dotenv file.")] = Path(
+        DEFAULT_ENV_FILE
+    ),
+    estimate_only: Annotated[
+        bool,
+        typer.Option("--estimate-only", help="Print the expected spend and exit."),
+    ] = False,
+) -> None:
+    """Run the simulated-interview E2E lane (experimental, gated).
+
+    Interviewer LLM -> persona LLM -> pinned Kokoro voice -> pinned tel8k
+    degradation -> candidate streaming STT -> deterministic field-extraction
+    scoring. The expected spend is computed and printed before anything paid
+    executes, and the run aborts above the config's hard cap. The vendor
+    ranking is compared against the pre-registered real-corpus composite;
+    below the gate the lane renders "experimental - not ranked".
+
+    Requires the optional dependency group: uv sync --extra sim-kokoro.
+    """
+    import yaml
+
+    from .sim import interview as sim_interview
+
+    load_env_file(env_file)
+    try:
+        raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        bench = BenchmarkConfig.from_dict(raw)
+        sim = sim_interview.SimConfig.from_mapping(raw.get("sim") or {})
+        scenarios = sim_interview.load_scenarios(sim.scenarios_path)
+    except (OSError, ConfigError) as exc:
+        console.print(f"[red]config error:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+    if not bench.stt:
+        console.print("[red]config error:[/red] no stt providers configured")
+        raise typer.Exit(code=2)
+
+    estimate = sim_interview.estimate_spend(
+        bench,
+        scenarios,
+        sim.personas_per_scenario,
+        est_answer_s=sim.est_answer_s,
+    )
+    console.print(f"[bold]Expected spend (hard cap ${sim.hard_cap_usd:.2f})[/bold]")
+    console.print(estimate.render())
+    if estimate_only:
+        return
+    try:
+        sim_interview.ensure_within_cap(estimate, sim.hard_cap_usd)
+    except ConfigError as exc:
+        console.print(f"[red]spend cap:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+
+    try:
+        llm = sim_interview.gemini_llm(sim.model)
+        console.print("[dim]loading Kokoro (pinned revision)…[/dim]")
+        tts_fn = sim_interview.KokoroSynth(sim.voices)
+    except (RuntimeError, ConfigError) as exc:
+        console.print(f"[red]sim error:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+
+    try:
+        outcome = asyncio.run(
+            sim_interview.run_sim(bench, sim, llm=llm, tts=tts_fn, progress=_progress())
+        )
+    except ConfigError as exc:
+        console.print(f"[red]sim error:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+
+    results_path = runner.write_stt_results(outcome.results, bench.run.output_dir)
+
+    gate = None
+    gate_raw = raw.get("gate") or {}
+    canonical = [Path(p) for p in gate_raw.get("canonical") or []]
+    if canonical:
+        try:
+            merged = sim_interview.load_canonical(canonical)
+        except (FileNotFoundError, ValueError) as exc:
+            console.print(f"[red]gate error:[/red] {exc}")
+            raise typer.Exit(code=2) from exc
+        composite = sim_interview.composite_ranking(
+            merged, [entry.name for entry in bench.stt]
+        )
+        gate = sim_interview.evaluate_gate(
+            outcome.vendor_scores,
+            composite,
+            threshold=float(gate_raw.get("rho_threshold", 0.8)),
+        )
+
+    sim_path, gate_path, report_path = sim_interview.write_sim_outputs(
+        outcome, gate, results_path
+    )
+    console.print()
+    console.print(sim_interview.render_sim_markdown(outcome, gate))
+    console.print(
+        "Actual spend: "
+        + ", ".join(
+            f"{name} ${usd:.2f}"
+            for name, usd in sorted(outcome.spend.items())
+            if name != "total"
+        )
+        + f" — total ${outcome.spend['total']:.2f} "
+        f"({outcome.usage.calls} LLM calls, seed {outcome.seed})"
+    )
+    if gate is not None and not gate.passed:
+        console.print(
+            "[yellow]gate FAILED — write the divergence analysis "
+            "(sim-divergence.md) before any kill/demote verdict[/yellow]"
+        )
+    console.print(f"[dim]raw results:[/dim] {results_path}")
+    console.print(f"[dim]sim results:[/dim] {sim_path}")
+    console.print(f"[dim]gate:[/dim]        {gate_path}")
+    console.print(f"[dim]report:[/dim]      {report_path}")
+
+
+@app.command("judge-semantic")
+def judge_semantic_command(
+    results: Annotated[
+        list[Path],
+        typer.Argument(help="One or more stt-results.jsonl files to merge and judge."),
+    ],
+    language: Annotated[
+        str, typer.Option(help="Fallback BCP-47 tag for results that recorded none.")
+    ] = "en-US",
+    anchor: Annotated[
+        Path | None,
+        typer.Option(help="Human anchor CSV (clip_id, provider, human_label)."),
+    ] = None,
+    cache_file: Annotated[
+        Path | None,
+        typer.Option(help="Vote cache JSONL; defaults next to the first results file."),
+    ] = None,
+    max_calls: Annotated[
+        int, typer.Option(help="Hard cap on live judge calls for this run.")
+    ] = 4800,
+    semascore: Annotated[
+        bool, typer.Option(help="Compute the deterministic SeMaScore fallback.")
+    ] = True,
+    env_file: Annotated[Path, typer.Option(help="Dotenv file.")] = Path(
+        DEFAULT_ENV_FILE
+    ),
+) -> None:
+    """Judge saved STT transcripts for semantic fidelity (experimental lane).
+
+    Reads saved results only — no audio is ever re-submitted — and caches
+    every vote by content, so re-running an already-judged merge bills
+    nothing. Files merge with the same supersede rule as ``report``: when a
+    provider and mode appears in several files, the later file wins. Until a
+    language's human anchor exists and its Cohen's-kappa gate passes, every
+    number renders as "experimental — not ranked" and must not feed a
+    vendor recommendation.
+    """
+    from collections.abc import Callable
+
+    from .judge import semantic
+    from .types import SttResult
+
+    load_env_file(env_file)
+
+    by_lane: dict[tuple[str, str], list[SttResult]] = {}
+    for path in results:
+        try:
+            loaded = runner.read_stt_results(path)
+        except (ValueError, OSError) as exc:
+            console.print(f"[red]results error:[/red] {exc}")
+            raise typer.Exit(code=2) from exc
+        lanes: dict[tuple[str, str], list[SttResult]] = {}
+        for item in loaded:
+            lanes.setdefault((item.provider, str(item.mode)), []).append(item)
+        for lane, runs in lanes.items():
+            if lane in by_lane:
+                console.print(f"[yellow]superseded[/yellow] {lane[0]} {lane[1]}")
+            by_lane[lane] = runs
+        console.print(f"[dim]loaded[/dim] {len(loaded):4d} stt runs from {path}")
+
+    merged = [item for runs in by_lane.values() for item in runs]
+    items = semantic.judgeable_items(merged, language)
+    if not items:
+        console.print("[red]no judgeable results[/red] (need ok runs with references)")
+        raise typer.Exit(code=2)
+
+    anchor_map = None
+    if anchor is not None:
+        try:
+            anchor_map = semantic.load_anchor(anchor)
+        except (ValueError, OSError) as exc:
+            console.print(f"[red]anchor error:[/red] {exc}")
+            raise typer.Exit(code=2) from exc
+
+    semascore_fn: Callable[[semantic.JudgeItem], float | None] | None = None
+    if semascore:
+        try:
+            embed = semantic.roberta_embedder()
+        except RuntimeError as exc:
+            # Optional feature: the judge lane still works without the
+            # fallback metric, so a missing extra degrades instead of failing.
+            console.print(f"[yellow]semascore skipped:[/yellow] {exc}")
+        else:
+
+            def semascore_fn(item: semantic.JudgeItem) -> float | None:
+                return semantic.semascore(
+                    item.reference, item.hypothesis, item.language, embed
+                )
+
+    console.print(
+        f"Judging {len(items)} items with [cyan]{semantic.JUDGE_MODEL}[/cyan] "
+        f"({len(items) * semantic.VOTES_PER_ITEM} votes max, cap {max_calls})"
+    )
+    cache_path = (
+        cache_file
+        if cache_file is not None
+        else results[0].parent / "semantic-cache.jsonl"
+    )
+    try:
+        judgements, stats = semantic.run_judge(
+            items,
+            semantic.GeminiJudge(),
+            semantic.VoteCache(cache_path),
+            max_calls=max_calls,
+            semascore_fn=semascore_fn,
+        )
+    except (semantic.JudgeBudgetError, ConfigError, RuntimeError) as exc:
+        console.print(f"[red]judge error:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    gates = semantic.evaluate_gates(judgements, anchor_map)
+    out_path = semantic.write_semantic_results(
+        judgements, gates, stats, results[0].parent / "semantic-results.jsonl"
+    )
+    markdown = semantic.render_semantic_markdown(
+        semantic.summarize_semantic(judgements), gates
+    )
+    console.print()
+    console.print(markdown)
+    report_path = results[0].parent / "semantic-report.md"
+    report_path.write_text(
+        f"# Semantic-fidelity judge (experimental)\n\n{markdown}\n", encoding="utf-8"
+    )
+    console.print()
+    console.print(
+        f"[dim]judge spend:[/dim] {stats.live_calls} live calls "
+        f"({stats.cached_votes} cached), {stats.input_tokens} in / "
+        f"{stats.output_tokens} out tokens, est ${stats.estimated_usd:.4f}"
+    )
+    console.print(f"[dim]raw results:[/dim] {out_path}")
+    console.print(f"[dim]report:[/dim]      {report_path}")
+
+
 def main() -> None:
     """Entry point for the ``audio-harness`` console script."""
     app()

@@ -1,0 +1,58 @@
+# Simulated-interview E2E lane (plan P4 step 18, lane E3).
+#
+#   uv sync --extra sim-kokoro
+#   uv run audio-harness sim configs/sim-interview.yaml --estimate-only
+#   uv run audio-harness sim configs/sim-interview.yaml
+#
+# ONE approved run, English only, sized to a hard $30-50 spend cap. The CLI
+# computes and prints the expected spend before anything paid executes and
+# aborts above hard_cap_usd. Persona audio is local Kokoro (free); the paid
+# parts are the six streaming STT lanes and the pinned Gemini dialogue.
+#
+# The candidate set is the stt-yodas.yaml provider set with each vendor's
+# default English configuration (the deployment an English interview agent
+# would use; the multilingual deepgram model option is a yodas-lane detail).
+# The gate compares this run's task-success ranking against the canonical
+# multilingual merge listed under gate.canonical, in supersede order.
+
+sim:
+  scenarios: data/sim/scenarios-en.yaml
+  personas_per_scenario: 8      # 3 scenarios x 8 personas x 8 slots = 192 turns
+  model: gemini-2.5-flash       # pinned interviewer + persona LLM
+  voices: [af_heart, am_michael, bf_emma, bm_george]   # pinned Kokoro roster
+  degradation: tel8k            # pinned telephony round-trip (snr.py machinery)
+  est_answer_s: 12.0            # expected seconds per answer, for the estimate
+  hard_cap_usd: 50.0            # HARD cap: abort if the estimate exceeds this
+  # seed: null                  # fresh personas every run; set only to repro
+
+stt:
+  - name: deepgram-nova3
+    modes: [stream]
+  - name: elevenlabs-scribe2
+    modes: [stream]
+  - name: assemblyai-universal35pro
+    modes: [stream]
+  - name: soniox-rt-v5
+    modes: [stream]
+  - name: speechmatics-enhanced
+    modes: [stream]
+  - name: google-chirp3
+    modes: [stream]
+
+run:
+  repeats: 1
+  warmup: 1
+  chunk_ms: 20
+  realtime: true
+  provider_concurrency: 6
+  vendor_concurrency: 1
+  timeout_s: 300
+  output_dir: results
+
+gate:
+  rho_threshold: 0.8
+  canonical:                    # supersede order: later files replace lanes
+    - results/20260806-002303/stt-results-annotated.jsonl
+    - results/20260806-005430/stt-results.jsonl
+    - results/20260806-012949/stt-results.jsonl
+    - results/20260806-030801/stt-results.jsonl
