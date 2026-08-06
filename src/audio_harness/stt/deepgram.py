@@ -10,7 +10,7 @@ from websockets.asyncio.client import ClientConnection
 
 from ..audio import wrap_wav
 from ..config import require_env
-from ..types import AudioClip, Mode, SttResult
+from ..types import AudioClip, EventKind, Mode, SttResult
 from .base import StreamTimeline, SttProvider, raise_for_status, register
 from .ws import run_stream
 
@@ -27,6 +27,12 @@ class DeepgramNova3(SttProvider):
         language: Language code sent to Deepgram. Use ``multi`` with the
             multilingual model to enable code-switching.
         smart_format: Whether Deepgram applies punctuation and formatting.
+        endpointing: Streaming silence threshold in milliseconds before a
+            ``speech_final`` result, or ``false`` to disable. Deepgram's
+            server default is 10 ms when unset.
+        utterance_end_ms: When set, Deepgram also sends ``UtteranceEnd``
+            messages after this word-gap (>= 1000 recommended; requires
+            interim results, which this adapter always enables).
     """
 
     key = "deepgram-nova3"
@@ -78,6 +84,12 @@ class DeepgramNova3(SttProvider):
             "interim_results": "true",
             "smart_format": str(self.options.get("smart_format", True)).lower(),
         }
+        endpointing = self.options.get("endpointing")
+        utterance_end_ms = self.options.get("utterance_end_ms")
+        if endpointing is not None:
+            params["endpointing"] = str(endpointing).lower()
+        if utterance_end_ms:
+            params["utterance_end_ms"] = str(utterance_end_ms)
 
         async def close_stream(socket: ClientConnection) -> None:
             await socket.send(orjson.dumps({"type": "CloseStream"}).decode())
@@ -98,6 +110,18 @@ class DeepgramNova3(SttProvider):
         result.ttft_s = timeline.ttft_s
         result.finalize_s = timeline.finalize_s
         result.total_s = timeline.total_s
+        result.raw["ws_rtt_s"] = timeline.ws_rtt_s
+        # Deepgram's endpointing is on server-side by default (10 ms), so
+        # speech_final events exist on every stream — the lane is always
+        # EOU-capable. The effective knob values are recorded because a
+        # ranking is only comparable when each lane's configuration is known.
+        result.raw["eou_source"] = (
+            "speech_final+utterance_end" if utterance_end_ms else "speech_final"
+        )
+        result.raw["endpoint_config"] = {
+            "endpointing": endpointing if endpointing is not None else 10,
+            "utterance_end_ms": utterance_end_ms,
+        }
         return result
 
 
@@ -115,13 +139,24 @@ def _handle_message(payload: Any, timeline: StreamTimeline) -> bool:
 
     Deepgram emits one ``Results`` frame per interim update and one with
     ``is_final`` per finished segment, so the full transcript is the
-    concatenation of the final frames.
+    concatenation of the final frames. Two independent signals mark end of
+    utterance: ``speech_final`` on a Results frame (VAD endpointing) and the
+    bare ``UtteranceEnd`` message (word-gap analysis, when enabled). Both are
+    recorded as EOU events; a segment final without ``speech_final`` is not
+    an endpointing decision and stays ``segment_final``.
     """
     if not isinstance(payload, dict):
         return False
     kind = payload.get("type")
     if kind == "Metadata":
         return True
+    if kind == "UtteranceEnd":
+        # last_word_end of -1 means the result was already finalized before
+        # the gap condition was met; Deepgram documents it as a stale
+        # notification to ignore.
+        if payload.get("last_word_end") != -1:
+            timeline.record("", is_final=False, kind=EventKind.EOU)
+        return False
     if kind != "Results":
         return False
 
@@ -131,5 +166,6 @@ def _handle_message(payload: Any, timeline: StreamTimeline) -> bool:
     timeline.record(
         str(alternatives[0].get("transcript", "")),
         is_final=bool(payload.get("is_final")),
+        kind=EventKind.EOU if payload.get("speech_final") else "",
     )
     return False

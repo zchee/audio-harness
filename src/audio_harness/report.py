@@ -12,6 +12,13 @@ from dataclasses import dataclass
 
 import polars as pl
 
+from .audio import (
+    PauseStats,
+    measure_pauses,
+    pcm16_to_float,
+    read_audio_samples,
+    wav_data_offset,
+)
 from .config import STT_PRICING, TTS_PRICING
 from .entities import EntityClassScore
 from .metrics import (
@@ -110,9 +117,15 @@ def _stt_row(
         "usd_per_hour": rate,
         "audio_hours": audio_hours,
         "est_usd": None if rate is None else rate * audio_hours,
+        "unverified": summary.unverified,
+        "license": ", ".join(sorted(summary.licenses)),
     }
     for label in entity_labels or ():
-        row[f"ent[{label}]"] = _entity_cell(summary.entities.get(label))
+        score = summary.entities.get(label)
+        row[f"ent[{label}]"] = _entity_cell(score)
+        # Numeric twin of the display cell, for charts: strings cannot shade
+        # a heatmap, and re-parsing "12.00% / EM 50.00%" would be absurd.
+        row[f"ent_err[{label}]"] = None if score is None else score.error_rate
     return row
 
 
@@ -151,13 +164,17 @@ def tts_summary_frame(results: list[TtsResult], language: str) -> pl.DataFrame:
         language: BCP-47 tag driving round-trip normalization.
 
     Returns:
-        One row per provider and mode, sorted by time to first byte. Each
-        round-trip judge gets its own ``rt[<judge>]`` column so the frame
-        stays rectangular even when a judge failed on some lanes.
+        One row per provider, mode and load factor, sorted by time to first
+        byte. Load-pass runs (several syntheses in flight) form their own
+        ``stream xN`` rows so queueing under load never blends into the
+        sequential percentiles. Each round-trip judge gets its own
+        ``rt[<judge>]`` column so the frame stays rectangular even when a
+        judge failed on some lanes.
     """
-    grouped: dict[tuple[str, str], list[TtsResult]] = {}
+    grouped: dict[tuple[str, str, int], list[TtsResult]] = {}
     for result in results:
-        grouped.setdefault((result.provider, str(result.mode)), []).append(result)
+        key = (result.provider, str(result.mode), _load_of(result))
+        grouped.setdefault(key, []).append(result)
 
     judges = sorted(
         {
@@ -168,12 +185,36 @@ def tts_summary_frame(results: list[TtsResult], language: str) -> pl.DataFrame:
         }
     )
     rows = [
-        _tts_row(provider, mode, runs, language, judges)
-        for (provider, mode), runs in grouped.items()
+        _tts_row(provider, mode, load, runs, language, judges)
+        for (provider, mode, load), runs in grouped.items()
     ]
     if not rows:
         return pl.DataFrame()
     return pl.DataFrame(rows).sort(["ttfb_p50_s"], nulls_last=True)
+
+
+def _load_of(result: TtsResult) -> int:
+    """Concurrent syntheses in flight when this run was made; 1 = sequential."""
+    load = result.raw.get("load")
+    if isinstance(load, int) and load > 1:
+        return load
+    return 1
+
+
+def _ranked_counts(
+    per_judge: dict[str, ErrorCounts], provider: str
+) -> ErrorCounts | None:
+    """Pool the judges from outside the candidate's family into one score.
+
+    A vendor's own recognizer decodes that vendor's voices best, so only
+    cross-family judges may rank a lane; same-family scores stay diagnostic.
+    """
+    candidate_family = tts_family(provider)
+    ranked: ErrorCounts | None = None
+    for judge, judge_counts in per_judge.items():
+        if stt_family(judge) != candidate_family:
+            ranked = judge_counts if ranked is None else ranked + judge_counts
+    return ranked
 
 
 def _judge_counts(ok: list[TtsResult], language: str) -> dict[str, ErrorCounts]:
@@ -206,11 +247,17 @@ def _judge_cell(counts: ErrorCounts | None, *, same_family: bool) -> str:
 def _tts_row(
     provider: str,
     mode: str,
+    load: int,
     runs: list[TtsResult],
     language: str,
     judges: list[str],
 ) -> dict[str, object]:
     """Flatten one provider's TTS runs into a table row.
+
+    Latency percentiles come from warm runs only: the recorded cold runs
+    carry connection-establishment cost by design and get their own column
+    instead of dragging the warm tail. Cost columns count every successful
+    run — cold calls billed too.
 
     The ranked ``roundtrip_error_rate`` pools only judges from a different
     family than the candidate — a vendor's own recognizer decodes that
@@ -218,17 +265,18 @@ def _tts_row(
     same-family score still appears in its judge column, marked diagnostic.
     """
     ok = [run for run in runs if run.ok]
-    ttfb = [run.ttfb_s for run in ok if run.ttfb_s is not None]
-    rtf = [run.rtf for run in ok if run.rtf is not None]
+    warm = [run for run in ok if not run.cold]
+    ttfb = [run.ttfb_s for run in warm if run.ttfb_s is not None]
+    ttfa = [run.ttfa_s for run in warm if run.ttfa_s is not None]
+    gaps = [run.gap_p99_s for run in warm if run.gap_p99_s is not None]
+    ttfb_cold = [run.ttfb_s for run in ok if run.cold and run.ttfb_s is not None]
+    rtf = [run.rtf for run in warm if run.rtf is not None]
     chars = sum(run.chars for run in ok)
     audio_s = sum(run.audio_s for run in ok)
 
-    per_judge = _judge_counts(ok, language)
+    per_judge = _judge_counts(warm, language)
     candidate_family = tts_family(provider)
-    ranked: ErrorCounts | None = None
-    for judge, judge_counts in per_judge.items():
-        if stt_family(judge) != candidate_family:
-            ranked = judge_counts if ranked is None else ranked + judge_counts
+    ranked = _ranked_counts(per_judge, provider)
 
     rates = [
         judge_counts.rate
@@ -249,11 +297,14 @@ def _tts_row(
 
     row: dict[str, object] = {
         "provider": provider,
-        "mode": mode,
+        "mode": mode if load == 1 else f"{mode} x{load}",
         "prompts": len(runs),
         "failures": len(runs) - len(ok),
         "ttfb_p50_s": percentile(ttfb, 50),
         "ttfb_p95_s": percentile(ttfb, 95),
+        "ttfa_p50_s": percentile(ttfa, 50),
+        "gap_p99_s": percentile(gaps, 50),
+        "ttfb_cold_s": percentile(ttfb_cold, 50),
         "rtf_p50": percentile(rtf, 50),
         "roundtrip_error_rate": (
             None if ranked is None or ranked.reference_length == 0 else ranked.rate
@@ -270,6 +321,131 @@ def _tts_row(
             same_family=stt_family(judge) == candidate_family,
         )
     return row
+
+
+def tts_mode_delta_frame(results: list[TtsResult], language: str) -> pl.DataFrame:
+    """Diff batch against stream lanes of one provider on identical prompts.
+
+    Streaming synthesis buys latency with a smaller lookahead, and whatever
+    that costs — mispronunciations, drifted pacing, seams at chunk boundaries
+    — never shows up in a latency table. The only fair comparison is the same
+    provider speaking the same prompts through both transports, so rows
+    appear only for providers with successful warm sequential runs in both
+    modes, restricted to the prompt ids the two modes share.
+
+    Args:
+        results: Every TTS run.
+        language: BCP-47 tag driving round-trip normalization.
+
+    Returns:
+        One row per provider: ranked cross-family round-trip error, audio
+        duration p50 and internal-pause profile p50 per mode, each with its
+        stream-minus-batch delta. Empty when no provider ran both modes.
+    """
+    by_provider: dict[str, dict[str, list[TtsResult]]] = {}
+    for result in results:
+        if not result.ok or result.cold or _load_of(result) > 1:
+            continue
+        by_provider.setdefault(result.provider, {}).setdefault(
+            str(result.mode), []
+        ).append(result)
+
+    rows: list[dict[str, object]] = []
+    for provider, modes in sorted(by_provider.items()):
+        batch = modes.get("batch")
+        stream = modes.get("stream")
+        if not batch or not stream:
+            continue
+        shared = {run.prompt_id for run in batch} & {run.prompt_id for run in stream}
+        if not shared:
+            continue
+        rows.append(
+            _mode_delta_row(
+                provider,
+                [run for run in batch if run.prompt_id in shared],
+                [run for run in stream if run.prompt_id in shared],
+                language,
+            )
+        )
+    if not rows:
+        return pl.DataFrame()
+    return pl.DataFrame(rows).sort("provider")
+
+
+def _mode_delta_row(
+    provider: str,
+    batch: list[TtsResult],
+    stream: list[TtsResult],
+    language: str,
+) -> dict[str, object]:
+    """Build one provider's batch-versus-stream comparison row."""
+    rt_batch = _ranked_rate(batch, provider, language)
+    rt_stream = _ranked_rate(stream, provider, language)
+    dur_batch = percentile([run.audio_s for run in batch if run.audio_s > 0], 50)
+    dur_stream = percentile([run.audio_s for run in stream if run.audio_s > 0], 50)
+    pause_batch = _pause_percentiles(batch)
+    pause_stream = _pause_percentiles(stream)
+
+    return {
+        "provider": provider,
+        "prompts": len({run.prompt_id for run in batch}),
+        "rt_batch": rt_batch,
+        "rt_stream": rt_stream,
+        "rt_delta": _delta(rt_batch, rt_stream),
+        "dur_batch_s": dur_batch,
+        "dur_stream_s": dur_stream,
+        "dur_delta_s": _delta(dur_batch, dur_stream),
+        "pause_batch_s": pause_batch[0],
+        "pause_stream_s": pause_stream[0],
+        "pause_delta_s": _delta(pause_batch[0], pause_stream[0]),
+        "longest_pause_delta_s": _delta(pause_batch[1], pause_stream[1]),
+    }
+
+
+def _delta(batch: float | None, stream: float | None) -> float | None:
+    """Stream-minus-batch difference, or ``None`` when either side is missing."""
+    if batch is None or stream is None:
+        return None
+    return stream - batch
+
+
+def _ranked_rate(runs: list[TtsResult], provider: str, language: str) -> float | None:
+    """Cross-family round-trip error rate over one lane's runs."""
+    ranked = _ranked_counts(_judge_counts(runs, language), provider)
+    if ranked is None or ranked.reference_length == 0:
+        return None
+    return ranked.rate
+
+
+def _pause_percentiles(runs: list[TtsResult]) -> tuple[float | None, float | None]:
+    """P50 of total and longest internal pause across one lane's runs."""
+    profiles = [profile for profile in map(_pause_profile, runs) if profile is not None]
+    return (
+        percentile([profile.total_s for profile in profiles], 50),
+        percentile([profile.longest_s for profile in profiles], 50),
+    )
+
+
+def _pause_profile(result: TtsResult) -> PauseStats | None:
+    """Internal pauses of one run's audio, from memory or the saved WAV.
+
+    Freshly-run results still hold their PCM; results reloaded from JSONL
+    dropped the bytes but may carry an ``audio_path`` written by the runner.
+    Either source works, so saved runs stay re-scorable — a run persisted
+    without audio simply contributes no pause figures.
+    """
+    if result.audio and result.encoding.startswith("pcm"):
+        header = wav_data_offset(result.audio)
+        samples = pcm16_to_float(result.audio[header:])
+        return measure_pauses(samples, result.sample_rate)
+
+    path = result.raw.get("audio_path")
+    if isinstance(path, str) and path:
+        decoded = read_audio_samples(path)
+        if decoded is not None:
+            samples, rate = decoded
+            return measure_pauses(samples, rate)
+    return None
 
 
 @dataclass(slots=True)
@@ -303,6 +479,8 @@ _STT_COLUMNS = [
     Column("Frame", "chunk_ms", lambda v: "—" if v is None else f"{v}ms"),
     Column("USD/hr", "usd_per_hour", lambda v: _fmt(v, 3)),
     Column("Est. USD", "est_usd", lambda v: _fmt(v, 4)),
+    Column("Unverified", "unverified", lambda v: str(v) if v else "—"),
+    Column("License", "license", lambda v: v or "—"),
     Column("Fail", "failures", str),
 ]
 
@@ -311,6 +489,9 @@ _TTS_COLUMNS = [
     Column("Mode", "mode", str),
     Column("TTFB p50", "ttfb_p50_s", lambda v: _fmt(v, 3, "s")),
     Column("TTFB p95", "ttfb_p95_s", lambda v: _fmt(v, 3, "s")),
+    Column("TTFA p50", "ttfa_p50_s", lambda v: _fmt(v, 3, "s")),
+    Column("Gap p99", "gap_p99_s", lambda v: _fmt(v, 3, "s")),
+    Column("TTFB cold", "ttfb_cold_s", lambda v: _fmt(v, 3, "s")),
     Column("RTF p50", "rtf_p50", lambda v: _fmt(v, 2, "x")),
     Column("Round-trip err", "roundtrip_error_rate", _pct),
     Column("Judge Δ", "rt_divergence", lambda v: "⚠ >2pt" if v else "—"),
@@ -319,6 +500,37 @@ _TTS_COLUMNS = [
     Column("Est. USD", "est_usd", lambda v: _fmt(v, 4)),
     Column("Fail", "failures", str),
 ]
+
+
+def _signed(value: float | None, places: int = 3, suffix: str = "") -> str:
+    """Render an optional delta with an explicit sign, or an em dash."""
+    return "—" if value is None else f"{value:+.{places}f}{suffix}"
+
+
+def _signed_pts(value: float | None) -> str:
+    """Render an optional rate delta in signed percentage points."""
+    return "—" if value is None else f"{value * 100:+.2f}pt"
+
+
+_TTS_DELTA_COLUMNS = [
+    Column("Provider", "provider", str),
+    Column("Prompts", "prompts", str),
+    Column("RT err batch", "rt_batch", _pct),
+    Column("RT err stream", "rt_stream", _pct),
+    Column("Δ RT", "rt_delta", _signed_pts),
+    Column("Dur p50 batch", "dur_batch_s", lambda v: _fmt(v, 2, "s")),
+    Column("Dur p50 stream", "dur_stream_s", lambda v: _fmt(v, 2, "s")),
+    Column("Δ Dur", "dur_delta_s", lambda v: _signed(v, 2, "s")),
+    Column("Pause p50 batch", "pause_batch_s", lambda v: _fmt(v, 2, "s")),
+    Column("Pause p50 stream", "pause_stream_s", lambda v: _fmt(v, 2, "s")),
+    Column("Δ Pause", "pause_delta_s", lambda v: _signed(v, 2, "s")),
+    Column("Δ Longest pause", "longest_pause_delta_s", lambda v: _signed(v, 2, "s")),
+]
+
+
+def render_tts_mode_delta_markdown(frame: pl.DataFrame) -> str:
+    """Render the batch-versus-stream degradation table."""
+    return _markdown_table(frame, _TTS_DELTA_COLUMNS)
 
 
 def _markdown_table(frame: pl.DataFrame, columns: list[Column]) -> str:
@@ -389,6 +601,13 @@ LEGEND = """
 - **Error rate** — WER for space-delimited languages, CER for Japanese and
   other scriptio-continua languages. Corpus-level: total edits over total
   reference length, so long clips carry proportional weight.
+- **Unverified / License** — curated corpora (YODAS/Granary) carry a source
+  license and a gold status on every clip. Clips whose reference is an
+  unverified subtitle are **excluded from Error rate** — ranking against
+  caption quality would measure the captioner — but still count for TTFT,
+  Finalize, RTF and Churn, which need no transcript truth. The Unverified
+  column says how many clips were held out; a row that is entirely
+  unverified shows no error rate at all.
 - **Ent \\<class\\>** — entity-WER and exact-match rate over reference spans
   tagged with that class (numbers, dates, currency, IDs, names). Read both:
   a one-digit error in every phone number is a low entity-WER and a 0% exact
@@ -406,6 +625,20 @@ LEGEND = """
   this, never alone: 40% churn over 0.7 updates/s is three rewrites out of
   seven, while 0% over 4.0 updates/s is a provider that revises constantly and
   never contradicts itself. The percentages are not comparable without it.
+- **TTFA** — time to first *audible* audio: the RMS onset of the decoded
+  waveform translated to wall time through per-chunk arrivals, modeling a
+  client that plays from the first byte. TTFB credits a vendor for container
+  bytes and leading silence; TTFA credits neither. Compare the two columns —
+  a large spread is padding, not speed.
+- **Gap p99** — 99th-percentile gap between successive audio chunks within a
+  run (p50 across runs). Stutter: a real-time client stalls whenever a gap
+  outruns its playback buffer.
+- **TTFB cold** — first-request latency on a cold connection stack (DNS,
+  TLS, session setup), from the recorded warmup pass. Warm columns exclude
+  these runs. An agent's first utterance in a call pays this price.
+- **Mode "stream xN"** — the optional load pass: N syntheses in flight
+  against one adapter. Compare against the plain stream row to see queueing
+  under concurrency; the rows never mix.
 - **Round-trip err** — synthesized audio transcribed by fixed recognizers and
   scored against the prompt. An intelligibility proxy, not naturalness; only
   comparisons between rows are meaningful. The ranked figure pools only
@@ -418,4 +651,11 @@ LEGEND = """
   than the voice; read the per-judge columns before trusting the row.
 - **Est. USD** — list price times measured volume. Verify against the vendor's
   current pricing page before quoting it.
+- **Batch vs stream (Δ columns)** — the same provider speaking the same
+  prompts through both transports; every Δ is stream minus batch, so positive
+  means streaming degraded it. Round-trip error measures intelligibility
+  loss, duration catches pacing drift, and the pause columns profile silence
+  *inside* the speech — chunk-boundary seams that batch synthesis of the same
+  text does not produce. Cold and load-pass runs are excluded from both
+  sides.
 """.strip()

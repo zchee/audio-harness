@@ -227,4 +227,8 @@ __marimo__/
 
 # Downloaded evaluation corpora (re-fetch with `hf download`)
 data/hf/
+# MUSAN noise corpus (CC BY 4.0; re-fetch with `uv run tools/fetch_musan.py`)
+data/musan/
+# Extracted curated-lane audio segments (re-fetched on demand by the loader)
+data/cache/
 results/

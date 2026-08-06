@@ -1,16 +1,18 @@
-# All 12 Speech-MASSIVE languages in one run.
+# INTERNAL REGRESSION ONLY — all 12 Speech-MASSIVE languages in one run.
 #
 #   hf download FBK-MT/Speech-MASSIVE --repo-type dataset \
 #     --local-dir data/hf/speech-massive
-#   uv run audio-harness stt configs/stt-speech-massive-all.yaml
+#   uv run audio-harness stt configs/stt-speech-massive-internal.yaml
 #
 # Spoken voice-assistant commands with human transcripts. Results are grouped
 # per language — error rates in different languages are never pooled, because a
 # 2% French rate and an 8% Vietnamese rate averaged into 5% describe no system
 # anyone can deploy.
 #
-# LICENSE: CC-BY-NC-SA-4.0. Internal evaluation use; legal review before any
-# external claim rests on it.
+# LICENSE: CC-BY-NC-SA-4.0 (non-commercial). This lane is demoted to internal
+# regression: nothing published externally may rest on it. The commercial-safe
+# multilingual lane is configs/stt-yodas.yaml (YODAS2 CC BY 3.0 + Granary
+# CC BY 4.0, curated by tools/curate_yodas.py).
 #
 # Cost/time note: batch mode is deliberately deferred — streaming is the mode
 # that matters for a voice agent, and stream-only halves the lane count.

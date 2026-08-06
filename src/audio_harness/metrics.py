@@ -143,7 +143,9 @@ def partial_instability(partials: list[Partial]) -> float | None:
         Instability in [0, 1], or ``None`` when there are fewer than two
         interim events to compare.
     """
-    interim = [p for p in partials if not p.is_final]
+    # Bare end-of-utterance markers carry no text; comparing prefixes against
+    # them would count every marker as a rewrite, so churn skips them.
+    interim = [p for p in partials if not p.is_final and p.text]
     if len(interim) < 2:
         return None
     rewrites = sum(
@@ -179,6 +181,12 @@ class ProviderSummary:
             reference carries inline entity tags. Kept separate from
             ``counts`` because a digit swap inside an account number and a
             dropped filler word are the same edit but not the same failure.
+        unverified: Clips whose reference is an unverified subtitle
+            (``gold_status: unverified``) and therefore contributed latency
+            and churn but no accuracy — ranking against caption quality
+            would measure the captioner, not the recognizer.
+        licenses: Source licenses seen across this lane's clips, so merged
+            reports keep per-source attribution.
     """
 
     provider: str
@@ -196,6 +204,8 @@ class ProviderSummary:
     audio_s: float = 0.0
     chunk_ms: int | None = None
     entities: dict[str, EntityClassScore] = field(default_factory=dict)
+    unverified: int = 0
+    licenses: set[str] = field(default_factory=set)
 
     @property
     def error_rate(self) -> float | None:
@@ -262,8 +272,20 @@ def summarize(results: list[SttResult], language: str) -> list[ProviderSummary]:
         if churn is not None:
             summary.instability.append(churn)
         if result.audio_s > 0 and result.partials:
-            interim = sum(1 for p in result.partials if not p.is_final)
+            interim = sum(1 for p in result.partials if not p.is_final and p.text)
             summary.interim_rate.append(interim / result.audio_s)
+
+        license_tag = result.raw.get("license")
+        if isinstance(license_tag, str) and license_tag:
+            summary.licenses.add(license_tag)
+
+        # An unverified reference is a subtitle, not ground truth: scoring it
+        # would rank vendors against caption quality. Latency, churn and the
+        # counters above need no transcript truth, so the clip still counts
+        # there — only accuracy is withheld.
+        if result.raw.get("gold_status") == "unverified":
+            summary.unverified += 1
+            continue
 
         reference = result.raw.get("reference")
         if isinstance(reference, str) and reference:
@@ -284,5 +306,272 @@ def summarize(results: list[SttResult], language: str) -> list[ProviderSummary]:
                 summary.entities[label] = (
                     score if existing is None else existing + score
                 )
+
+    return list(summaries.values())
+
+
+FABRICATION_MIN_RUN = 3
+"""Consecutive inserted words that count as a fabricated phrase.
+
+One or two stray insertions are ordinary recognition noise; three consecutive
+words the audio never contained are invented content. The threshold follows
+the hallucination lane's pre-registered definition (research-beyond-wer)."""
+
+LOOP_MIN_REPEATS = 3
+"""Times an n-gram must repeat back-to-back to count as a decoder loop."""
+
+LOOP_MIN_TOKENS = 6
+"""Minimum tokens the repeated span must cover. Keeps mundane doubled words
+("very very very") out of a metric meant for runaway decoding."""
+
+LOOP_MAX_NGRAM_WORDS = 5
+"""Longest repeating unit searched in word-tokenized languages."""
+
+LOOP_MAX_NGRAM_CHARS = 20
+"""Longest repeating unit searched in character-scored languages, where one
+looped phrase spans many tokens (a repeated ありがとうございました is eleven)."""
+
+
+def _comparison_tokens(text: str, language: str) -> list[str]:
+    """Tokenize text exactly as :func:`score_pair` would score it.
+
+    Hallucination counters must agree with the accuracy metric about what a
+    "word" is, or the same transcript would produce different insertion totals
+    in different report columns.
+    """
+    normalize = normalizer_for(language)
+    fold = comparison_fold_for(language)
+    folded = fold(normalize(text))
+    if uses_character_metric(language):
+        return list(folded.replace(" ", ""))
+    return folded.split()
+
+
+def insertion_run_lengths(reference: str, hypothesis: str, language: str) -> list[int]:
+    """Lengths of maximal runs of consecutive inserted tokens.
+
+    Insertions are what hallucination is made of: text present in the
+    hypothesis with no corresponding audio evidence. Run lengths — not just
+    the total — matter because scattered single insertions and one four-word
+    invented phrase are very different failures.
+
+    Args:
+        reference: Ground-truth transcript; empty means the clip has no
+            speech, making the entire hypothesis one inserted run.
+        hypothesis: Provider transcript.
+        language: BCP-47 tag driving normalization and tokenization.
+
+    Returns:
+        One length per maximal insertion run, in transcript order.
+    """
+    ref_tokens = _comparison_tokens(reference, language)
+    hyp_tokens = _comparison_tokens(hypothesis, language)
+    if not hyp_tokens:
+        return []
+    if not ref_tokens:
+        return [len(hyp_tokens)]
+
+    output = jiwer.process_words(" ".join(ref_tokens), " ".join(hyp_tokens))
+    # jiwer merges adjacent same-type operations into a single chunk, so each
+    # insert chunk is exactly one maximal run.
+    return [
+        chunk.hyp_end_idx - chunk.hyp_start_idx
+        for chunk in output.alignments[0]
+        if chunk.type == "insert"
+    ]
+
+
+def has_ngram_loop(
+    text: str,
+    language: str,
+    *,
+    min_repeats: int = LOOP_MIN_REPEATS,
+    min_tokens: int = LOOP_MIN_TOKENS,
+) -> bool:
+    """Whether a transcript contains a runaway n-gram repetition.
+
+    Autoregressive decoders stuck in a loop emit the same unit over and over
+    ("thank you thank you thank you ..."). A span counts as a loop when some
+    n-gram repeats at least ``min_repeats`` times back-to-back and the
+    repeated span covers at least ``min_tokens`` tokens.
+
+    Args:
+        text: Provider transcript.
+        language: BCP-47 tag driving normalization and tokenization.
+        min_repeats: Consecutive repetitions required.
+        min_tokens: Minimum tokens the whole repeated span must cover.
+
+    Returns:
+        ``True`` when any qualifying loop exists.
+    """
+    tokens = _comparison_tokens(text, language)
+    max_n = (
+        LOOP_MAX_NGRAM_CHARS
+        if uses_character_metric(language)
+        else LOOP_MAX_NGRAM_WORDS
+    )
+    for n in range(1, max_n + 1):
+        if n * min_repeats > len(tokens):
+            break
+        for start in range(len(tokens) - n * min_repeats + 1):
+            unit = tokens[start : start + n]
+            repeats = 1
+            while tokens[start + repeats * n : start + (repeats + 1) * n] == unit:
+                repeats += 1
+            if repeats >= min_repeats and repeats * n >= min_tokens:
+                return True
+    return False
+
+
+def phantom_final_count(result: SttResult) -> int:
+    """Final events carrying text on a clip that contains no speech.
+
+    An interim hypothesis on noise is recoverable — the provider may retract
+    it. A *final* is a commitment: downstream turn-taking logic acts on it.
+    Only meaningful for clips whose reference is empty by construction, i.e.
+    the silence and noise-only condition sets.
+
+    Args:
+        result: A streamed result from a no-speech clip.
+
+    Returns:
+        Number of final events with non-empty text, or ``0`` when the clip
+        has a reference and the notion does not apply.
+    """
+    reference = result.raw.get("reference")
+    if isinstance(reference, str) and reference.strip():
+        return 0
+    return sum(1 for p in result.partials if p.is_final and p.text.strip())
+
+
+@dataclass(slots=True)
+class HallucinationSummary:
+    """Hallucination behaviour of one provider on one condition set.
+
+    Attributes:
+        provider: Registry key of the adapter.
+        mode: Transport mode the runs used.
+        language: BCP-47 tag these runs were scored under.
+        condition: Synthetic condition (``silence``, ``noise``,
+            ``trailing_silence``, ``low_snr``), or ``speech``/``no_speech``
+            for clips outside the synthetic lane.
+        clips: Number of clips attempted.
+        failures: Number of clips that errored.
+        fabricated_clips: Clips with an insertion run of at least
+            :data:`FABRICATION_MIN_RUN` words.
+        inserted_words: Total inserted tokens across scored clips.
+        phantom_finals: Final events with text across no-speech clips.
+        phantom_final_clips: No-speech clips with at least one such final.
+        looped_clips: Clips whose transcript contains an n-gram loop.
+        audio_s: Total audio submitted, the denominator for per-minute rates.
+    """
+
+    provider: str
+    mode: str
+    language: str
+    condition: str
+    clips: int = 0
+    failures: int = 0
+    fabricated_clips: int = 0
+    inserted_words: int = 0
+    phantom_finals: int = 0
+    phantom_final_clips: int = 0
+    looped_clips: int = 0
+    audio_s: float = 0.0
+
+    @property
+    def scored(self) -> int:
+        """Clips that produced a scoreable transcript."""
+        return self.clips - self.failures
+
+    @property
+    def fabrication_rate(self) -> float | None:
+        """Fraction of scored clips with a fabricated phrase."""
+        if self.scored == 0:
+            return None
+        return self.fabricated_clips / self.scored
+
+    @property
+    def inserted_words_per_min(self) -> float | None:
+        """Inserted tokens per minute of submitted audio."""
+        if self.audio_s <= 0:
+            return None
+        return self.inserted_words / (self.audio_s / 60.0)
+
+    @property
+    def phantom_final_rate(self) -> float | None:
+        """Fraction of scored no-speech clips that produced a final."""
+        if self.scored == 0:
+            return None
+        return self.phantom_final_clips / self.scored
+
+    @property
+    def loop_rate(self) -> float | None:
+        """Fraction of scored clips whose transcript loops."""
+        if self.scored == 0:
+            return None
+        return self.looped_clips / self.scored
+
+
+def summarize_hallucination(
+    results: list[SttResult], language: str
+) -> list[HallucinationSummary]:
+    """Aggregate hallucination counters per provider, mode, language and
+    condition.
+
+    Designed to run over saved results JSONL: every input it reads —
+    reference, transcript, partials, audio duration, clip id — survives
+    :func:`runner.write_stt_results`, so a normalization or threshold change
+    never requires paying for the audio again.
+
+    Args:
+        results: Per-clip results, typically from the hallucination lane.
+        language: Fallback BCP-47 tag for results that recorded none.
+
+    Returns:
+        Summaries keyed by provider, mode, language and condition.
+    """
+    # Imported here, not at module top: synthetic.py sits atop the dataset
+    # loaders, and pulling that stack into every metrics import is needless.
+    from .synthetic import condition_of
+
+    summaries: dict[tuple[str, str, str, str], HallucinationSummary] = {}
+
+    for result in results:
+        recorded = result.raw.get("language")
+        clip_language = recorded if isinstance(recorded, str) and recorded else language
+        raw_reference = result.raw.get("reference")
+        reference = raw_reference if isinstance(raw_reference, str) else ""
+        condition = condition_of(result.clip_id) or (
+            "speech" if reference.strip() else "no_speech"
+        )
+
+        key = (result.provider, str(result.mode), clip_language, condition)
+        summary = summaries.setdefault(
+            key,
+            HallucinationSummary(
+                provider=result.provider,
+                mode=str(result.mode),
+                language=clip_language,
+                condition=condition,
+            ),
+        )
+        summary.clips += 1
+        if not result.ok:
+            summary.failures += 1
+            continue
+
+        summary.audio_s += result.audio_s
+        runs = insertion_run_lengths(reference, result.text, clip_language)
+        summary.inserted_words += sum(runs)
+        if any(run >= FABRICATION_MIN_RUN for run in runs):
+            summary.fabricated_clips += 1
+        if has_ngram_loop(result.text, clip_language):
+            summary.looped_clips += 1
+        if not reference.strip():
+            phantom = phantom_final_count(result)
+            summary.phantom_finals += phantom
+            if phantom:
+                summary.phantom_final_clips += 1
 
     return list(summaries.values())

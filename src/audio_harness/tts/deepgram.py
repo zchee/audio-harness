@@ -10,7 +10,7 @@ from ..audio import decode_audio_duration
 from ..config import require_env
 from ..stt.base import raise_for_status
 from ..types import Mode, TtsPrompt, TtsResult
-from .base import TtsProvider, register
+from .base import ChunkTimeline, TtsProvider, register, stamp_stream_timing
 
 SPEAK_URL = "https://api.deepgram.com/v1/speak"
 
@@ -40,9 +40,13 @@ class DeepgramAura2(TtsProvider):
         return os.environ.get("DEEPGRAM_TTS_VOICE", "aura-2-thalia-en")
 
     def _url(self) -> str:
+        # container=none keeps the response headerless raw PCM. The default
+        # WAV wrapper would count its 44 header bytes as audio in the
+        # arithmetic duration and read as a loud click to onset detection.
         params = {
             "model": self._model(),
             "encoding": "linear16",
+            "container": "none",
             "sample_rate": str(self.sample_rate),
         }
         return f"{SPEAK_URL}?{urlencode(params)}"
@@ -64,24 +68,20 @@ class DeepgramAura2(TtsProvider):
         return _finish(result, response.content)
 
     async def synthesize_stream(self, prompt: TtsPrompt) -> TtsResult:
-        """Request audio and stamp the first chunk of the response body."""
+        """Request audio and stamp every chunk of the response body."""
         result = self._result(prompt, Mode.STREAM)
-        started = time.perf_counter()
-        chunks: list[bytes] = []
+        timeline = ChunkTimeline()
 
         async with self.http.stream(
             "POST", self._url(), headers=self._headers(), json={"text": prompt.text}
         ) as response:
             raise_for_status(response, self.key)
             async for chunk in response.aiter_bytes():
-                if not chunk:
-                    continue
-                if result.ttfb_s is None:
-                    result.ttfb_s = time.perf_counter() - started
-                chunks.append(chunk)
+                timeline.add(chunk)
 
-        result.total_s = time.perf_counter() - started
-        return _finish(result, b"".join(chunks))
+        _finish(result, timeline.audio)
+        stamp_stream_timing(result, timeline)
+        return result
 
 
 def _finish(result: TtsResult, audio: bytes) -> TtsResult:

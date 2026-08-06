@@ -18,7 +18,7 @@ from google.cloud.speech_v2.types import cloud_speech
 
 from ..audio import pace_chunks
 from ..config import require_env
-from ..types import AudioClip, Mode, SttResult
+from ..types import AudioClip, EventKind, Mode, SttResult
 from .base import StreamTimeline, SttProvider, register
 
 
@@ -34,6 +34,9 @@ class GoogleChirp3(SttProvider):
         project: Overrides ``GOOGLE_CLOUD_PROJECT``.
         location: Overrides ``GOOGLE_CLOUD_LOCATION``. Chirp 3 is served from
             regional and multi-region endpoints, not ``global``.
+        enable_voice_activity_events: When true, streaming responses include
+            ``SPEECH_ACTIVITY_END`` events — the API's end-of-utterance
+            signal. Off by default.
     """
 
     key = "google-chirp3"
@@ -113,10 +116,12 @@ class GoogleChirp3(SttProvider):
         timeline = StreamTimeline()
         client = self._speech_client()
 
+        vad_events = bool(self.options.get("enable_voice_activity_events"))
         streaming_config = cloud_speech.StreamingRecognitionConfig(
             config=self._config(clip),
             streaming_features=cloud_speech.StreamingRecognitionFeatures(
-                interim_results=True
+                interim_results=True,
+                enable_voice_activity_events=vad_events,
             ),
         )
 
@@ -132,15 +137,34 @@ class GoogleChirp3(SttProvider):
 
         stream = await client.streaming_recognize(requests=requests())
         async for response in stream:
-            for item in response.results:
-                if item.alternatives:
-                    timeline.record(
-                        item.alternatives[0].transcript, is_final=item.is_final
-                    )
+            _record_response(response, timeline)
 
         result.text = timeline.concat_finals()
         result.partials = timeline.partials
         result.ttft_s = timeline.ttft_s
         result.finalize_s = timeline.finalize_s
         result.total_s = timeline.total_s
+        if vad_events:
+            result.raw["eou_source"] = "speech_activity_end"
+            result.raw["endpoint_config"] = {"enable_voice_activity_events": True}
         return result
+
+
+def _record_response(
+    response: cloud_speech.StreamingRecognizeResponse, timeline: StreamTimeline
+) -> None:
+    """Record one streaming response's transcript and voice-activity events.
+
+    ``SPEECH_ACTIVITY_END`` arrives as a bare event — no transcript rides on
+    it — and is the v2 API's end-of-utterance decision. Result frames keep
+    their segment-final semantics; Google's ``is_final`` is a decoding
+    boundary, not an endpointing one.
+    """
+    if (
+        response.speech_event_type
+        == cloud_speech.StreamingRecognizeResponse.SpeechEventType.SPEECH_ACTIVITY_END
+    ):
+        timeline.record("", is_final=False, kind=EventKind.EOU)
+    for item in response.results:
+        if item.alternatives:
+            timeline.record(item.alternatives[0].transcript, is_final=item.is_final)

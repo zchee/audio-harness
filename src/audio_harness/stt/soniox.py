@@ -8,7 +8,7 @@ import orjson
 from websockets.asyncio.client import ClientConnection
 
 from ..config import require_env
-from ..types import AudioClip, Mode, SttResult
+from ..types import AudioClip, EventKind, Mode, SttResult
 from .base import StreamTimeline, SttProvider, register
 from .ws import StreamProtocolError, run_stream
 
@@ -28,6 +28,11 @@ class SonioxRealtimeV5(SttProvider):
     Options:
         model: Model identifier; defaults to ``stt-rt-v5``.
         language_hints: Language codes that bias recognition.
+        enable_endpoint_detection: When true, Soniox finalizes each utterance
+            as it ends and emits a ``<end>`` marker token. Off by default.
+        endpoint_sensitivity: How readily the model emits an endpoint.
+        max_endpoint_delay_ms: Ceiling on endpoint delay after speech ends.
+        endpoint_latency_adjustment_level: Vendor latency/accuracy trade-off.
     """
 
     key = "soniox-rt-v5"
@@ -41,6 +46,16 @@ class SonioxRealtimeV5(SttProvider):
         result = self._result(clip, Mode.STREAM)
         timeline = StreamTimeline()
         hints = self.options.get("language_hints") or [clip.language.split("-")[0]]
+        knobs = {
+            name: self.options[name]
+            for name in (
+                "enable_endpoint_detection",
+                "endpoint_sensitivity",
+                "max_endpoint_delay_ms",
+                "endpoint_latency_adjustment_level",
+            )
+            if name in self.options
+        }
 
         async def configure(socket: ClientConnection) -> None:
             await socket.send(
@@ -52,6 +67,7 @@ class SonioxRealtimeV5(SttProvider):
                         "sample_rate": clip.sample_rate,
                         "num_channels": 1,
                         "language_hints": list(hints),
+                        **knobs,
                     }
                 ).decode()
             )
@@ -77,6 +93,10 @@ class SonioxRealtimeV5(SttProvider):
         result.ttft_s = timeline.ttft_s
         result.finalize_s = timeline.finalize_s
         result.total_s = timeline.total_s
+        result.raw["ws_rtt_s"] = timeline.ws_rtt_s
+        if knobs.get("enable_endpoint_detection"):
+            result.raw["eou_source"] = "end_token"
+            result.raw["endpoint_config"] = knobs
         return result
 
 
@@ -103,8 +123,18 @@ class _TokenAccumulator:
             )
 
         tail = ""
+        endpoints = 0
         for token in payload.get("tokens", []):
             text = str(token.get("text", ""))
+            # Marker tokens are control flow, not transcript: <end> is the
+            # endpoint decision (enable_endpoint_detection), <fin> confirms a
+            # manual finalize. Splicing either into the text would corrupt
+            # every accuracy metric downstream.
+            if text == "<end>":
+                endpoints += 1
+                continue
+            if text == "<fin>":
+                continue
             if token.get("is_final"):
                 self.finalized += text
             else:
@@ -112,5 +142,7 @@ class _TokenAccumulator:
 
         if self.finalized or tail:
             timeline.record((self.finalized + tail).strip(), is_final=not tail)
+        for _ in range(endpoints):
+            timeline.record("", is_final=False, kind=EventKind.EOU)
 
         return bool(payload.get("finished"))

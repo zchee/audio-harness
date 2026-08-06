@@ -1,0 +1,74 @@
+# EOU-aware endpointing bench: does the vendor cut the speaker off?
+#
+#   hf download livekit/eot-bench-data --repo-type dataset \
+#     --local-dir data/hf/eot-bench-data
+#   uv run audio-harness stt configs/stt-endpointing.yaml
+#
+# Corpus: livekit/eot-bench-data (CC BY 4.0) — real human-to-agent turns with
+# every >=100 ms silence span labeled. The FINAL span is the true end of the
+# turn (ground-truth speech_end_s); every earlier span is a mid-turn pause
+# the agent must listen through. A vendor end-of-utterance decision inside
+# one of those pauses is a false cutoff (metrics: endpointing.py).
+#
+# Ranked lanes capture each vendor's NATIVE end-of-utterance signal — never
+# bare segment finals, which are decoding boundaries. Effective endpointing
+# knobs below are recorded into results so the ranking stays interpretable.
+# xai-grok-stt exposes no EOU signal and would be reported descriptively.
+
+stt:
+  - name: deepgram-nova3
+    modes: [stream]
+    options:
+      endpointing: 300         # ms of silence before speech_final
+      utterance_end_ms: 1000   # word-gap UtteranceEnd messages (needs >=1000)
+  - name: assemblyai-universal35pro
+    modes: [stream]            # end_of_turn is always on; server defaults
+  - name: speechmatics-enhanced
+    modes: [stream]
+    options:
+      max_delay: 1.0
+      end_of_utterance_silence_trigger: 0.7   # must stay below max_delay
+  - name: soniox-rt-v5
+    modes: [stream]
+    options:
+      enable_endpoint_detection: true         # emits <end> marker tokens
+  - name: elevenlabs-scribe2
+    modes: [stream]            # commit_strategy vad = its end-of-speech signal
+  - name: google-chirp3
+    modes: [stream]
+    options:
+      location: us
+      enable_voice_activity_events: true      # SPEECH_ACTIVITY_END events
+
+dataset:
+  id_column: id
+  audio_column: audio
+  silence_spans_column: silence_spans
+  words_column: words          # no plain transcript column; words are joined
+  sources:
+    - parquet: data/hf/eot-bench-data/en/validation-*.parquet
+      language: en-US
+      limit: 50
+      sample_seed: 20260806
+    - parquet: data/hf/eot-bench-data/ja/validation-*.parquet
+      language: ja-JP
+      limit: 50
+      sample_seed: 20260806
+    - parquet: data/hf/eot-bench-data/de/validation-*.parquet
+      language: de-DE
+      limit: 50
+      sample_seed: 20260806
+    - parquet: data/hf/eot-bench-data/fr/validation-*.parquet
+      language: fr-FR
+      limit: 50
+      sample_seed: 20260806
+
+run:
+  repeats: 1
+  warmup: 1
+  chunk_ms: 20
+  realtime: true               # endpoint latency is meaningless unpaced
+  provider_concurrency: 6
+  vendor_concurrency: 1
+  timeout_s: 180
+  output_dir: results

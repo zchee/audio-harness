@@ -1,0 +1,67 @@
+# Hallucination/silence lane: what does each recognizer invent when there is
+# nothing — or almost nothing — to hear?
+#
+#   uv run tools/fetch_musan.py                      # noise material (once)
+#   uv run audio-harness stt configs/stt-hallucination.yaml
+#
+# Four pre-registered condition sets (counts from research-beyond-wer):
+#   silence          x20  pure digital silence
+#   noise            x20  MUSAN noise only, no speech
+#   trailing_silence x50  real utterances + 6 s of appended silence
+#   low_snr          x50  real utterances mixed at -10 dB active-speech SNR
+#
+# Every clip is generated deterministically at load time from the seeds below;
+# no audio is committed to the repository. Scored by fabrication rate,
+# inserted-words/min, phantom finals and n-gram loop rate
+# (metrics.summarize_hallucination), not by WER — the no-speech sets have
+# nothing to get right, only things to invent.
+#
+# Noise attribution: MUSAN — D. Snyder, G. Chen, D. Povey, "MUSAN: A Music,
+# Speech, and Noise Corpus", arXiv:1510.08484. Licensed CC BY 4.0.
+
+stt:
+  - name: deepgram-nova3
+    modes: [stream]
+  - name: assemblyai-universal35pro
+    modes: [stream]
+  - name: speechmatics-enhanced
+    modes: [stream]
+  - name: speechmatics-standard
+    modes: [stream]
+  - name: elevenlabs-scribe2
+    modes: [stream]
+  - name: soniox-rt-v5
+    modes: [stream]          # Soniox is realtime-only in this harness
+
+dataset:
+  language: en-US
+  sources:
+    - synthetic: silence
+      limit: 20
+      duration_s: 8.0
+    - synthetic: noise
+      limit: 20
+      duration_s: 8.0
+      noise_dir: data/musan/noise
+      sample_seed: 20260806
+    - synthetic: trailing_silence
+      limit: 50
+      trailing_silence_s: 6.0
+      parquet: data/hf/stt-benchmark-data/data/train-00000-of-00001.parquet
+      sample_seed: 20260806
+    - synthetic: low_snr
+      limit: 50
+      snr_db: -10.0
+      noise_dir: data/musan/noise
+      parquet: data/hf/stt-benchmark-data/data/train-00000-of-00001.parquet
+      sample_seed: 20260806
+
+run:
+  repeats: 1                 # 140 clips per provider; behaviour, not latency
+  warmup: 1
+  chunk_ms: 20
+  realtime: true             # fabrication depends on real-time endpointing
+  provider_concurrency: 6
+  vendor_concurrency: 1      # Speechmatics Standard and Enhanced share a plan
+  timeout_s: 180
+  output_dir: results

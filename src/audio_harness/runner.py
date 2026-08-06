@@ -273,7 +273,15 @@ async def _tts_lane(
     vendors: _VendorLocks,
     progress: Progress | None,
 ) -> list[TtsResult]:
-    """Run one provider in one mode across every prompt, sequentially."""
+    """Run one provider in one mode across every prompt, sequentially.
+
+    The warmup pass is recorded rather than discarded: flagged ``cold``,
+    those runs carry the connection-establishment cost the first real user
+    request pays, and the report splits them out instead of blending them
+    into the warm percentiles. When the config asks for a load pass, the
+    prompt set is repeated with several syntheses in flight, tagged so the
+    report keeps them out of the sequential lane.
+    """
     provider = tts.create(entry.name, entry.options)
     async with limiter, vendors.get(provider.billing_group):
         transport = Mode(mode)
@@ -284,25 +292,66 @@ async def _tts_lane(
 
         try:
             for _ in range(run.warmup):
-                await _one_tts(provider, prompts[0], transport, run)
+                cold = await _one_tts(provider, prompts[0], transport, run)
+                cold.cold = True
+                results.append(cold)
             for _ in range(run.repeats):
                 for prompt in prompts:
                     result = await _one_tts(provider, prompt, transport, run)
                     results.append(result)
                     if progress is not None:
                         progress.result(entry.name, mode, result.ok)
+            if transport is Mode.STREAM and run.tts_load_concurrency > 1:
+                results.extend(await _tts_load_pass(provider, prompts, run))
         finally:
             await provider.aclose()
         return results
 
 
+async def _tts_load_pass(
+    provider: tts.TtsProvider, prompts: list[TtsPrompt], run: RunConfig
+) -> list[TtsResult]:
+    """Repeat the prompt set with several syntheses in flight at once.
+
+    A voice agent under load holds concurrent sessions, and a vendor that
+    looks fast sequentially can queue under concurrency. Each prompt is
+    issued ``tts_load_concurrency`` times simultaneously; every result is
+    tagged with the load factor so the report renders these as their own
+    lane instead of folding them into the sequential percentiles.
+    """
+    load = run.tts_load_concurrency
+    results: list[TtsResult] = []
+    for prompt in prompts:
+        batch = await asyncio.gather(
+            *(_one_tts(provider, prompt, Mode.STREAM, run) for _ in range(load))
+        )
+        for result in batch:
+            result.raw["load"] = load
+        results.extend(batch)
+    return results
+
+
 async def _one_tts(
     provider: tts.TtsProvider, prompt: TtsPrompt, mode: Mode, run: RunConfig
 ) -> TtsResult:
-    """Execute a single synthesis, converting any failure into a result."""
+    """Execute a single synthesis, converting any failure into a result.
+
+    With incremental text enabled, streaming lanes whose protocol accepts
+    appended text are fed at LLM-token cadence; lanes without that support
+    fall back to whole-prompt streaming and record ``input_streaming: false``
+    so the report never presents a fallback as the real thing.
+    """
     try:
         async with asyncio.timeout(run.timeout_s):
             if mode is Mode.STREAM:
+                if run.tts_incremental_text:
+                    if provider.supports_input_streaming:
+                        return await provider.synthesize_incremental(
+                            prompt, token_rate=run.tts_token_rate
+                        )
+                    result = await provider.synthesize_stream(prompt)
+                    result.raw["input_streaming"] = False
+                    return result
                 return await provider.synthesize_stream(prompt)
             return await provider.synthesize(prompt)
     except TimeoutError, asyncio.CancelledError:
@@ -344,6 +393,9 @@ async def score_roundtrip(
     ``{provider, text, error}`` mappings in config order; the report layer
     turns those into error rates.
 
+    Cold-lane warmup runs are skipped: the same voice is already scored on
+    its warm runs, and judging the duplicate would double-bill the judges.
+
     Args:
         config: Benchmark definition, providing ``roundtrip_stt``.
         results: TTS results to score, mutated in place.
@@ -353,7 +405,7 @@ async def score_roundtrip(
         provider = stt.create(entry.name, entry.options)
         try:
             for result in results:
-                if not result.ok:
+                if not result.ok or result.cold:
                     continue
                 prompt = prompts.get(result.prompt_id)
                 if prompt is None:
@@ -408,6 +460,8 @@ def write_stt_results(results: list[SttResult], output_dir: str | Path) -> Path:
                         "text": result.text,
                         "reference": result.raw.get("reference", ""),
                         "reference_annotated": result.raw.get("reference_annotated"),
+                        "license": result.raw.get("license"),
+                        "gold_status": result.raw.get("gold_status"),
                         "language": result.raw.get("language", ""),
                         "audio_s": result.audio_s,
                         "total_s": result.total_s,
@@ -415,9 +469,19 @@ def write_stt_results(results: list[SttResult], output_dir: str | Path) -> Path:
                         "finalize_s": result.finalize_s,
                         "rtf": result.rtf,
                         "chunk_ms": result.raw.get("chunk_ms"),
+                        "speech_end_s": result.raw.get("speech_end_s"),
+                        "pauses": result.raw.get("pauses"),
+                        "ws_rtt_s": result.raw.get("ws_rtt_s"),
+                        "eou_source": result.raw.get("eou_source"),
+                        "endpoint_config": result.raw.get("endpoint_config"),
                         "error": result.error,
                         "partials": [
-                            {"t_s": p.t_s, "text": p.text, "is_final": p.is_final}
+                            {
+                                "t_s": p.t_s,
+                                "text": p.text,
+                                "is_final": p.is_final,
+                                "kind": p.kind,
+                            }
                             for p in result.partials
                         ],
                     }
@@ -454,8 +518,14 @@ def write_tts_results(
                         "chars": result.chars,
                         "audio_s": result.audio_s,
                         "ttfb_s": result.ttfb_s,
+                        "ttfa_s": result.ttfa_s,
+                        "gap_p99_s": result.gap_p99_s,
+                        "cold": result.cold,
+                        "chunk_t_s": result.chunk_t_s,
                         "total_s": result.total_s,
                         "rtf": result.rtf,
+                        "load": result.raw.get("load"),
+                        "input_streaming": result.raw.get("input_streaming"),
                         "error": result.error,
                         "text": result.raw.get("text", ""),
                         "roundtrip": result.raw.get("roundtrip"),
@@ -510,15 +580,37 @@ def read_stt_results(path: str | Path) -> list[SttResult]:
             error=record.get("error"),
         )
         result.partials = [
-            Partial(t_s=p["t_s"], text=p["text"], is_final=p["is_final"])
+            # Records written before the EOU migration carry no kind; the
+            # Partial default derives it from is_final, which is exactly the
+            # pre-migration semantics.
+            Partial(
+                t_s=p["t_s"],
+                text=p["text"],
+                is_final=p["is_final"],
+                kind=p.get("kind") or "",
+            )
             for p in record.get("partials", [])
         ]
         result.raw["reference"] = record.get("reference", "")
         result.raw["language"] = record.get("language", "")
         if record.get("reference_annotated"):
             result.raw["reference_annotated"] = record["reference_annotated"]
+        if record.get("license"):
+            result.raw["license"] = record["license"]
+        if record.get("gold_status"):
+            result.raw["gold_status"] = record["gold_status"]
         if record.get("chunk_ms") is not None:
             result.raw["chunk_ms"] = record["chunk_ms"]
+        if record.get("speech_end_s") is not None:
+            result.raw["speech_end_s"] = record["speech_end_s"]
+        if record.get("pauses"):
+            result.raw["pauses"] = record["pauses"]
+        if record.get("ws_rtt_s") is not None:
+            result.raw["ws_rtt_s"] = record["ws_rtt_s"]
+        if record.get("eou_source"):
+            result.raw["eou_source"] = record["eou_source"]
+        if record.get("endpoint_config"):
+            result.raw["endpoint_config"] = record["endpoint_config"]
         results.append(result)
     return results
 
@@ -563,10 +655,18 @@ def read_tts_results(path: str | Path) -> list[TtsResult]:
             chars=int(record.get("chars") or 0),
             audio_s=float(record.get("audio_s") or 0.0),
             ttfb_s=record.get("ttfb_s"),
+            ttfa_s=record.get("ttfa_s"),
+            gap_p99_s=record.get("gap_p99_s"),
+            cold=bool(record.get("cold", False)),
+            chunk_t_s=[float(t) for t in record.get("chunk_t_s") or []],
             total_s=float(record.get("total_s") or 0.0),
             error=record.get("error"),
         )
         result.raw["text"] = record.get("text", "")
+        if record.get("load") is not None:
+            result.raw["load"] = int(record["load"])
+        if record.get("input_streaming") is not None:
+            result.raw["input_streaming"] = bool(record["input_streaming"])
         roundtrip = record.get("roundtrip")
         if isinstance(roundtrip, list):
             result.raw["roundtrip"] = roundtrip

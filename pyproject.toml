@@ -41,6 +41,19 @@ judge-whisper = [
     "mlx-whisper>=0.4.3",
     "numba>=0.66",
 ]
+# Distill-MOS perceptual regression guardrail (see tts_quality.py). CPU-only,
+# no GPU required; pulls in torch as a transitive dependency.
+guardrail-mos = [
+    "distillmos>=0.9.1",
+]
+# TTS prompt suite generators (tools/gen_entity_prompts.py): num2words for
+# spoken-form number/date/currency words, Faker for names and alphanumeric
+# templates, Babel for CLDR-backed locale date/currency formatting.
+prompt-suite = [
+    "num2words>=0.5.14",
+    "faker>=40.0",
+    "babel>=2.18",
+]
 
 [project.scripts]
 audio-harness = "audio_harness.cli:main"

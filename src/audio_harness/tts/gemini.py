@@ -13,7 +13,7 @@ from google.genai import types as genai_types
 from ..audio import decode_audio_duration
 from ..config import require_env
 from ..types import Mode, TtsPrompt, TtsResult
-from .base import TtsProvider, register
+from .base import ChunkTimeline, TtsProvider, register, stamp_stream_timing
 
 GEMINI_SAMPLE_RATE = 24000
 """Gemini TTS emits 24 kHz mono 16-bit PCM regardless of what is requested."""
@@ -74,10 +74,9 @@ class GeminiTts(TtsProvider):
         return _finish(result, b"".join(_extract_audio(response)))
 
     async def synthesize_stream(self, prompt: TtsPrompt) -> TtsResult:
-        """Generate incrementally, stamping the first audio part as TTFB."""
+        """Generate incrementally, stamping every audio part as it arrives."""
         result = self._result(prompt, Mode.STREAM)
-        started = time.perf_counter()
-        chunks: list[bytes] = []
+        timeline = ChunkTimeline()
 
         stream = self._genai_client().aio.models.generate_content_stream(
             model=self._model(), contents=prompt.text, config=self._config()
@@ -87,12 +86,11 @@ class GeminiTts(TtsProvider):
 
         async for response in stream:
             for audio in _extract_audio(response):
-                if result.ttfb_s is None:
-                    result.ttfb_s = time.perf_counter() - started
-                chunks.append(audio)
+                timeline.add(audio)
 
-        result.total_s = time.perf_counter() - started
-        return _finish(result, b"".join(chunks))
+        _finish(result, timeline.audio)
+        stamp_stream_timing(result, timeline)
+        return result
 
 
 def _extract_audio(response: Any) -> list[bytes]:

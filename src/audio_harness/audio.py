@@ -12,6 +12,7 @@ import asyncio
 import time
 import wave
 from collections.abc import AsyncIterator, Iterator
+from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 
@@ -176,6 +177,158 @@ def detect_speech_end_s(
     if len(voiced) == 0:
         return len(samples) / sample_rate
     return float((voiced[-1] + 1) * frame_ms / 1000)
+
+
+def detect_speech_onset_s(
+    samples: np.ndarray, sample_rate: int, *, frame_ms: int = SPEECH_FRAME_MS
+) -> float | None:
+    """Return the offset of the first voiced frame, in seconds.
+
+    The mirror of :func:`detect_speech_end_s`, used by the TTS lane to locate
+    when synthesized audio becomes audible: vendors pad output with leading
+    silence, and time-to-first-byte credits them for it. The threshold is
+    relative to the clip's own peak, so recording level does not matter.
+
+    Args:
+        samples: Mono float samples in [-1, 1].
+        sample_rate: Sample rate of ``samples``.
+        frame_ms: Analysis frame size in milliseconds.
+
+    Returns:
+        Seconds from the start of the clip to the first voiced frame, or
+        ``None`` when no frame clears the threshold — silence has no onset.
+    """
+    step = int(sample_rate * frame_ms / 1000)
+    usable = len(samples) // step * step
+    if step <= 0 or usable == 0:
+        return None
+
+    frames = samples[:usable].reshape(-1, step)
+    rms = np.sqrt((frames**2).mean(axis=1))
+    threshold = max(float(rms.max()) * SPEECH_THRESHOLD, 1e-4)
+    voiced = np.nonzero(rms > threshold)[0]
+    if len(voiced) == 0:
+        return None
+    return float(voiced[0] * frame_ms / 1000)
+
+
+def pcm16_to_float(pcm: bytes) -> np.ndarray:
+    """Convert little-endian 16-bit PCM bytes to float samples in [-1, 1].
+
+    A trailing odd byte — a truncated final sample from a cut-off stream — is
+    dropped rather than raised on, because analysis of what did arrive is
+    exactly what a truncated stream needs.
+    """
+    usable = len(pcm) // BYTES_PER_SAMPLE * BYTES_PER_SAMPLE
+    return np.frombuffer(pcm[:usable], dtype="<i2").astype(np.float32) / 32768.0
+
+
+def wav_data_offset(payload: bytes) -> int:
+    """Byte offset of the PCM samples, skipping a RIFF/WAVE header when present.
+
+    Some vendors wrap a nominally raw PCM response in a WAV container. The
+    header bytes decode as one loud click, which would defeat RMS analysis by
+    making the very first frame look voiced, so scans start after it.
+    Headerless payloads return 0.
+    """
+    if len(payload) < 12 or payload[:4] != b"RIFF" or payload[8:12] != b"WAVE":
+        return 0
+    offset = 12
+    while offset + 8 <= len(payload):
+        chunk_id = payload[offset : offset + 4]
+        size = int.from_bytes(payload[offset + 4 : offset + 8], "little")
+        if chunk_id == b"data":
+            return offset + 8
+        offset += 8 + size + (size & 1)
+    return 0
+
+
+def read_audio_samples(path: str | Path) -> tuple[np.ndarray, int] | None:
+    """Decode an audio file to mono float samples and its sample rate.
+
+    Reporting reads saved synthesis WAVs back for pause analysis; a missing
+    or corrupt file degrades to "no pause stats" (``None``) rather than
+    failing the whole report over one clip.
+    """
+    try:
+        data, rate = sf.read(str(path), dtype="float32", always_2d=True)
+    except OSError, RuntimeError, sf.LibsndfileError:
+        return None
+    if data.shape[0] == 0:
+        return None
+    return data.mean(axis=1), int(rate)
+
+
+MIN_PAUSE_S = 0.15
+"""Internal silences shorter than this are articulation gaps, not pauses."""
+
+
+@dataclass(slots=True, frozen=True)
+class PauseStats:
+    """Internal-pause profile of one utterance.
+
+    Leading and trailing silence are excluded — they belong to latency and
+    endpointing metrics, not to phrasing. What is profiled here is the silence
+    a listener hears *inside* the speech: streamed synthesis can introduce
+    seams at chunk boundaries that batch synthesis of the same text does not.
+
+    Attributes:
+        total_s: Summed duration of qualifying internal pauses.
+        longest_s: Duration of the single longest pause.
+        count: Number of pauses at least ``MIN_PAUSE_S`` long.
+    """
+
+    total_s: float
+    longest_s: float
+    count: int
+
+
+def measure_pauses(
+    samples: np.ndarray,
+    sample_rate: int,
+    *,
+    frame_ms: int = SPEECH_FRAME_MS,
+    min_pause_s: float = MIN_PAUSE_S,
+) -> PauseStats:
+    """Profile the internal pauses of an utterance.
+
+    Uses the same relative-RMS voicing test as :func:`detect_speech_end_s`,
+    then measures unvoiced runs strictly between the first and last voiced
+    frames. Runs shorter than ``min_pause_s`` are articulation gaps — stop
+    consonants produce them in perfectly natural speech — and do not count.
+
+    Args:
+        samples: Mono float samples in [-1, 1].
+        sample_rate: Sample rate of ``samples``.
+        frame_ms: Analysis frame size in milliseconds.
+        min_pause_s: Shortest unvoiced run counted as a pause.
+
+    Returns:
+        The pause profile; all zeros when nothing is voiced.
+    """
+    step = int(sample_rate * frame_ms / 1000)
+    usable = len(samples) // step * step
+    if step <= 0 or usable == 0:
+        return PauseStats(0.0, 0.0, 0)
+
+    frames = samples[:usable].reshape(-1, step)
+    rms = np.sqrt((frames**2).mean(axis=1))
+    threshold = max(float(rms.max()) * SPEECH_THRESHOLD, 1e-4)
+    voiced = np.nonzero(rms > threshold)[0]
+    if len(voiced) < 2:
+        return PauseStats(0.0, 0.0, 0)
+
+    total = 0.0
+    longest = 0.0
+    count = 0
+    for gap_frames in np.diff(voiced) - 1:
+        pause_s = float(gap_frames) * frame_ms / 1000
+        if pause_s < min_pause_s:
+            continue
+        count += 1
+        total += pause_s
+        longest = max(longest, pause_s)
+    return PauseStats(total, longest, count)
 
 
 def chunk_pcm(clip: AudioClip, chunk_ms: int) -> Iterator[bytes]:

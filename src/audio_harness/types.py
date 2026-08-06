@@ -17,6 +17,29 @@ class Mode(StrEnum):
     STREAM = "stream"
 
 
+class EventKind(StrEnum):
+    """What a streaming transcript event *means*, beyond its text.
+
+    Vendor final events are semantically heterogeneous: AssemblyAI's
+    ``end_of_turn`` is a genuine end-of-utterance decision, while Deepgram's
+    ``is_final`` merely marks a transcript segment as immutable. Collapsing
+    both into one boolean makes endpointing metrics wrong by design, so the
+    kind is recorded explicitly and endpointing scores only ``EOU`` events.
+    """
+
+    INTERIM = "interim"
+    """A provisional hypothesis that may still change."""
+
+    SEGMENT_FINAL = "segment_final"
+    """An immutable transcript segment — a decoding decision, not a
+    turn-taking one."""
+
+    EOU = "eou"
+    """The vendor's end-of-utterance decision: it believes the speaker is
+    done. May carry no text (Deepgram ``UtteranceEnd``, Speechmatics
+    ``EndOfUtterance``, Soniox ``<end>`` arrive as bare markers)."""
+
+
 @dataclass(slots=True, frozen=True)
 class AudioClip:
     """A single benchmark utterance.
@@ -34,6 +57,17 @@ class AudioClip:
             provider that endpoints during it finalizes before the file ends.
             Turn latency measured from end-of-file would score that as zero, so
             this is the reference point the metric actually uses.
+        pauses: Labeled mid-turn silence spans as ``(start_s, end_s)`` pairs.
+            Endpointing corpora annotate hesitations the speaker talks
+            through; a vendor end-of-utterance decision inside one is a false
+            cutoff. Empty for corpora without pause labels.
+        license: License of the clip's source material, when the corpus
+            records one. Rides into results so reports keep per-source
+            attribution after lanes are merged.
+        gold_status: Reference-transcript trust level for curated corpora:
+            ``unverified`` subtitles must not feed ranked accuracy, though
+            latency needs no transcript truth and still counts. Empty for
+            corpora with trusted human transcripts.
     """
 
     clip_id: str
@@ -44,6 +78,9 @@ class AudioClip:
     language: str
     source_path: str
     speech_end_s: float = 0.0
+    pauses: tuple[tuple[float, float], ...] = ()
+    license: str = ""
+    gold_status: str = ""
 
 
 @dataclass(slots=True, frozen=True)
@@ -68,17 +105,28 @@ class TtsPrompt:
 
 @dataclass(slots=True)
 class Partial:
-    """One interim transcript event observed on a streaming connection.
+    """One transcript event observed on a streaming connection.
 
     Attributes:
         t_s: Seconds since the first audio byte was written to the socket.
-        text: Full hypothesis for the utterance at that instant.
+        text: Full hypothesis for the utterance at that instant. Empty only
+            for bare end-of-utterance markers.
         is_final: Whether the provider marked this hypothesis as immutable.
+        kind: Event semantics as an :class:`EventKind` value. Defaults from
+            ``is_final`` so untouched adapters and historical results keep
+            their existing behaviour: finals map to ``segment_final``,
+            everything else to ``interim``.
     """
 
     t_s: float
     text: str
     is_final: bool
+    kind: str = ""
+
+    def __post_init__(self) -> None:
+        """Derive the default kind from the finality flag."""
+        if not self.kind:
+            self.kind = EventKind.SEGMENT_FINAL if self.is_final else EventKind.INTERIM
 
 
 @dataclass(slots=True)
@@ -146,6 +194,20 @@ class TtsResult:
         chars: Character count of the input text, for per-character cost.
         ttfb_s: Seconds from request start to the first audio byte received.
             This is the number that governs perceived response latency.
+        ttfa_s: Seconds from request start until a client that starts playback
+            on the first byte would hear the first *audible* sound. Derived
+            from the RMS onset of the decoded waveform and per-chunk arrival
+            times, because the first byte can be a container header or leading
+            silence — TTFB credits a vendor for both, TTFA for neither.
+        gap_p99_s: 99th percentile of gaps between successive chunk arrivals
+            within this run. Stutter: a real-time client stalls when a gap
+            outruns its buffer.
+        cold: Whether the run executed while the adapter's connection stack
+            was cold. The warmup pass records these instead of discarding
+            them; the report splits them out of the warm percentiles.
+        chunk_t_s: Arrival timestamp of every audio chunk, seconds since
+            request start. The raw data behind ``gap_p99_s`` and ``ttfa_s``,
+            kept so both can be recomputed from saved results.
         total_s: Wall-clock seconds from request start to the last audio byte.
         error: Failure description, or ``None`` when the run succeeded.
         raw: Provider-specific payload retained for debugging.
@@ -160,6 +222,10 @@ class TtsResult:
     audio_s: float = 0.0
     chars: int = 0
     ttfb_s: float | None = None
+    ttfa_s: float | None = None
+    gap_p99_s: float | None = None
+    cold: bool = False
+    chunk_t_s: list[float] = field(default_factory=list)
     total_s: float = 0.0
     error: str | None = None
     raw: dict[str, object] = field(default_factory=dict)

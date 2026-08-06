@@ -1,0 +1,84 @@
+# SNR robustness matrix: the same speech at {+20, +10, +5, 0, -5} dB
+# active-speech SNR, plus an 8 kHz telephony round-trip.
+#
+#   uv run tools/fetch_musan.py                # noise material (once, ~11 GB
+#                                              # streamed, noise subset kept)
+#   uv run audio-harness stt configs/stt-snr.yaml
+#
+# COST — GET APPROVAL BEFORE THE FULL RUN. The matrix multiplies the corpus:
+# 130 base clips (50 pipecat en + 40 YODAS de + 40 YODAS fr) x 6 conditions
+# = 780 streamed clips ~= 1.1 h of audio PER VENDOR. With the four vendors
+# below that is ~4.3 vendor-hours ~= $1.50-2.00 at current streaming rates
+# (recompute with snr.estimated_matrix_cost), ~1.1 h wall-clock (lanes run
+# in parallel at real time, repeats: 1). This is the plan's ~6x corpus
+# multiplier; the 50-clip/language subset IS the budget cap.
+#
+# Metrics: audio-harness report renders WER per SNR level, WER-vs-SNR AUC
+# (trapezoidal mean across the range, lower is better), finalize-p50
+# degradation from cleanest to noisiest level, and the 8 kHz WER — grouped
+# per provider/mode/language from the clip-id prefix (snr+05-..., tel8k-...),
+# so saved runs regroup without re-running vendors.
+#
+# One noise draw per base clip is shared across all five levels: the only
+# thing that changes level to level is noise gain, so WER deltas are the
+# SNR's doing. Noise: MUSAN (Snyder, Chen, Povey, arXiv:1510.08484), CC BY
+# 4.0. YODAS bases are CC BY 3.0 subtitles: their rows carry
+# gold_status: unverified, so the ranked accuracy gate applies — SNR *deltas*
+# and AUC remain meaningful because every level shares the same references.
+
+stt:
+  - name: deepgram-nova3
+    modes: [stream]
+  - name: assemblyai-universal35pro
+    modes: [stream]
+  - name: soniox-rt-v5
+    modes: [stream]
+  - name: speechmatics-enhanced
+    modes: [stream]
+
+dataset:
+  sources:
+    # English: pipecat interview corpus (human transcripts, trusted refs).
+    - synthetic: snr
+      parquet: "data/hf/stt-benchmark-data/data/train-00000-of-00001.parquet"
+      language: en-US
+      limit: 50
+      sample_seed: 20260806
+      noise_dir: "data/musan/noise"
+    - synthetic: telephony
+      parquet: "data/hf/stt-benchmark-data/data/train-00000-of-00001.parquet"
+      language: en-US
+      limit: 50
+      sample_seed: 20260806
+    # Multilingual: curated YODAS manifests (commercial-safe, audio fetched
+    # and cached by the curated loader before mixing).
+    - synthetic: snr
+      manifest: "data/curated/yodas2-de-DE.jsonl"
+      language: de-DE
+      limit: 40
+      sample_seed: 20260806
+      noise_dir: "data/musan/noise"
+    - synthetic: telephony
+      manifest: "data/curated/yodas2-de-DE.jsonl"
+      language: de-DE
+      limit: 40
+      sample_seed: 20260806
+    - synthetic: snr
+      manifest: "data/curated/yodas2-fr-FR.jsonl"
+      language: fr-FR
+      limit: 40
+      sample_seed: 20260806
+      noise_dir: "data/musan/noise"
+    - synthetic: telephony
+      manifest: "data/curated/yodas2-fr-FR.jsonl"
+      language: fr-FR
+      limit: 40
+      sample_seed: 20260806
+
+run:
+  repeats: 1
+  warmup: 1
+  provider_concurrency: 4
+  vendor_concurrency: 1
+  timeout_s: 300
+  output_dir: results

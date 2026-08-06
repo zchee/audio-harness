@@ -7,6 +7,7 @@ recordings from your own product, and the records look the same.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import orjson
@@ -47,18 +48,46 @@ def load_clips(config: DatasetConfig, *, sample_rate: int = 16000) -> list[Audio
 
 
 def load_source(source: SourceConfig, *, sample_rate: int = 16000) -> list[AudioClip]:
-    """Load one corpus in one language.
+    """Load one corpus in one language, or generate a synthetic condition set.
 
     Raises:
         DatasetError: If the source names neither or both of ``manifest`` and
-            ``parquet``, or cannot be read.
+            ``parquet``, cannot be read, or describes an unusable synthetic
+            condition.
     """
+    if source.synthetic in {"snr", "telephony"}:
+        # The SNR robustness matrix lives in its own module; dispatching here
+        # keeps synthetic.py's condition set closed. Lazy import: snr.py
+        # reaches back through synthetic.py into this module.
+        from .snr import synthesize_snr_source
+
+        return synthesize_snr_source(source, sample_rate=sample_rate)
+    if source.synthetic:
+        # Imported here, not at module top: synthetic.py loads real base
+        # utterances through this module, so a top-level import would be
+        # circular.
+        from .synthetic import synthesize_source
+
+        return synthesize_source(source, sample_rate=sample_rate)
     if source.manifest and source.parquet:
         raise DatasetError(
             "set only one of dataset.manifest or dataset.parquet, not both"
         )
     if source.parquet:
         return load_clips_from_parquet(source, sample_rate=sample_rate)
+    if source.manifest:
+        # Curated YODAS/Granary manifests reference remote audio by id and
+        # offset instead of naming local files; detection is per file so the
+        # config stays a plain `manifest:` entry either way.
+        from .curated import CuratedManifestError, is_curated_manifest
+
+        if is_curated_manifest(Path(source.manifest)):
+            from .curated import load_curated_clips
+
+            try:
+                return load_curated_clips(source, sample_rate=sample_rate)
+            except CuratedManifestError as exc:
+                raise DatasetError(str(exc)) from exc
     return load_clips_from_manifest(source, sample_rate=sample_rate)
 
 
@@ -94,7 +123,16 @@ def load_clips_from_parquet(
 
     frame = pl.scan_parquet(spec)
     available = set(frame.collect_schema().names())
-    required = {config.id_column, config.audio_column, config.text_column}
+    spans_column = config.silence_spans_column
+    required = {config.id_column, config.audio_column}
+    if spans_column:
+        # Endpointing corpora (eot-bench schema) label silence spans instead
+        # of shipping a plain transcript; the text column becomes optional.
+        required.add(spans_column)
+    else:
+        required.add(config.text_column)
+    if config.words_column:
+        required.add(config.words_column)
     missing = sorted(required - available)
     if missing:
         raise DatasetError(
@@ -102,28 +140,42 @@ def load_clips_from_parquet(
             f"available: {', '.join(sorted(available))}"
         )
 
-    projected = frame.select(
+    columns = [
         pl.col(config.id_column).alias("id"),
         pl.col(config.audio_column).alias("audio"),
-        pl.col(config.text_column).alias("text"),
-    )
+    ]
+    has_text = config.text_column in available
+    if has_text:
+        columns.append(pl.col(config.text_column).alias("text"))
+    if config.words_column:
+        columns.append(pl.col(config.words_column).alias("words"))
+    if spans_column:
+        columns.append(pl.col(spans_column).alias("spans"))
+    projected = frame.select(columns)
     selected = _select_rows(projected, limit=config.limit, seed=config.sample_seed)
 
     clips: list[AudioClip] = []
     failures: list[str] = []
     for row in selected.iter_rows(named=True):
         clip_id = str(row["id"])
+        if has_text:
+            reference = row["text"]
+        elif config.words_column:
+            reference = _join_words(row.get("words"))
+        else:
+            reference = None
         try:
-            clips.append(
-                load_clip_bytes(
-                    _audio_bytes(row["audio"], clip_id),
-                    clip_id=clip_id,
-                    reference=row["text"],
-                    language=config.language,
-                    target_sample_rate=sample_rate,
-                    source_path=f"{path}#{clip_id}",
-                )
+            clip = load_clip_bytes(
+                _audio_bytes(row["audio"], clip_id),
+                clip_id=clip_id,
+                reference=reference,
+                language=config.language,
+                target_sample_rate=sample_rate,
+                source_path=f"{path}#{clip_id}",
             )
+            if spans_column:
+                clip = _apply_silence_spans(clip, row.get("spans"))
+            clips.append(clip)
         except (ValueError, RuntimeError, sf.LibsndfileError) as exc:
             failures.append(f"{clip_id}: {exc}")
 
@@ -175,6 +227,38 @@ def _select_rows(
         .drop("__row")
         .collect()
     )
+
+
+def _join_words(value: object) -> str | None:
+    """Join word-timing structs into a plain reference transcript."""
+    if not isinstance(value, list):
+        return None
+    words = [
+        str(item.get("word", "")).strip() for item in value if isinstance(item, dict)
+    ]
+    text = " ".join(word for word in words if word)
+    return text or None
+
+
+def _apply_silence_spans(clip: AudioClip, value: object) -> AudioClip:
+    """Attach labeled pause spans and the labeled end of speech to a clip.
+
+    In the eot-bench schema the *final* silence span is the true end of the
+    speaker's turn, so its start is the ground-truth ``speech_end_s`` —
+    strictly better than energy detection, which cannot tell a hesitation
+    from the end. Every earlier span is a mid-turn pause the speaker talked
+    through; an end-of-utterance decision inside one is a false cutoff.
+    """
+    if not isinstance(value, list) or not value:
+        return clip
+    spans = sorted(
+        (float(item["start"]), float(item["end"]))
+        for item in value
+        if isinstance(item, dict)
+    )
+    if not spans:
+        return clip
+    return replace(clip, pauses=tuple(spans[:-1]), speech_end_s=spans[-1][0])
 
 
 def _audio_bytes(value: object, clip_id: str) -> bytes:

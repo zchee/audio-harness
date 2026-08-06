@@ -16,7 +16,7 @@ from websockets.asyncio.client import ClientConnection
 
 from ..audio import wrap_wav
 from ..config import require_env
-from ..types import AudioClip, Mode, SttResult
+from ..types import AudioClip, EventKind, Mode, SttResult
 from .base import StreamTimeline, SttProvider, raise_for_status, register
 from .ws import StreamProtocolError, run_stream
 
@@ -33,6 +33,10 @@ class _SpeechmaticsBase(SttProvider):
         max_delay: Latency/accuracy trade-off in seconds, 0.7 to 4.0. Lower
             values finalize sooner at some cost in accuracy.
         stream_url: Regional realtime endpoint override.
+        end_of_utterance_silence_trigger: Seconds of non-speech (0-2; 0
+            disables) after which the server emits an ``EndOfUtterance``
+            message. Keep it below ``max_delay``. Off by default, so plain
+            accuracy lanes are unaffected.
     """
 
     vendor = "speechmatics"
@@ -109,6 +113,11 @@ class _SpeechmaticsBase(SttProvider):
         config["enable_partials"] = True
         if "max_delay" in self.options:
             config["max_delay"] = float(self.options["max_delay"])
+        eou_trigger = self.options.get("end_of_utterance_silence_trigger")
+        if eou_trigger:
+            config["conversation_config"] = {
+                "end_of_utterance_silence_trigger": float(eou_trigger)
+            }
 
         async def start_recognition(socket: ClientConnection) -> None:
             await socket.send(
@@ -155,6 +164,13 @@ class _SpeechmaticsBase(SttProvider):
         result.ttft_s = timeline.ttft_s
         result.finalize_s = timeline.finalize_s
         result.total_s = timeline.total_s
+        result.raw["ws_rtt_s"] = timeline.ws_rtt_s
+        if eou_trigger:
+            result.raw["eou_source"] = "end_of_utterance"
+            result.raw["endpoint_config"] = {
+                "end_of_utterance_silence_trigger": float(eou_trigger),
+                "max_delay": config.get("max_delay"),
+            }
         return result
 
 
@@ -163,7 +179,9 @@ def _handle_message(payload: Any, timeline: StreamTimeline) -> bool:
 
     ``AddTranscript`` frames carry successive final segments, so the full
     transcript is their concatenation; ``AddPartialTranscript`` frames are
-    interim hypotheses for the segment in progress.
+    interim hypotheses for the segment in progress. When end-of-utterance
+    detection is enabled, the server sends the final for the segment and then
+    a bare ``EndOfUtterance`` marker — the marker alone is the turn decision.
     """
     if not isinstance(payload, dict):
         return False
@@ -171,6 +189,9 @@ def _handle_message(payload: Any, timeline: StreamTimeline) -> bool:
 
     if message == "EndOfTranscript":
         return True
+    if message == "EndOfUtterance":
+        timeline.record("", is_final=False, kind=EventKind.EOU)
+        return False
     if message == "Error":
         raise StreamProtocolError(
             f"speechmatics: {payload.get('type')}: {payload.get('reason')}"

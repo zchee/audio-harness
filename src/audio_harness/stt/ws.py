@@ -110,6 +110,11 @@ async def run_stream(
                 on_input_done=on_input_done,
             )
         )
+        # Measured mid-session, concurrently with the audio, so it samples
+        # the same network path the transcript events travel. Endpoint
+        # latency comparisons publish this next to the curves: an event
+        # timestamp includes the vendor's decision time AND this path.
+        rtt_probe = asyncio.create_task(_measure_rtt(socket, timeline))
         try:
             await _receive(
                 socket=socket,
@@ -120,15 +125,33 @@ async def run_stream(
                 finalize_timeout_s=finalize_timeout_s,
             )
         finally:
-            sender.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await sender
+            for task in (sender, rtt_probe):
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await task
             # Complete the closing handshake before returning. Vendors count a
             # session as open until they see it, so returning early makes the
             # next clip in the same lane collide with a session that is still
             # winding down and get refused for excess concurrency.
             with contextlib.suppress(Exception):
                 await asyncio.wait_for(socket.close(), timeout=CLOSE_TIMEOUT_S)
+
+
+RTT_TIMEOUT_S = 5.0
+"""Give up on a pong after this long; a lax server just yields no RTT."""
+
+
+async def _measure_rtt(socket: ClientConnection, timeline: StreamTimeline) -> None:
+    """Measure one ping/pong round trip and record it on the timeline.
+
+    RFC 6455 requires servers to answer pings, but not every vendor does;
+    a missing pong leaves ``ws_rtt_s`` as ``None`` rather than failing the
+    run. Control frames are interleaved with data frames by the protocol
+    layer, so the probe never blocks audio or transcripts.
+    """
+    with contextlib.suppress(Exception):
+        pong = await socket.ping()
+        timeline.ws_rtt_s = await asyncio.wait_for(pong, timeout=RTT_TIMEOUT_S)
 
 
 async def _send_audio(

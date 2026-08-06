@@ -2,7 +2,10 @@
 #
 #   hf download FBK-MT/Speech-MASSIVE --repo-type dataset \
 #     --include 'fr-FR/*' --local-dir data/hf/speech-massive
-#   uv run audio-harness stt configs/stt-speech-massive-fr.yaml
+#   uv run audio-harness stt configs/stt-speech-massive-fr-internal.yaml
+#
+# INTERNAL REGRESSION ONLY: Speech-MASSIVE is CC-BY-NC-SA-4.0 (non-commercial).
+# The commercial-safe multilingual lane is configs/stt-yodas.yaml.
 #
 # Spoken voice-assistant commands in 12 languages: ar-SA, de-DE, es-ES, fr-FR,
 # hu-HU, ko-KR, nl-NL, pl-PL, pt-PT, ru-RU, tr-TR, vi-VN. Human transcripts.

@@ -1,6 +1,6 @@
 """Chart rendering for benchmark results.
 
-Two charts, adapted from the pipecat-ai/stt-benchmark plot styling (the visual
+The core pair adapts the pipecat-ai/stt-benchmark plot styling (the visual
 design is theirs; every number comes from this harness' own measurements):
 
 * **Pareto frontier** — latency versus error rate, one dot per provider, with
@@ -8,6 +8,11 @@ design is theirs; every number comes from this harness' own measurements):
   provider not on the frontier is beaten on both axes by someone on it.
 * **Latency range** — one row per provider showing p50 and p95, sorted fastest
   first. The row length is the size of the provider's tail.
+
+Around them, in the same chrome: hypothesis stability, the per-language error
+grid, the multilingual overview (with an entity panel when the corpus is
+annotated), the TTS latency profile (TTFB → first audible audio, cold starts,
+chunk stutter) and the hallucination-lane rates.
 
 Charts are drawn per language and per mode. Mixing languages on one chart would
 place WER next to CER and invite reading one as beating the other.
@@ -543,6 +548,9 @@ def plot_language_grid(
 AMBER = "#c9822b"
 """Hue for the latency panel of the overview, kept apart from the data blue."""
 
+ENTITY = "#7a4fb8"
+"""Hue for the entity panel of the overview: a third quantity, a third hue."""
+
 
 @dataclass(slots=True, frozen=True)
 class _Cell:
@@ -686,10 +694,12 @@ def plot_overview(
 ) -> Path | None:
     """Render the whole multilingual run as one figure.
 
-    Two aligned matrices share the provider rows: error rate on the left,
-    finalize latency on the right. Rows are ordered by mean within-language
-    accuracy rank, so the vertical order *is* the composite verdict, while the
-    cells keep the per-language magnitudes that a composite hides.
+    Aligned matrices share the provider rows: error rate on the left,
+    finalize latency on the right, and — when the corpus carries entity
+    annotations — mean entity-WER as a third panel. Rows are ordered by mean
+    within-language accuracy rank, so the vertical order *is* the composite
+    verdict, while the cells keep the per-language magnitudes that a
+    composite hides.
 
     Args:
         frame: Summary frame from :func:`audio_harness.report.stt_summary_frame`.
@@ -712,6 +722,16 @@ def plot_overview(
     languages = sorted({str(row["language"]) for row in rows})
     if len(languages) < 2:
         return None
+
+    # Mean across annotated entity classes, per lane. One number per cell is
+    # a deliberate compression — the per-class breakdown lives in the report
+    # table; the panel exists so entity weakness is visible at a glance.
+    entity_fields = [field for field in frame.columns if field.startswith("ent_err[")]
+    has_entities = False
+    for row in rows:
+        rates = [row[field] for field in entity_fields if row.get(field) is not None]
+        row["_ent_mean"] = sum(rates) / len(rates) if rates else None
+        has_entities = has_entities or bool(rates)
 
     # Mean within-language rank orders the rows; missing lanes simply do not
     # contribute rather than counting for or against a provider.
@@ -746,22 +766,23 @@ def plot_overview(
         fmt=".2f",
     )
 
-    width = max(11.0, 1.02 * len(languages) * 2 + 3.4)
+    panels = 3 if has_entities else 2
+    width = max(11.0, 1.02 * len(languages) * panels + 3.4)
     height = 2.6 + 0.58 * len(providers)
-    fig, (left, right) = plt.subplots(
+    fig, axes = plt.subplots(
         1,
-        2,
+        panels,
         figsize=(width, height),
         dpi=150,
         sharey=False,
         gridspec_kw={"wspace": 0.04},
     )
     fig.patch.set_facecolor(SURFACE)
-    for ax in (left, right):
+    for ax in axes:
         ax.set_facecolor(SURFACE)
 
     _draw_overview_panel(
-        left,
+        axes[0],
         accuracy,
         hue=DOT,
         columns=[f"{lang}\n{metric_by_language[lang]}" for lang in languages],
@@ -769,14 +790,38 @@ def plot_overview(
         title="Error rate (%) — shaded within each language",
     )
     _draw_overview_panel(
-        right,
+        axes[1],
         latency,
         hue=AMBER,
         columns=list(languages),
         providers=None,
         title="Finalize p50 (s) — one scale across languages",
     )
+    if has_entities:
+        entities = _overview_matrix(
+            rows,
+            providers,
+            languages,
+            value_key="_ent_mean",
+            per_language_shading=True,
+            fmt=".1f",
+            scale=100.0,
+        )
+        _draw_overview_panel(
+            axes[2],
+            entities,
+            hue=ENTITY,
+            columns=list(languages),
+            providers=None,
+            title="Mean entity-WER (%) — annotated classes only",
+        )
 
+    caption = (
+        "rows ordered by mean within-language accuracy rank · "
+        "darker = worse · * = lane had failures · — = not run"
+    )
+    if has_entities:
+        caption += " · entity panel averages the corpus' annotated classes"
     fig.suptitle(
         f"STT multilingual overview — {mode}",
         fontsize=14,
@@ -785,13 +830,318 @@ def plot_overview(
         x=0.125,
         ha="left",
     )
-    fig.text(
-        0.125,
-        0.015,
-        "rows ordered by mean within-language accuracy rank · "
-        "darker = worse · * = lane had failures · — = not run",
-        fontsize=8.6,
-        color=MUTED,
+    fig.text(0.125, 0.015, caption, fontsize=8.6, color=MUTED)
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output, bbox_inches="tight", facecolor=SURFACE)
+    plt.close(fig)
+    return output
+
+
+def plot_tts_latency(
+    frame: pl.DataFrame, output: Path, *, mode_prefix: str = "stream"
+) -> Path | None:
+    """Render the TTS latency profile: TTFB→TTFA rows plus chunk stutter.
+
+    Two aligned panels share the provider rows. The left panel draws each
+    lane's time to first byte and time to first *audible* audio as a
+    gradient segment — the segment length is the padding a raw TTFB hides
+    (container bytes, leading silence) — with the cold first-request latency
+    as an open marker. The right panel bars the inter-chunk gap p99, the
+    stutter a real-time client must buffer against.
+
+    Args:
+        frame: Summary frame from :func:`audio_harness.report.tts_summary_frame`.
+        output: PNG path to write.
+        mode_prefix: Lane modes to include; ``stream`` also matches the
+            ``stream xN`` load lanes, which appear as their own rows.
+
+    Returns:
+        The written path, or ``None`` when no lane has a time to first byte.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.collections import LineCollection
+    from matplotlib.colors import LinearSegmentedColormap
+
+    rows = [
+        row
+        for row in frame.iter_rows(named=True)
+        if str(row.get("mode", "")).startswith(mode_prefix)
+        and row.get("ttfb_p50_s") is not None
+    ]
+    if not rows:
+        return None
+    rows.sort(key=lambda row: row.get("ttfa_p50_s") or row["ttfb_p50_s"])
+
+    def label(row: dict[str, object]) -> str:
+        mode = str(row["mode"])
+        return (
+            str(row["provider"])
+            if mode == mode_prefix
+            else f"{row['provider']} ({mode})"
+        )
+
+    gradient = LinearSegmentedColormap.from_list(
+        "ttfa", [_mix(RANGE_P50, SURFACE, 0.55), _mix(RANGE_P95, SURFACE, 0.55)]
+    )
+
+    fig, (left, right) = plt.subplots(
+        1,
+        2,
+        figsize=(12.5, 0.9 * len(rows) + 2.5),
+        dpi=150,
+        gridspec_kw={"width_ratios": [2.2, 1.0], "wspace": 0.08},
+    )
+    fig.patch.set_facecolor(SURFACE)
+    for ax in (left, right):
+        ax.set_facecolor(SURFACE)
+
+    ys = range(len(rows), 0, -1)
+    max_x = 0.0
+    for y, row in zip(ys, rows, strict=True):
+        ttfb = float(row["ttfb_p50_s"]) * 1000  # type: ignore[arg-type]
+        ttfa = row.get("ttfa_p50_s")
+        cold = row.get("ttfb_cold_s")
+        max_x = max(max_x, ttfb)
+        if ttfa is not None:
+            ttfa_ms = float(ttfa) * 1000  # type: ignore[arg-type]
+            max_x = max(max_x, ttfa_ms)
+            if ttfa_ms > ttfb:
+                gx = np.linspace(ttfb, ttfa_ms, 60)
+                segments = [((gx[i], y), (gx[i + 1], y)) for i in range(len(gx) - 1)]
+                left.add_collection(
+                    LineCollection(
+                        segments,
+                        colors=gradient(np.linspace(0, 1, len(segments))),
+                        linewidths=3,
+                        capstyle="butt",
+                        zorder=2,
+                    )
+                )
+            left.scatter(
+                [ttfa_ms],
+                [y],
+                s=55,
+                color=RANGE_P95,
+                edgecolors=SURFACE,
+                linewidths=1.4,
+                zorder=4,
+            )
+        if cold is not None:
+            cold_ms = float(cold) * 1000  # type: ignore[arg-type]
+            max_x = max(max_x, cold_ms)
+            left.scatter(
+                [cold_ms],
+                [y],
+                s=65,
+                facecolors="none",
+                edgecolors=AMBER,
+                linewidths=1.6,
+                zorder=3,
+            )
+        left.scatter(
+            [ttfb],
+            [y],
+            s=70,
+            color=RANGE_P50,
+            edgecolors=SURFACE,
+            linewidths=1.4,
+            zorder=5,
+        )
+
+    left.set_yticks(list(ys))
+    left.set_yticklabels([label(row) for row in rows], fontsize=9, color=INK_2)
+    left.set_ylim(0.3, len(rows) + 0.7)
+    left.set_xlim(0, max_x * 1.08 or 1)
+    left.grid(True, axis="x", color=GRID, linewidth=0.8, zorder=0)
+    left.tick_params(axis="y", length=0)
+    _chrome(
+        left,
+        xlabel="Warm p50 (ms) (lower is better)",
+        ylabel="",
+        title="TTFB → first audible audio (TTFA)",
+    )
+    handles = [
+        plt.Line2D(
+            [],
+            [],
+            marker="o",
+            linestyle="",
+            markersize=8,
+            markerfacecolor=face,
+            markeredgecolor=edge,
+            label=text,
+        )
+        for face, edge, text in [
+            (RANGE_P50, SURFACE, "TTFB p50"),
+            (RANGE_P95, SURFACE, "TTFA p50"),
+            (SURFACE, AMBER, "TTFB cold"),
+        ]
+    ]
+    left.legend(
+        handles=handles,
+        loc="lower right",
+        frameon=True,
+        framealpha=0.95,
+        edgecolor=GRID,
+        fontsize=10,
+    )
+
+    gaps = [
+        (y, float(row["gap_p99_s"]) * 1000)  # type: ignore[arg-type]
+        for y, row in zip(range(len(rows), 0, -1), rows, strict=True)
+        if row.get("gap_p99_s") is not None
+    ]
+    if gaps:
+        right.barh(
+            [y for y, _ in gaps],
+            [gap for _, gap in gaps],
+            height=0.5,
+            color=DOT,
+            edgecolor=SURFACE,
+            linewidth=0.8,
+            zorder=3,
+        )
+        right.set_xlim(0, max(gap for _, gap in gaps) * 1.15)
+    right.set_yticks([])
+    right.set_ylim(0.3, len(rows) + 0.7)
+    right.grid(True, axis="x", color=GRID, linewidth=0.8, zorder=0)
+    _chrome(
+        right,
+        xlabel="Gap p99 (ms) (lower is better)",
+        ylabel="",
+        title="Inter-chunk stutter",
+    )
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output, bbox_inches="tight", facecolor=SURFACE)
+    plt.close(fig)
+    return output
+
+
+_CONDITION_ORDER = ["silence", "noise", "trailing_silence", "low_snr", "no_speech"]
+"""Display order for hallucination condition sets, hardest-silence first."""
+
+_NO_SPEECH_CONDITIONS = {"silence", "noise", "no_speech"}
+"""Conditions whose clips contain no speech, where a phantom final can exist."""
+
+
+def plot_hallucination(
+    summaries: list[object], output: Path, *, mode: str = "stream"
+) -> Path | None:
+    """Render fabrication and phantom-final rates per provider and condition.
+
+    Two stacked bar panels in the language-grid style: the top panel shows
+    the share of clips where a provider fabricated a phrase, grouped by
+    synthetic condition; the bottom panel shows phantom finals — a *final*
+    transcript event on a clip that contains no speech at all, the event a
+    voice agent would act on.
+
+    Args:
+        summaries: Output of :func:`audio_harness.metrics.summarize_hallucination`.
+        output: PNG path to write.
+        mode: Transport mode to plot.
+
+    Returns:
+        The written path, or ``None`` when nothing is plottable.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    rows = [
+        s
+        for s in summaries
+        if getattr(s, "mode", None) == mode and getattr(s, "scored", 0) > 0
+    ]
+    conditions = [
+        c for c in _CONDITION_ORDER if any(s.condition == c for s in rows)
+    ] + sorted({s.condition for s in rows} - set(_CONDITION_ORDER) - {"speech"})
+    providers = sorted({s.provider for s in rows})
+    if not conditions or not providers:
+        return None
+
+    fabrication: dict[tuple[str, str], float] = {}
+    phantom: dict[tuple[str, str], float] = {}
+    for s in rows:
+        if s.fabrication_rate is not None:
+            fabrication[(s.provider, s.condition)] = s.fabrication_rate * 100
+        if s.condition in _NO_SPEECH_CONDITIONS and s.phantom_final_rate is not None:
+            phantom[(s.provider, s.condition)] = s.phantom_final_rate * 100
+
+    phantom_conditions = [c for c in conditions if c in _NO_SPEECH_CONDITIONS]
+    cmap = plt.get_cmap("tab10")
+    colors = {provider: cmap(i % 10) for i, provider in enumerate(providers)}
+
+    fig, (top, bottom) = plt.subplots(
+        2,
+        1,
+        figsize=(1.9 * len(conditions) + 4, 10),
+        dpi=150,
+        gridspec_kw={"hspace": 0.45},
+    )
+    fig.patch.set_facecolor(SURFACE)
+
+    def draw(
+        ax: object,
+        rates: dict[tuple[str, str], float],
+        panel_conditions: list[str],
+        *,
+        ylabel: str,
+        title: str,
+    ) -> None:
+        ax.set_facecolor(SURFACE)  # type: ignore[attr-defined]
+        width = 0.8 / len(providers)
+        for index, provider in enumerate(providers):
+            offsets = [
+                cond_index + index * width - 0.4 + width / 2
+                for cond_index in range(len(panel_conditions))
+            ]
+            values = [rates.get((provider, c)) for c in panel_conditions]
+            ax.bar(  # type: ignore[attr-defined]
+                [o for o, v in zip(offsets, values, strict=True) if v is not None],
+                [v for v in values if v is not None],
+                width=width * 0.92,
+                color=colors[provider],
+                edgecolor=SURFACE,
+                linewidth=0.8,
+                label=provider,
+                zorder=3,
+            )
+        ax.set_xticks(range(len(panel_conditions)))  # type: ignore[attr-defined]
+        ax.set_xticklabels(panel_conditions, fontsize=9, color=INK_2)  # type: ignore[attr-defined]
+        ax.set_ylim(0, 105)  # type: ignore[attr-defined]
+        _chrome(ax, xlabel="", ylabel=ylabel, title=title)
+        ax.grid(True, axis="y", color=GRID, linewidth=0.8, zorder=0)  # type: ignore[attr-defined]
+        ax.grid(False, axis="x")  # type: ignore[attr-defined]
+
+    draw(
+        top,
+        fabrication,
+        conditions,
+        ylabel="Clips with a fabricated phrase (%)",
+        title=f"STT fabrication rate by condition — {mode}",
+    )
+    if phantom_conditions:
+        draw(
+            bottom,
+            phantom,
+            phantom_conditions,
+            ylabel="No-speech clips with a final (%)",
+            title=f"STT phantom finals — {mode} (finals are commitments)",
+        )
+    else:
+        bottom.set_visible(False)
+    top.legend(
+        loc="upper right",
+        frameon=True,
+        framealpha=0.95,
+        edgecolor=GRID,
+        fontsize=9,
     )
 
     output.parent.mkdir(parents=True, exist_ok=True)

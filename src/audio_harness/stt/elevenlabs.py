@@ -11,9 +11,9 @@ from websockets.asyncio.client import ClientConnection
 
 from ..audio import wrap_wav
 from ..config import require_env
-from ..types import AudioClip, Mode, SttResult
+from ..types import AudioClip, EventKind, Mode, SttResult
 from .base import StreamTimeline, SttProvider, raise_for_status, register
-from .ws import StreamProtocolError, run_stream
+from .ws import HandleMessage, StreamProtocolError, run_stream
 
 BATCH_URL = "https://api.elevenlabs.io/v1/speech-to-text"
 STREAM_URL = "wss://api.elevenlabs.io/v1/speech-to-text/realtime"
@@ -104,6 +104,7 @@ class ElevenLabsScribeV2(SttProvider):
                 ).decode()
             )
 
+        vad = str(params["commit_strategy"]) == "vad"
         await run_stream(
             url=f"{STREAM_URL}?{urlencode(params)}",
             headers=self._auth(),
@@ -111,7 +112,7 @@ class ElevenLabsScribeV2(SttProvider):
             chunk_ms=chunk_ms,
             realtime=realtime,
             timeline=timeline,
-            handle_message=_handle_message,
+            handle_message=_make_handler(vad_commits=vad),
             encode_chunk=encode,
             on_input_done=commit,
         )
@@ -121,27 +122,43 @@ class ElevenLabsScribeV2(SttProvider):
         result.ttft_s = timeline.ttft_s
         result.finalize_s = timeline.finalize_s
         result.total_s = timeline.total_s
+        result.raw["ws_rtt_s"] = timeline.ws_rtt_s
+        if vad:
+            result.raw["eou_source"] = "vad_commit"
+            result.raw["endpoint_config"] = {"commit_strategy": "vad"}
         return result
 
 
-def _handle_message(payload: Any, timeline: StreamTimeline) -> bool:
-    """Record one realtime event.
+def _make_handler(*, vad_commits: bool) -> HandleMessage:
+    """Build the message handler for one session.
 
     ElevenLabs signals finality through the message type rather than a flag:
     ``partial_transcript`` is interim, ``committed_transcript`` is immutable.
-    Committed frames cover one segment each, so they are concatenated.
+    Committed frames cover one segment each, so they are concatenated. The
+    API exposes no separate end-of-utterance event; under the ``vad`` commit
+    strategy the commit itself *is* the vendor's end-of-speech decision, so
+    those frames carry the EOU kind. Manual commits are ours, not the
+    vendor's, and stay segment finals.
     """
-    if not isinstance(payload, dict):
-        return False
-    kind = payload.get("message_type")
 
-    if kind in {"error", "rate_limited"}:
-        raise StreamProtocolError(f"elevenlabs: {payload.get('error', kind)}")
-    if kind == "session_started":
+    def handle(payload: Any, timeline: StreamTimeline) -> bool:
+        if not isinstance(payload, dict):
+            return False
+        kind = payload.get("message_type")
+
+        if kind in {"error", "rate_limited"}:
+            raise StreamProtocolError(f"elevenlabs: {payload.get('error', kind)}")
+        if kind == "session_started":
+            return False
+        if kind == "partial_transcript":
+            timeline.record(str(payload.get("text", "")), is_final=False)
+            return False
+        if kind in {"committed_transcript", "committed_transcript_with_timestamps"}:
+            timeline.record(
+                str(payload.get("text", "")),
+                is_final=True,
+                kind=EventKind.EOU if vad_commits else "",
+            )
         return False
-    if kind == "partial_transcript":
-        timeline.record(str(payload.get("text", "")), is_final=False)
-        return False
-    if kind in {"committed_transcript", "committed_transcript_with_timestamps"}:
-        timeline.record(str(payload.get("text", "")), is_final=True)
-    return False
+
+    return handle

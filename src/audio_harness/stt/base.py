@@ -13,7 +13,7 @@ from typing import Any, ClassVar
 
 import httpx
 
-from ..types import AudioClip, Mode, Partial, SttResult
+from ..types import AudioClip, EventKind, Mode, Partial, SttResult
 
 
 class ProviderHttpError(RuntimeError):
@@ -51,12 +51,13 @@ class StreamTimeline:
     comparable across providers regardless of connection setup cost.
     """
 
-    __slots__ = ("_audio_end_s", "_start", "partials")
+    __slots__ = ("_audio_end_s", "_start", "partials", "ws_rtt_s")
 
     def __init__(self) -> None:
         self._start: float | None = None
         self._audio_end_s: float | None = None
         self.partials: list[Partial] = []
+        self.ws_rtt_s: float | None = None
 
     def start(self) -> None:
         """Anchor the clock. Call immediately before writing the first chunk."""
@@ -77,20 +78,33 @@ class StreamTimeline:
         """Seconds at which input finished, or ``None`` while still sending."""
         return self._audio_end_s
 
-    def record(self, text: str, *, is_final: bool) -> None:
-        """Append a hypothesis event at the current instant.
+    def record(self, text: str, *, is_final: bool, kind: str = "") -> None:
+        """Append a transcript event at the current instant.
 
         Empty hypotheses are dropped: several vendors emit blank keepalive
-        results that would otherwise register as a spuriously fast first token.
+        results that would otherwise register as a spuriously fast first
+        token. The exception is a bare end-of-utterance marker
+        (``kind=EventKind.EOU``) — Deepgram's ``UtteranceEnd``, Speechmatics'
+        ``EndOfUtterance`` and Soniox's ``<end>`` carry no transcript, yet
+        their timestamps are exactly what the endpointing bench measures.
         """
-        if not text:
+        if not text and kind != EventKind.EOU:
             return
-        self.partials.append(Partial(t_s=self.elapsed(), text=text, is_final=is_final))
+        self.partials.append(
+            Partial(t_s=self.elapsed(), text=text, is_final=is_final, kind=kind)
+        )
 
     @property
     def ttft_s(self) -> float | None:
-        """Seconds to the first non-empty hypothesis of any kind."""
-        return self.partials[0].t_s if self.partials else None
+        """Seconds to the first non-empty hypothesis of any kind.
+
+        Bare end-of-utterance markers are skipped: they carry no text, so
+        they are not a "first token" in any sense a user would perceive.
+        """
+        for partial in self.partials:
+            if partial.text:
+                return partial.t_s
+        return None
 
     @property
     def finalize_s(self) -> float | None:
@@ -116,7 +130,9 @@ class StreamTimeline:
         Correct for vendors that emit one final per utterance segment, where
         the full transcript is the concatenation of those segments.
         """
-        return " ".join(p.text.strip() for p in self.partials if p.is_final).strip()
+        return " ".join(
+            p.text.strip() for p in self.partials if p.is_final and p.text.strip()
+        )
 
     def last_final(self) -> str:
         """Return the most recent final hypothesis.
@@ -244,16 +260,25 @@ class SttProvider(abc.ABC):
     def _result(self, clip: AudioClip, mode: Mode) -> SttResult:
         """Build a result pre-populated with the fields every run shares.
 
-        The reference transcript is carried in ``raw`` so the metrics layer can
-        score a result without holding on to the corpus.
+        The reference transcript is carried in ``raw`` so the metrics layer
+        can score a result without holding on to the corpus; license and
+        gold status ride along for the same reason — the report needs them
+        after the corpus is long gone.
         """
-        return SttResult(
+        result = SttResult(
             provider=self.key,
             clip_id=clip.clip_id,
             mode=mode,
             audio_s=clip.duration_s,
             raw={"reference": clip.reference or "", "language": clip.language},
         )
+        if clip.license:
+            result.raw["license"] = clip.license
+        if clip.gold_status:
+            result.raw["gold_status"] = clip.gold_status
+        if clip.pauses:
+            result.raw["pauses"] = [list(span) for span in clip.pauses]
+        return result
 
 
 _REGISTRY: dict[str, type[SttProvider]] = {}

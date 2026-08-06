@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import contextlib
 import time
 from typing import Any
 from urllib.parse import urlencode
@@ -14,7 +16,14 @@ from ..audio import decode_audio_duration
 from ..config import require_env
 from ..stt.base import raise_for_status
 from ..types import Mode, TtsPrompt, TtsResult
-from .base import TtsProvider, register
+from .base import (
+    ChunkTimeline,
+    TtsProvider,
+    pace_tokens,
+    register,
+    stamp_stream_timing,
+    token_pieces,
+)
 
 HTTP_URL = "https://api.cartesia.ai/tts/bytes"
 WS_URL = "wss://api.cartesia.ai/tts/websocket"
@@ -38,6 +47,7 @@ class _CartesiaBase(TtsProvider):
     vendor = "cartesia"
     supports_batch = True
     supports_stream = True
+    supports_input_streaming = True
     model_id = "sonic-3.5"
 
     def _model(self) -> str:
@@ -95,38 +105,84 @@ class _CartesiaBase(TtsProvider):
         result.total_s = time.perf_counter() - started
         return _finish(result, b"".join(chunks))
 
-    async def synthesize_stream(self, prompt: TtsPrompt) -> TtsResult:
-        """Synthesize over the WebSocket, timing the first audio frame."""
-        result = self._result(prompt, Mode.STREAM)
+    def _ws_url(self) -> str:
         params = {
             "cartesia_version": self._version(),
             "api_key": self._api_key(),
         }
+        return f"{WS_URL}?{urlencode(params)}"
+
+    async def _consume(
+        self, socket: object, result: TtsResult, timeline: ChunkTimeline
+    ) -> None:
+        """Drain one WebSocket generation into the timeline."""
+        async for raw in socket:  # type: ignore[attr-defined]
+            payload = orjson.loads(raw)
+            kind = payload.get("type")
+            if kind == "chunk":
+                timeline.add(base64.b64decode(payload["data"]))
+            elif kind == "error":
+                result.error = str(payload.get("error", "cartesia stream error"))
+                break
+            elif kind == "done" or payload.get("done"):
+                break
+
+    async def synthesize_stream(self, prompt: TtsPrompt) -> TtsResult:
+        """Synthesize over the WebSocket, timing the first audio frame."""
+        result = self._result(prompt, Mode.STREAM)
         body = self._body(prompt)
         body["context_id"] = f"{self.key}-{prompt.prompt_id}"
 
-        chunks: list[bytes] = []
-        started = time.perf_counter()
-
-        async with connect(
-            f"{WS_URL}?{urlencode(params)}", max_size=None, open_timeout=30.0
-        ) as socket:
+        url = self._ws_url()
+        timeline = ChunkTimeline()
+        async with connect(url, max_size=None, open_timeout=30.0) as socket:
             await socket.send(orjson.dumps(body).decode())
-            async for raw in socket:
-                payload = orjson.loads(raw)
-                kind = payload.get("type")
-                if kind == "chunk":
-                    if result.ttfb_s is None:
-                        result.ttfb_s = time.perf_counter() - started
-                    chunks.append(base64.b64decode(payload["data"]))
-                elif kind == "error":
-                    result.error = str(payload.get("error", "cartesia stream error"))
-                    break
-                elif kind == "done" or payload.get("done"):
-                    break
+            await self._consume(socket, result, timeline)
 
-        result.total_s = time.perf_counter() - started
-        return _finish(result, b"".join(chunks))
+        return _finish_stream(result, timeline)
+
+    async def synthesize_incremental(
+        self, prompt: TtsPrompt, *, token_rate: float
+    ) -> TtsResult:
+        """Feed the transcript in word pieces over one WebSocket context.
+
+        Cartesia's WebSocket accepts continuations: messages sharing a
+        ``context_id`` with ``continue: true`` append transcript to the same
+        generation, closed by an empty transcript with ``continue: false``.
+        That documented input-streaming path is what a voice agent uses while
+        its language model is still talking, so this lane measures it.
+        """
+        result = self._result(prompt, Mode.STREAM)
+        result.raw["input_streaming"] = True
+        base = self._body(prompt)
+        base["context_id"] = f"{self.key}-{prompt.prompt_id}-incremental"
+
+        url = self._ws_url()
+        pieces = token_pieces(prompt.text)
+        result.raw["text_pieces"] = len(pieces)
+        timeline = ChunkTimeline()
+        async with connect(url, max_size=None, open_timeout=30.0) as socket:
+
+            async def feed() -> None:
+                async for piece in pace_tokens(pieces, token_rate):
+                    message = {**base, "transcript": piece, "continue": True}
+                    await socket.send(orjson.dumps(message).decode())
+                closing = {**base, "transcript": "", "continue": False}
+                await socket.send(orjson.dumps(closing).decode())
+
+            feeder = asyncio.create_task(feed())
+            try:
+                await self._consume(socket, result, timeline)
+            finally:
+                # A server-side error ends consumption early; the feeder must
+                # not keep pacing text into a dead generation, and its own
+                # failure must not mask the error already recorded.
+                if not feeder.done():
+                    feeder.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await feeder
+
+        return _finish_stream(result, timeline)
 
 
 def _finish(result: TtsResult, audio: bytes) -> TtsResult:
@@ -136,6 +192,13 @@ def _finish(result: TtsResult, audio: bytes) -> TtsResult:
     result.audio_s = decode_audio_duration(
         audio, encoding=result.encoding, sample_rate=result.sample_rate
     )
+    return result
+
+
+def _finish_stream(result: TtsResult, timeline: ChunkTimeline) -> TtsResult:
+    """Attach streamed audio and stamp the chunk-timing metrics."""
+    _finish(result, timeline.audio)
+    stamp_stream_timing(result, timeline)
     return result
 
 

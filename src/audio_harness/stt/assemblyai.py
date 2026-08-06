@@ -12,7 +12,7 @@ from websockets.asyncio.client import ClientConnection
 
 from ..audio import wrap_wav
 from ..config import require_env
-from ..types import AudioClip, Mode, SttResult
+from ..types import AudioClip, EventKind, Mode, SttResult
 from .base import StreamTimeline, SttProvider, raise_for_status, register
 from .ws import StreamProtocolError, run_stream
 
@@ -29,6 +29,13 @@ class AssemblyAIUniversal35Pro(SttProvider):
         model: Speech model identifier; defaults to ``universal-3-5-pro``.
         format_turns: Whether streaming turns arrive punctuated and cased.
         language: Streaming language pin; defaults to the clip's language.
+        end_of_turn_confidence_threshold: Confidence (0-1, server default
+            0.4) above which the model may end a turn early.
+        min_turn_silence: Minimum silence in ms before an end-of-turn check
+            fires (server default 400).
+        max_turn_silence: Silence in ms that forces a turn to end regardless
+            of confidence (server default 1280).
+        vad_threshold: VAD sensitivity (server default 0.4).
 
     The v3 socket accepts (as of 2026-08): en, es, de, fr, it, pt, tr, nl,
     sv, no, da, fi, hi, vi, ar, he, ja, ur, zh, ru, ko, multi. Anything else
@@ -120,6 +127,17 @@ class AssemblyAIUniversal35Pro(SttProvider):
             # lane. The batch endpoint already pins language_code — parity.
             "language": str(self.options.get("language", clip.language.split("-")[0])),
         }
+        knobs = {
+            name: self.options[name]
+            for name in (
+                "end_of_turn_confidence_threshold",
+                "min_turn_silence",
+                "max_turn_silence",
+                "vad_threshold",
+            )
+            if name in self.options
+        }
+        params.update({name: str(value) for name, value in knobs.items()})
 
         async def terminate(socket: ClientConnection) -> None:
             await socket.send(orjson.dumps({"type": "Terminate"}).decode())
@@ -131,7 +149,7 @@ class AssemblyAIUniversal35Pro(SttProvider):
             chunk_ms=chunk_ms,
             realtime=realtime,
             timeline=timeline,
-            handle_message=_handle_message,
+            handle_message=_TurnHandler(),
             on_input_done=terminate,
         )
 
@@ -140,30 +158,53 @@ class AssemblyAIUniversal35Pro(SttProvider):
         result.ttft_s = timeline.ttft_s
         result.finalize_s = timeline.finalize_s
         result.total_s = timeline.total_s
+        result.raw["ws_rtt_s"] = timeline.ws_rtt_s
+        # AssemblyAI's end_of_turn is a genuine end-of-utterance decision and
+        # its turn detection is always on, so the lane is always EOU-capable.
+        result.raw["eou_source"] = "end_of_turn"
+        result.raw["endpoint_config"] = knobs
         return result
 
 
-def _handle_message(payload: Any, timeline: StreamTimeline) -> bool:
-    """Record one streaming event.
+class _TurnHandler:
+    """Records streaming events, deduplicating end-of-turn decisions.
 
     Each ``Turn`` frame restates the whole transcript for that turn, so only
-    the ``end_of_turn`` frames are joined to form the final transcript.
+    the ``end_of_turn`` frames are joined to form the final transcript. With
+    ``format_turns`` the server may emit two ``end_of_turn`` frames for one
+    ``turn_order`` (unformatted, then formatted); the turn's *decision* time
+    is the first one, so only that frame carries the EOU kind.
     """
-    if not isinstance(payload, dict):
-        return False
-    kind = payload.get("type")
 
-    if kind == "Error" or payload.get("error"):
-        raise StreamProtocolError(
-            f"assemblyai: {payload.get('error') or payload.get('message') or payload}"
+    __slots__ = ("_eou_turns",)
+
+    def __init__(self) -> None:
+        self._eou_turns: set[int] = set()
+
+    def __call__(self, payload: Any, timeline: StreamTimeline) -> bool:
+        if not isinstance(payload, dict):
+            return False
+        kind = payload.get("type")
+
+        if kind == "Error" or payload.get("error"):
+            raise StreamProtocolError(
+                f"assemblyai: "
+                f"{payload.get('error') or payload.get('message') or payload}"
+            )
+        if kind == "Termination":
+            return True
+        if kind != "Turn":
+            return False
+
+        end_of_turn = bool(payload.get("end_of_turn"))
+        turn_order = int(payload.get("turn_order") or 0)
+        first_decision = end_of_turn and turn_order not in self._eou_turns
+        if first_decision:
+            self._eou_turns.add(turn_order)
+
+        timeline.record(
+            str(payload.get("transcript", "")),
+            is_final=end_of_turn,
+            kind=EventKind.EOU if first_decision else "",
         )
-    if kind == "Termination":
-        return True
-    if kind != "Turn":
         return False
-
-    timeline.record(
-        str(payload.get("transcript", "")),
-        is_final=bool(payload.get("end_of_turn")),
-    )
-    return False

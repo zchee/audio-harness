@@ -288,6 +288,10 @@ def tts_command(
     markdown = report.render_tts_markdown(frame)
     _emit(path, "TTS", markdown)
 
+    delta = report.tts_mode_delta_frame(results, config.dataset.language)
+    if not delta.is_empty():
+        _emit(path, "TTS-delta", report.render_tts_mode_delta_markdown(delta))
+
 
 def _results_kind(path: Path) -> str:
     """Detect whether a results file holds STT or TTS runs.
@@ -371,12 +375,41 @@ def report_command(
         markdown = report.render_stt_markdown(frame)
         _emit(results[0], "STT", markdown)
 
+        from . import snr
+
+        snr_rows = snr.summarize_snr(merged_stt, language)
+        if snr_rows:
+            snr_markdown = snr.render_snr_markdown(snr_rows)
+            console.print()
+            console.print(snr_markdown)
+            snr_path = results[0].parent / "snr-report.md"
+            snr_path.write_text(
+                f"# SNR robustness\n\n{snr_markdown}\n", encoding="utf-8"
+            )
+            console.print(f"[dim]snr report:[/dim]  {snr_path}")
+
+        from . import endpointing
+
+        endpoint_summaries = endpointing.summarize_endpointing(merged_stt, language)
+        if any(s.hold_pauses or s.eou_source for s in endpoint_summaries):
+            _emit(
+                results[0],
+                "Endpointing",
+                endpointing.render_endpointing_markdown(endpoint_summaries),
+            )
+
         if plots:
-            from . import plot
+            from . import metrics, plot
 
             charts = plot.render_all(
                 frame, results[0].parent / "charts", metric=latency_metric
             )
+            hallucination = plot.plot_hallucination(
+                list(metrics.summarize_hallucination(merged_stt, language)),
+                results[0].parent / "charts" / "hallucination.png",
+            )
+            if hallucination is not None:
+                charts.append(hallucination)
             for chart in charts:
                 console.print(f"[dim]chart:[/dim]       {chart}")
             if not charts:
@@ -389,6 +422,19 @@ def report_command(
         tts_frame = report.tts_summary_frame(merged_tts, language)
         tts_markdown = report.render_tts_markdown(tts_frame)
         _emit(results[0], "TTS", tts_markdown)
+
+        delta = report.tts_mode_delta_frame(merged_tts, language)
+        if not delta.is_empty():
+            _emit(results[0], "TTS-delta", report.render_tts_mode_delta_markdown(delta))
+
+        if plots:
+            from . import plot
+
+            tts_chart = plot.plot_tts_latency(
+                tts_frame, results[0].parent / "charts" / "tts_latency.png"
+            )
+            if tts_chart is not None:
+                console.print(f"[dim]chart:[/dim]       {tts_chart}")
 
 
 def _emit(results_path: Path, title: str, markdown: str) -> None:
@@ -405,6 +451,93 @@ def _emit(results_path: Path, title: str, markdown: str) -> None:
     console.print()
     console.print(f"[dim]raw results:[/dim] {results_path}")
     console.print(f"[dim]report:[/dim]      {report_path}")
+
+
+@app.command("guardrail")
+def guardrail_command(
+    source: Annotated[
+        Path,
+        typer.Argument(help="Directory of saved TTS audio, or a tts-results.jsonl."),
+    ],
+    baseline: Annotated[
+        Path,
+        typer.Option(help="JSON file storing each provider's baseline mean MOS."),
+    ] = Path("mos-baseline.json"),
+    update_baseline: Annotated[
+        bool,
+        typer.Option(
+            "--update-baseline",
+            help="Overwrite the baseline with this run's means.",
+        ),
+    ] = False,
+) -> None:
+    """Score saved TTS audio with Distill-MOS as a regression tripwire.
+
+    This is a regression guardrail, NOT a quality ranking across providers:
+    single-utterance MOS predictors collapse out-of-domain, so this only ever
+    compares a provider's audio against its own recorded baseline, alerting
+    when the mean drops by more than the guardrail's threshold.
+
+    Requires the optional dependency group: uv sync --extra guardrail-mos.
+    """
+    from . import tts_quality
+
+    if not source.exists():
+        console.print(f"[red]guardrail error:[/red] source not found: {source}")
+        raise typer.Exit(code=2)
+
+    try:
+        summaries = tts_quality.run_guardrail(
+            source, baseline_path=baseline, update_baseline=update_baseline
+        )
+    except RuntimeError as exc:
+        console.print(f"[red]guardrail error:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+
+    if not summaries:
+        console.print("[yellow]no scoreable audio found[/yellow]")
+        raise typer.Exit(code=0)
+
+    table = Table(
+        title="Distill-MOS regression guardrail — tripwire only, not a ranking",
+        show_lines=False,
+    )
+    table.add_column("Provider")
+    table.add_column("Clips", justify="right")
+    table.add_column("Mean MOS", justify="right")
+    table.add_column("Baseline", justify="right")
+    table.add_column("Delta", justify="right")
+    table.add_column("Status")
+
+    for summary in summaries:
+        delta = summary.delta
+        if summary.alert:
+            status = "[red]ALERT[/red]"
+        elif delta is None:
+            status = "[dim]no baseline[/dim]"
+        else:
+            status = "[green]ok[/green]"
+        table.add_row(
+            summary.provider,
+            str(summary.clips),
+            f"{summary.mean_mos:.2f}",
+            f"{summary.baseline_mos:.2f}" if summary.baseline_mos is not None else "—",
+            f"{delta:+.2f}" if delta is not None else "—",
+            status,
+        )
+
+    console.print(table)
+    if update_baseline:
+        console.print(f"[dim]baseline updated:[/dim] {baseline}")
+
+    alerted = [s for s in summaries if s.alert]
+    if alerted:
+        names = ", ".join(s.provider for s in alerted)
+        console.print(
+            f"[red]{len(alerted)} provider(s) dropped more than "
+            f"{tts_quality.REGRESSION_THRESHOLD} MOS vs baseline:[/red] {names}"
+        )
+        raise typer.Exit(code=1)
 
 
 def main() -> None:

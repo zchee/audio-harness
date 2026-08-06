@@ -1,0 +1,70 @@
+# Commercial-safe multilingual STT lane: YODAS2 + Granary.
+#
+#   uv run python tools/curate_yodas.py --out data/curated   # refresh manifests
+#   uv run audio-harness stt configs/stt-yodas.yaml
+#
+# This replaces Speech-MASSIVE (CC-BY-NC-SA, demoted to
+# configs/stt-speech-massive-internal.yaml) for anything published externally.
+# Sources: YODAS2 (CC BY 3.0, manually subtitled YouTube talk content, all 12
+# languages) and NVIDIA Granary ytc (CC BY 4.0 manifests over YouTube-Commons,
+# the 8 EU languages). Manifests carry ids/offsets/transcripts only — audio is
+# fetched from the upstream host at load time and never redistributed.
+#
+# GOLD RULE: every manifest row carries gold_status. Transcripts count as gold
+# for a language only after a human-verified sample reaches subtitle-vs-audio
+# CER < 5%; until then reports must treat these rates as subtitle-relative,
+# not ground truth. tools/curate_yodas.py always writes "unverified".
+#
+# Audio is fetched at load time: each referenced YODAS2 shard is streamed
+# once (early-stopping, never stored) and the cut segments cache under
+# data/cache/curated/, so repeat runs are offline. Granary ytc/voxpopuli
+# rows have no fetchable audio host and are skipped with a note — their
+# transcripts remain for text-only work; granary/yodas rows (ru) load fine.
+# Unverified-gold references are excluded from ranked accuracy automatically
+# (see the report legend); they still measure latency and churn.
+
+stt:
+  - name: deepgram-nova3
+    modes: [stream]
+    options: { model: nova-3-multilingual, language: multi }
+  - name: elevenlabs-scribe2
+    modes: [stream]
+  - name: assemblyai-universal35pro
+    modes: [stream]
+  - name: soniox-rt-v5
+    modes: [stream]
+  - name: speechmatics-enhanced
+    modes: [stream]
+  - name: google-chirp3
+    modes: [stream]
+
+dataset:
+  sources:
+    - { manifest: "data/curated/yodas2-ar-SA.jsonl", language: ar-SA }
+    - { manifest: "data/curated/yodas2-de-DE.jsonl", language: de-DE }
+    - { manifest: "data/curated/yodas2-es-ES.jsonl", language: es-ES }
+    - { manifest: "data/curated/yodas2-fr-FR.jsonl", language: fr-FR }
+    - { manifest: "data/curated/yodas2-hu-HU.jsonl", language: hu-HU }
+    - { manifest: "data/curated/yodas2-ko-KR.jsonl", language: ko-KR }
+    - { manifest: "data/curated/yodas2-nl-NL.jsonl", language: nl-NL }
+    - { manifest: "data/curated/yodas2-pl-PL.jsonl", language: pl-PL }
+    - { manifest: "data/curated/yodas2-pt-PT.jsonl", language: pt-PT }
+    - { manifest: "data/curated/yodas2-ru-RU.jsonl", language: ru-RU }
+    - { manifest: "data/curated/yodas2-tr-TR.jsonl", language: tr-TR }
+    - { manifest: "data/curated/yodas2-vi-VN.jsonl", language: vi-VN }
+    - { manifest: "data/curated/granary-de-DE.jsonl", language: de-DE }
+    - { manifest: "data/curated/granary-es-ES.jsonl", language: es-ES }
+    - { manifest: "data/curated/granary-fr-FR.jsonl", language: fr-FR }
+    - { manifest: "data/curated/granary-hu-HU.jsonl", language: hu-HU }
+    - { manifest: "data/curated/granary-nl-NL.jsonl", language: nl-NL }
+    - { manifest: "data/curated/granary-pl-PL.jsonl", language: pl-PL }
+    - { manifest: "data/curated/granary-pt-PT.jsonl", language: pt-PT }
+    - { manifest: "data/curated/granary-ru-RU.jsonl", language: ru-RU }
+
+run:
+  repeats: 1
+  warmup: 1
+  provider_concurrency: 5
+  vendor_concurrency: 1
+  timeout_s: 300
+  output_dir: results

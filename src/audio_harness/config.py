@@ -131,8 +131,27 @@ class SourceConfig:
         id_column: Parquet column holding the clip identifier.
         audio_column: Parquet column holding the audio.
         text_column: Parquet column holding the reference transcript.
-        limit: Maximum clips from this source.
-        sample_seed: Seed for a reproducible random subset.
+        limit: Maximum clips from this source. For synthetic sources this is
+            the clip count of the condition set.
+        sample_seed: Seed for a reproducible random subset. Synthetic sources
+            reuse it to pin noise selection, offsets and pairing.
+        synthetic: Generate clips instead of reading a corpus: ``silence``,
+            ``noise``, ``trailing_silence`` or ``low_snr`` (see
+            ``synthetic.py``). The derived kinds still read base utterances
+            from ``parquet``/``manifest``; the generated kinds need neither.
+        noise_dir: Directory of noise recordings (MUSAN, CC BY 4.0) for the
+            ``noise`` and ``low_snr`` kinds.
+        duration_s: Length of generated ``silence``/``noise`` clips.
+        trailing_silence_s: Silence appended by ``trailing_silence``.
+        snr_db: Active-speech SNR targeted by ``low_snr``; negative values
+            put the speech below the noise.
+        silence_spans_column: Parquet column of labeled silence spans
+            (``{start, end}`` structs, eot-bench schema). The final span is
+            the true end of the turn; earlier spans become the clip's
+            mid-turn ``pauses`` and ``speech_end_s`` comes from the label
+            instead of energy detection.
+        words_column: Parquet column of word timings; joined into a
+            reference transcript when the corpus has no plain-text column.
     """
 
     parquet: str | None = None
@@ -143,6 +162,13 @@ class SourceConfig:
     text_column: str = "transcription"
     limit: int | None = None
     sample_seed: int | None = None
+    synthetic: str | None = None
+    noise_dir: str | None = None
+    duration_s: float | None = None
+    trailing_silence_s: float | None = None
+    snr_db: float | None = None
+    silence_spans_column: str | None = None
+    words_column: str | None = None
 
 
 @dataclass(slots=True)
@@ -170,6 +196,10 @@ class DatasetConfig:
             this seed instead of the first N rows. Corpora are often ordered by
             length or source, so the head is not a representative subset.
         prompts: Text file with one TTS prompt per line.
+        silence_spans_column: Parquet column of labeled silence spans; acts
+            as the shared default for every source (see ``SourceConfig``).
+        words_column: Parquet column of word timings; shared default for
+            every source.
     """
 
     manifest: str | None = None
@@ -181,6 +211,8 @@ class DatasetConfig:
     limit: int | None = None
     sample_seed: int | None = None
     prompts: str | None = None
+    silence_spans_column: str | None = None
+    words_column: str | None = None
     sources: list[SourceConfig] = field(default_factory=list)
 
     def resolved_sources(self) -> list[SourceConfig]:
@@ -201,6 +233,8 @@ class DatasetConfig:
                 text_column=self.text_column,
                 limit=self.limit,
                 sample_seed=self.sample_seed,
+                silence_spans_column=self.silence_spans_column,
+                words_column=self.words_column,
             )
         ]
 
@@ -229,6 +263,17 @@ class RunConfig:
         retry_backoff_s: Base delay before a retry; doubles per attempt.
         settle_ms: Pause between streaming clips in one lane, giving the vendor
             time to release the finished session before the next one opens.
+        tts_incremental_text: Feed TTS prompts word-by-word at LLM cadence on
+            streaming lanes whose wire protocol accepts appended text. Lanes
+            without protocol support fall back to whole-prompt streaming and
+            record that they did, so the lanes stay distinguishable.
+        tts_token_rate: Simulated LLM decode speed for the incremental lane,
+            in tokens per second; a token is approximated as four characters.
+        tts_load_concurrency: When above one, repeat the streaming TTS prompt
+            set with this many syntheses in flight at once against each
+            adapter. Those runs are tagged with the load factor and reported
+            as their own lane, so queueing under load is visible without
+            polluting the sequential percentiles.
         output_dir: Directory receiving result JSONL and reports.
     """
 
@@ -242,6 +287,9 @@ class RunConfig:
     transient_retries: int = 3
     retry_backoff_s: float = 3.0
     settle_ms: int = 250
+    tts_incremental_text: bool = False
+    tts_token_rate: float = 40.0
+    tts_load_concurrency: int = 1
     output_dir: str = "results"
 
 
@@ -347,9 +395,14 @@ def _dataset(raw: dict[str, Any]) -> DatasetConfig:
             raise ConfigError(
                 f"dataset.sources entry has unknown key(s): {', '.join(unknown)}"
             )
-        if not merged.get("parquet") and not merged.get("manifest"):
+        if (
+            not merged.get("parquet")
+            and not merged.get("manifest")
+            and not merged.get("synthetic")
+        ):
             raise ConfigError(
-                f"dataset.sources entry needs a parquet or manifest: {entry!r}"
+                f"dataset.sources entry needs a parquet or manifest corpus, "
+                f"or a synthetic kind: {entry!r}"
             )
         sources.append(SourceConfig(**merged))
 
