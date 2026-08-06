@@ -10,7 +10,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 import orjson
-from websockets.asyncio.client import connect
+from websockets.asyncio.client import ClientConnection, connect
 
 from ..audio import decode_audio_duration
 from ..config import require_env
@@ -113,10 +113,10 @@ class _CartesiaBase(TtsProvider):
         return f"{WS_URL}?{urlencode(params)}"
 
     async def _consume(
-        self, socket: object, result: TtsResult, timeline: ChunkTimeline
+        self, socket: ClientConnection, result: TtsResult, timeline: ChunkTimeline
     ) -> None:
         """Drain one WebSocket generation into the timeline."""
-        async for raw in socket:  # type: ignore[attr-defined]
+        async for raw in socket:
             payload = orjson.loads(raw)
             kind = payload.get("type")
             if kind == "chunk":

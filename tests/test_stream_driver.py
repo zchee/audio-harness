@@ -15,6 +15,7 @@ from collections.abc import AsyncIterator
 import orjson
 import pytest
 import websockets
+from websockets.asyncio.client import ClientConnection
 from websockets.asyncio.server import ServerConnection, serve
 
 from audio_harness.stt.base import StreamTimeline
@@ -130,8 +131,8 @@ async def drive(
     """Run the driver against the test server with the toy protocol."""
     timeline = StreamTimeline()
 
-    async def eos(socket: object) -> None:
-        await socket.send(orjson.dumps({"type": "eos"}).decode())  # type: ignore[attr-defined]
+    async def eos(socket: ClientConnection) -> None:
+        await socket.send(orjson.dumps({"type": "eos"}).decode())
 
     await run_stream(
         url=url,

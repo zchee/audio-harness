@@ -37,6 +37,7 @@ from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import jiwer
 import numpy as np
@@ -48,6 +49,9 @@ from ..entities import score_entities
 from ..metrics import ZERO_COUNTS, ErrorCounts, percentile, score_pair
 from ..normalize import comparison_fold_for, normalizer_for, uses_character_metric
 from ..types import SttResult
+
+if TYPE_CHECKING:
+    from google.genai import Client
 
 JUDGE_MODEL = "gemini-3.6-flash"
 """Pinned judge model. An alias like ``gemini-flash-latest`` would silently
@@ -333,9 +337,9 @@ class GeminiJudge:
     def __init__(self, api_key: str | None = None) -> None:
         """Store the key override and defer client construction."""
         self._api_key = api_key
-        self._client: object | None = None
+        self._client: Client | None = None
 
-    def _genai_client(self) -> object:
+    def _genai_client(self) -> Client:
         """Return a lazily constructed genai client."""
         if self._client is None:
             from google import genai
@@ -349,7 +353,7 @@ class GeminiJudge:
         from google.genai import types as genai_types
 
         client = self._genai_client()
-        response = client.models.generate_content(  # type: ignore[attr-defined]
+        response = client.models.generate_content(
             model=JUDGE_MODEL,
             contents=build_prompt(item),
             config=genai_types.GenerateContentConfig(
@@ -635,6 +639,11 @@ def roberta_embedder() -> Callable[[str], np.ndarray]:
     tokenizer = AutoTokenizer.from_pretrained(
         SEMASCORE_MODEL, revision=SEMASCORE_REVISION
     )
+    if tokenizer is None:
+        raise RuntimeError(
+            f"AutoTokenizer.from_pretrained returned no tokenizer for "
+            f"{SEMASCORE_MODEL}@{SEMASCORE_REVISION}"
+        )
     model = AutoModel.from_pretrained(SEMASCORE_MODEL, revision=SEMASCORE_REVISION)
     model.eval()
     cache: dict[str, np.ndarray] = {}

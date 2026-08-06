@@ -18,6 +18,7 @@ from audio_harness.sim.interview import (
     SimConfig,
     SlotValue,
     Turn,
+    VendorScore,
     average_ranks,
     canonical_value,
     clips_from_turns,
@@ -305,16 +306,15 @@ class TestRankingMath:
         composite = composite_ranking([], ["a", "b", "c"])
         composite.mean_rank = {"a": 1.0, "b": 2.0, "c": 3.0}
 
-        class _Score:
-            def __init__(self, success: float) -> None:
-                self.success = success
+        def score(provider: str, correct: int) -> VendorScore:
+            return VendorScore(provider=provider, scorable=10, correct=correct)
 
         passing = evaluate_gate(
-            {"a": _Score(0.9), "b": _Score(0.5), "c": _Score(0.1)},  # type: ignore[arg-type]
+            {"a": score("a", 9), "b": score("b", 5), "c": score("c", 1)},
             composite,
         )
         failing = evaluate_gate(
-            {"a": _Score(0.1), "b": _Score(0.5), "c": _Score(0.9)},  # type: ignore[arg-type]
+            {"a": score("a", 1), "b": score("b", 5), "c": score("c", 9)},
             composite,
         )
 

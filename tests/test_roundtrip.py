@@ -347,7 +347,7 @@ class TestResultsFiles:
     """JSONL moves to the list shape; both shapes stay readable."""
 
     def test_write_then_read_preserves_the_judge_list(self, tmp_path: Path) -> None:
-        verdicts = [
+        verdicts: list[dict[str, object]] = [
             {"provider": "deepgram-nova3", "text": "hello world", "error": None},
             {"provider": "whisper-local", "text": "hello word", "error": None},
         ]

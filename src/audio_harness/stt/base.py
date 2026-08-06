@@ -284,7 +284,7 @@ class SttProvider(abc.ABC):
 _REGISTRY: dict[str, type[SttProvider]] = {}
 
 
-def register(cls: type[SttProvider]) -> type[SttProvider]:
+def register[P: SttProvider](cls: type[P]) -> type[P]:
     """Register an STT adapter under its ``key`` class attribute.
 
     Args:

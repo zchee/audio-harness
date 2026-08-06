@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from typing import TypedDict
 
 import pytest
 
@@ -140,6 +141,14 @@ class TestNormalization:
         assert not uses_character_metric("en-US")
 
 
+class _EditCase(TypedDict):
+    """One edit-operation counting case."""
+
+    ref: str
+    hyp: str
+    expected: ErrorCounts
+
+
 class TestScorePair:
     """Edit counts drive every accuracy number in the report."""
 
@@ -149,7 +158,7 @@ class TestScorePair:
         assert counts.rate == 0.0
 
     def test_counts_each_edit_operation(self) -> None:
-        tests = {
+        tests: dict[str, _EditCase] = {
             "substitution": {
                 "ref": "the cat sat",
                 "hyp": "the dog sat",

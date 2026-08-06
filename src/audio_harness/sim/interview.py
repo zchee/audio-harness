@@ -863,7 +863,9 @@ def gemini_llm(model: str, usage: LlmUsage | None = None) -> LlmFn:
         )
         return response.text or ""
 
-    call.usage = usage  # type: ignore[attr-defined]
+    # Function attributes are untypeable; the closure carries its usage tally
+    # so callers can read token spend without a wrapper class.
+    call.usage = usage  # ty: ignore[unresolved-attribute]
     return call
 
 

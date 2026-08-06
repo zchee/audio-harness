@@ -295,7 +295,7 @@ async def pace_tokens(pieces: list[str], token_rate: float) -> AsyncIterator[str
 _REGISTRY: dict[str, type[TtsProvider]] = {}
 
 
-def register(cls: type[TtsProvider]) -> type[TtsProvider]:
+def register[P: TtsProvider](cls: type[P]) -> type[P]:
     """Register a TTS adapter under its ``key`` class attribute.
 
     Args:

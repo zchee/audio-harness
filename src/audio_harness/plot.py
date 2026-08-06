@@ -22,9 +22,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import polars as pl
+
+if TYPE_CHECKING:
+    from matplotlib.axes import Axes
+
+    from .metrics import HallucinationSummary
 
 # Chart chrome, shared by both charts: quiet ink/grid tokens, one hue for the
 # data, and a single highlight reserved for the Pareto band.
@@ -110,18 +116,18 @@ def _pareto(points: list[_Point]) -> list[_Point]:
     return sorted(optimal, key=lambda p: p.latency_ms)
 
 
-def _chrome(ax: object, *, xlabel: str, ylabel: str, title: str) -> None:
+def _chrome(ax: Axes, *, xlabel: str, ylabel: str, title: str) -> None:
     """Apply the shared recessive chart chrome."""
-    ax.grid(True, color=GRID, linewidth=0.8, zorder=0)  # type: ignore[attr-defined]
-    ax.set_axisbelow(True)  # type: ignore[attr-defined]
+    ax.grid(True, color=GRID, linewidth=0.8, zorder=0)
+    ax.set_axisbelow(True)
     for side in ("top", "right"):
-        ax.spines[side].set_visible(False)  # type: ignore[attr-defined]
+        ax.spines[side].set_visible(False)
     for side in ("left", "bottom"):
-        ax.spines[side].set_color(MUTED)  # type: ignore[attr-defined]
-    ax.tick_params(colors=INK_2, labelsize=10)  # type: ignore[attr-defined]
-    ax.set_xlabel(xlabel, fontsize=11, color=INK)  # type: ignore[attr-defined]
-    ax.set_ylabel(ylabel, fontsize=11, color=INK)  # type: ignore[attr-defined]
-    ax.set_title(title, fontsize=13, fontweight="bold", color=INK, pad=14)  # type: ignore[attr-defined]
+        ax.spines[side].set_color(MUTED)
+    ax.tick_params(colors=INK_2, labelsize=10)
+    ax.set_xlabel(xlabel, fontsize=11, color=INK)
+    ax.set_ylabel(ylabel, fontsize=11, color=INK)
+    ax.set_title(title, fontsize=13, fontweight="bold", color=INK, pad=14)
 
 
 def plot_pareto(
@@ -600,7 +606,7 @@ def _overview_matrix(
         if row is None:
             return None
         value = row.get(value_key)
-        return float(value) * scale if value is not None else None
+        return float(value) * scale if isinstance(value, int | float) else None
 
     def shades(values: list[float | None]) -> list[float]:
         present = [v for v in values if v is not None]
@@ -642,7 +648,7 @@ def _overview_matrix(
 
 
 def _draw_overview_panel(
-    ax: object,
+    ax: Axes,
     matrix: list[list[_Cell]],
     *,
     hue: str,
@@ -661,10 +667,10 @@ def _draw_overview_panel(
             else:
                 face = _mix(SURFACE, hue, 0.10 + 0.78 * cell.shade)
                 text_color = SURFACE if cell.shade > 0.62 else INK
-            ax.add_patch(  # type: ignore[attr-defined]
+            ax.add_patch(
                 Rectangle((x, y), 0.94, 0.88, facecolor=face, edgecolor=SURFACE, lw=1.5)
             )
-            ax.text(  # type: ignore[attr-defined]
+            ax.text(
                 x + 0.47,
                 y + 0.44,
                 cell.display,
@@ -674,19 +680,19 @@ def _draw_overview_panel(
                 color=text_color,
             )
 
-    ax.set_xlim(0, len(columns))  # type: ignore[attr-defined]
-    ax.set_ylim(len(matrix), -0.6)  # type: ignore[attr-defined]
-    ax.set_xticks([x + 0.47 for x in range(len(columns))])  # type: ignore[attr-defined]
-    ax.set_xticklabels(columns, fontsize=8.6, color=INK_2)  # type: ignore[attr-defined]
+    ax.set_xlim(0, len(columns))
+    ax.set_ylim(len(matrix), -0.6)
+    ax.set_xticks([x + 0.47 for x in range(len(columns))])
+    ax.set_xticklabels(columns, fontsize=8.6, color=INK_2)
     if providers is None:
-        ax.set_yticks([])  # type: ignore[attr-defined]
+        ax.set_yticks([])
     else:
-        ax.set_yticks([y + 0.44 for y in range(len(providers))])  # type: ignore[attr-defined]
-        ax.set_yticklabels(providers, fontsize=9.5, color=INK)  # type: ignore[attr-defined]
+        ax.set_yticks([y + 0.44 for y in range(len(providers))])
+        ax.set_yticklabels(providers, fontsize=9.5, color=INK)
     for side in ("top", "right", "left", "bottom"):
-        ax.spines[side].set_visible(False)  # type: ignore[attr-defined]
-    ax.tick_params(length=0)  # type: ignore[attr-defined]
-    ax.set_title(title, fontsize=11, color=INK, pad=10, loc="left")  # type: ignore[attr-defined]
+        ax.spines[side].set_visible(False)
+    ax.tick_params(length=0)
+    ax.set_title(title, fontsize=11, color=INK, pad=10, loc="left")
 
 
 def plot_overview(
@@ -739,7 +745,7 @@ def plot_overview(
     for language in languages:
         ordered = sorted(
             (row for row in rows if row["language"] == language),
-            key=lambda row: float(row["error_rate"]),  # type: ignore[arg-type]
+            key=lambda row: float(row["error_rate"]),
         )
         for position, row in enumerate(ordered, start=1):
             ranks.setdefault(str(row["provider"]), []).append(position)
@@ -902,12 +908,12 @@ def plot_tts_latency(
     ys = range(len(rows), 0, -1)
     max_x = 0.0
     for y, row in zip(ys, rows, strict=True):
-        ttfb = float(row["ttfb_p50_s"]) * 1000  # type: ignore[arg-type]
+        ttfb = float(row["ttfb_p50_s"]) * 1000
         ttfa = row.get("ttfa_p50_s")
         cold = row.get("ttfb_cold_s")
         max_x = max(max_x, ttfb)
         if ttfa is not None:
-            ttfa_ms = float(ttfa) * 1000  # type: ignore[arg-type]
+            ttfa_ms = float(ttfa) * 1000
             max_x = max(max_x, ttfa_ms)
             if ttfa_ms > ttfb:
                 gx = np.linspace(ttfb, ttfa_ms, 60)
@@ -931,7 +937,7 @@ def plot_tts_latency(
                 zorder=4,
             )
         if cold is not None:
-            cold_ms = float(cold) * 1000  # type: ignore[arg-type]
+            cold_ms = float(cold) * 1000
             max_x = max(max_x, cold_ms)
             left.scatter(
                 [cold_ms],
@@ -991,7 +997,7 @@ def plot_tts_latency(
     )
 
     gaps = [
-        (y, float(row["gap_p99_s"]) * 1000)  # type: ignore[arg-type]
+        (y, float(row["gap_p99_s"]) * 1000)
         for y, row in zip(range(len(rows), 0, -1), rows, strict=True)
         if row.get("gap_p99_s") is not None
     ]
@@ -1030,7 +1036,7 @@ _NO_SPEECH_CONDITIONS = {"silence", "noise", "no_speech"}
 
 
 def plot_hallucination(
-    summaries: list[object], output: Path, *, mode: str = "stream"
+    summaries: list[HallucinationSummary], output: Path, *, mode: str = "stream"
 ) -> Path | None:
     """Render fabrication and phantom-final rates per provider and condition.
 
@@ -1087,14 +1093,14 @@ def plot_hallucination(
     fig.patch.set_facecolor(SURFACE)
 
     def draw(
-        ax: object,
+        ax: Axes,
         rates: dict[tuple[str, str], float],
         panel_conditions: list[str],
         *,
         ylabel: str,
         title: str,
     ) -> None:
-        ax.set_facecolor(SURFACE)  # type: ignore[attr-defined]
+        ax.set_facecolor(SURFACE)
         width = 0.8 / len(providers)
         for index, provider in enumerate(providers):
             offsets = [
@@ -1102,7 +1108,7 @@ def plot_hallucination(
                 for cond_index in range(len(panel_conditions))
             ]
             values = [rates.get((provider, c)) for c in panel_conditions]
-            ax.bar(  # type: ignore[attr-defined]
+            ax.bar(
                 [o for o, v in zip(offsets, values, strict=True) if v is not None],
                 [v for v in values if v is not None],
                 width=width * 0.92,
@@ -1112,12 +1118,12 @@ def plot_hallucination(
                 label=provider,
                 zorder=3,
             )
-        ax.set_xticks(range(len(panel_conditions)))  # type: ignore[attr-defined]
-        ax.set_xticklabels(panel_conditions, fontsize=9, color=INK_2)  # type: ignore[attr-defined]
-        ax.set_ylim(0, 105)  # type: ignore[attr-defined]
+        ax.set_xticks(range(len(panel_conditions)))
+        ax.set_xticklabels(panel_conditions, fontsize=9, color=INK_2)
+        ax.set_ylim(0, 105)
         _chrome(ax, xlabel="", ylabel=ylabel, title=title)
-        ax.grid(True, axis="y", color=GRID, linewidth=0.8, zorder=0)  # type: ignore[attr-defined]
-        ax.grid(False, axis="x")  # type: ignore[attr-defined]
+        ax.grid(True, axis="y", color=GRID, linewidth=0.8, zorder=0)
+        ax.grid(False, axis="x")
 
     draw(
         top,
@@ -1209,4 +1215,5 @@ def _mix(hex_color: str, other: str, t: float) -> tuple[float, float, float]:
     """Blend ``hex_color`` toward ``other`` by ``t`` in [0, 1]."""
     a = [int(hex_color[i : i + 2], 16) for i in (1, 3, 5)]
     b = [int(other[i : i + 2], 16) for i in (1, 3, 5)]
-    return tuple((av + (bv - av) * t) / 255 for av, bv in zip(a, b, strict=True))
+    red, green, blue = ((av + (bv - av) * t) / 255 for av, bv in zip(a, b, strict=True))
+    return (red, green, blue)

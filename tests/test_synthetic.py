@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
+from typing import TypedDict
 
 import numpy as np
 import polars as pl
@@ -87,6 +88,13 @@ class TestSilence:
         )
 
 
+class _ErrorCase(TypedDict):
+    """One synthetic-source misconfiguration case."""
+
+    source: SourceConfig
+    match: str
+
+
 class TestNoise:
     """Noise-only clips must be reproducible cuts of the noise corpus."""
 
@@ -123,7 +131,7 @@ class TestNoise:
     def test_error_cases(self, tmp_path: Path) -> None:
         empty = tmp_path / "empty"
         empty.mkdir()
-        tests = {
+        tests: dict[str, _ErrorCase] = {
             "missing noise_dir names the fetch tool": {
                 "source": SourceConfig(synthetic="noise", limit=2),
                 "match": "fetch_musan",

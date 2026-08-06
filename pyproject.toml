@@ -31,7 +31,7 @@ dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "ruff>=0.16.1",
-    "mypy>=2.3.0",
+    "ty>=0.0.69",
 ]
 # Local Whisper round-trip judge (Apple Silicon; see stt/whisper_local.py).
 # The numba floor keeps resolution on a line with Python 3.14 wheels; without
@@ -94,7 +94,5 @@ select = ["E", "F", "I", "N", "UP", "B", "SIM", "RUF"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 
-[tool.mypy]
-python_version = "3.14"
-strict = true
-warn_return_any = true
+[tool.ty.environment]
+python-version = "3.14"

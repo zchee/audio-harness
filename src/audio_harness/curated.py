@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import re
 import tarfile
-from collections.abc import Iterator
+from collections.abc import Buffer, Iterator
 from dataclasses import dataclass
 from io import RawIOBase
 from pathlib import Path
@@ -341,7 +341,7 @@ class _HttpStream(RawIOBase):
     def readable(self) -> bool:
         return True
 
-    def readinto(self, target: bytearray | memoryview) -> int:
+    def readinto(self, target: Buffer) -> int:
         view = memoryview(target)
         while len(self._buffer) < len(view):
             try:

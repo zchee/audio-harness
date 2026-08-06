@@ -9,6 +9,7 @@ would rank vendors by transcript chunking, the exact confound the
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TypedDict
 
 import pytest
 from google.cloud.speech_v2.types import cloud_speech
@@ -68,11 +69,18 @@ def _result(
     return result
 
 
+class _KindCase(TypedDict):
+    """One ``Partial.kind`` defaulting case."""
+
+    partial: Partial
+    expected: EventKind
+
+
 class TestEventModel:
     """Partial.kind defaults must preserve pre-migration behaviour."""
 
     def test_kind_defaults_from_finality(self) -> None:
-        tests = {
+        tests: dict[str, _KindCase] = {
             "interim stays interim": {
                 "partial": Partial(t_s=0.1, text="a", is_final=False),
                 "expected": EventKind.INTERIM,

@@ -406,7 +406,7 @@ def _dataset(raw: dict[str, Any]) -> DatasetConfig:
             )
         sources.append(SourceConfig(**merged))
 
-    return DatasetConfig(**{**shared, "sources": sources})
+    return DatasetConfig(**shared, sources=sources)
 
 
 def _roundtrip(raw: Any) -> list[ProviderConfig]:

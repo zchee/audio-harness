@@ -8,7 +8,9 @@ the opposite of what capacity planning needs.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 import polars as pl
 
@@ -460,7 +462,7 @@ class Column:
 
     header: str
     field: str
-    render: object
+    render: Callable[[Any], str]
 
 
 _STT_COLUMNS = [

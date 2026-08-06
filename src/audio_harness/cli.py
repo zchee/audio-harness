@@ -16,6 +16,7 @@ from . import doctor as doctor_module
 from . import report, runner, stt, tts
 from .config import PRICING_CHECKED, BenchmarkConfig, ConfigError
 from .dataset import DatasetError, load_clips, load_prompts
+from .types import SttResult, TtsResult
 
 app = typer.Typer(
     add_completion=False,
@@ -269,7 +270,7 @@ def tts_command(
 
     console.print(f"Loaded {len(prompts)} prompts, language {config.dataset.language}")
 
-    async def execute() -> list[object]:
+    async def execute() -> list[TtsResult]:
         results = await runner.run_tts(config, prompts, _progress())
         if config.roundtrip_stt:
             judges = ", ".join(judge.name for judge in config.roundtrip_stt)
@@ -309,6 +310,28 @@ def _results_kind(path: Path) -> str:
     return "stt"
 
 
+def _fold_lanes[R: SttResult | TtsResult](
+    by_lane: dict[tuple[str, str], list[R]], loaded: list[R]
+) -> int:
+    """Fold one results file into the per-lane map, later files winning.
+
+    Returns:
+        The number of runs folded in.
+    """
+    lanes: dict[tuple[str, str], list[R]] = {}
+    for item in loaded:
+        lanes.setdefault((item.provider, str(item.mode)), []).append(item)
+    for lane, runs in lanes.items():
+        earlier = by_lane.get(lane)
+        if earlier is not None:
+            console.print(
+                f"[yellow]superseded[/yellow] {lane[0]} {lane[1]}"
+                f" — {len(earlier)} earlier runs replaced by {len(runs)}"
+            )
+        by_lane[lane] = runs
+    return len(loaded)
+
+
 @app.command("report")
 def report_command(
     results: Annotated[
@@ -338,34 +361,22 @@ def report_command(
     merge" work: without it the superseded run would be averaged back in and
     the fix would look half-effective.
     """
-    by_lane: dict[str, dict[tuple[str, str], list[object]]] = {"stt": {}, "tts": {}}
+    stt_by_lane: dict[tuple[str, str], list[SttResult]] = {}
+    tts_by_lane: dict[tuple[str, str], list[TtsResult]] = {}
     for path in results:
         try:
             kind = _results_kind(path)
-            loaded = (
-                runner.read_tts_results(path)
-                if kind == "tts"
-                else runner.read_stt_results(path)
-            )
+            if kind == "tts":
+                count = _fold_lanes(tts_by_lane, runner.read_tts_results(path))
+            else:
+                count = _fold_lanes(stt_by_lane, runner.read_stt_results(path))
         except (ValueError, OSError) as exc:
             console.print(f"[red]results error:[/red] {exc}")
             raise typer.Exit(code=2) from exc
+        console.print(f"[dim]loaded[/dim] {count:4d} {kind} runs from {path}")
 
-        lanes: dict[tuple[str, str], list[object]] = {}
-        for item in loaded:
-            lanes.setdefault((item.provider, str(item.mode)), []).append(item)
-        for lane, runs in lanes.items():
-            earlier = by_lane[kind].get(lane)
-            if earlier is not None:
-                console.print(
-                    f"[yellow]superseded[/yellow] {lane[0]} {lane[1]}"
-                    f" — {len(earlier)} earlier runs replaced by {len(runs)}"
-                )
-            by_lane[kind][lane] = runs
-        console.print(f"[dim]loaded[/dim] {len(loaded):4d} {kind} runs from {path}")
-
-    merged_stt = [item for runs in by_lane["stt"].values() for item in runs]
-    merged_tts = [item for runs in by_lane["tts"].values() for item in runs]
+    merged_stt = [item for runs in stt_by_lane.values() for item in runs]
+    merged_tts = [item for runs in tts_by_lane.values() for item in runs]
     if not merged_stt and not merged_tts:
         console.print("[red]no results to report[/red]")
         raise typer.Exit(code=2)
@@ -872,7 +883,6 @@ def judge_semantic_command(
     from collections.abc import Callable
 
     from .judge import semantic
-    from .types import SttResult
 
     load_env_file(env_file)
 

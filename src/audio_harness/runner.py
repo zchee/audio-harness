@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -36,8 +37,8 @@ from .types import AudioClip, Mode, Partial, SttResult, TtsPrompt, TtsResult
 class Progress:
     """Callbacks the CLI uses to render progress without owning the loop."""
 
-    on_start: object = None
-    on_result: object = None
+    on_start: Callable[[str, str, int], None] | None = None
+    on_result: Callable[[str, str, bool], None] | None = None
 
     def start(self, provider: str, mode: str, total: int) -> None:
         """Announce that a provider/mode lane is beginning."""

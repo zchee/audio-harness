@@ -14,12 +14,14 @@ import contextlib
 import os
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import TypedDict
 
 import numpy as np
 import orjson
 import pytest
 import soundfile as sf
 import websockets
+from websockets.asyncio.client import ClientConnection
 from websockets.asyncio.server import ServerConnection, serve
 
 from audio_harness.config import BenchmarkConfig, ProviderConfig, RunConfig
@@ -67,11 +69,20 @@ def _result(
     return result
 
 
+class _RunsCase(TypedDict):
+    """One insertion-run detection case."""
+
+    ref: str
+    hyp: str
+    language: str
+    expected: list[int]
+
+
 class TestInsertionRuns:
     """Run lengths separate scattered noise from invented phrases."""
 
     def test_run_detection(self) -> None:
-        tests = {
+        tests: dict[str, _RunsCase] = {
             "no speech makes the whole hypothesis one run": {
                 "ref": "",
                 "hyp": "thank you for watching",
@@ -127,11 +138,19 @@ class TestInsertionRuns:
         )
 
 
+class _LoopCase(TypedDict):
+    """One n-gram loop detection case."""
+
+    text: str
+    language: str
+    expected: bool
+
+
 class TestNgramLoop:
     """Loop detection targets runaway decoding, not natural repetition."""
 
     def test_loop_detection(self) -> None:
-        tests = {
+        tests: dict[str, _LoopCase] = {
             "classic whisper loop": {
                 "text": "thank you thank you thank you",
                 "language": "en-US",
@@ -175,11 +194,18 @@ class TestNgramLoop:
             )
 
 
+class _PhantomCase(TypedDict):
+    """One phantom-final counting case."""
+
+    result: SttResult
+    expected: int
+
+
 class TestPhantomFinals:
     """A final on silence is a commitment to text that never happened."""
 
     def test_counts_only_no_speech_clips(self) -> None:
-        tests = {
+        tests: dict[str, _PhantomCase] = {
             "finals with text on silence count": {
                 "result": _result("silence-000", FABRICATED, finals=(FABRICATED,)),
                 "expected": 1,
@@ -394,8 +420,8 @@ class TestStreamPath:
                 )
             return False
 
-        async def eos(socket: object) -> None:
-            await socket.send(orjson.dumps({"type": "eos"}).decode())  # type: ignore[attr-defined]
+        async def eos(socket: ClientConnection) -> None:
+            await socket.send(orjson.dumps({"type": "eos"}).decode())
 
         await run_stream(
             url=fabricating_server,
