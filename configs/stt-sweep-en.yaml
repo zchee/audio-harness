@@ -1,0 +1,38 @@
+# Stage-2 new-lane sweep over the English pipecat corpus, for the canonical
+# en rankings (supersede-merge). Mirrors stt-xai-en.yaml.
+#
+#   uv run audio-harness stt configs/stt-sweep-en.yaml
+
+stt:
+  - name: deepgram-flux
+    modes: [stream]
+  - name: cartesia-ink2
+    modes: [stream]
+  - name: gladia-solaria3
+    modes: [batch]
+  - name: or-parakeet
+    modes: [batch]
+  - name: openai-gpt4o-transcribe
+    modes: [batch]
+  - name: openai-gpt4o-transcribe-diarize
+    modes: [batch]
+  - name: apple-speech-stt
+    modes: [stream]
+
+dataset:
+  parquet: data/hf/stt-benchmark-data/data/train-00000-of-00001.parquet
+  id_column: sample_id
+  audio_column: audio
+  text_column: transcription
+  language: en-US
+  limit: 30
+  sample_seed: 20260805
+
+run:
+  repeats: 1
+  warmup: 1
+  chunk_ms: 20
+  realtime: true
+  provider_concurrency: 3
+  timeout_s: 600
+  output_dir: results

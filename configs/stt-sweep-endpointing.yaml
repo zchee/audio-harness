@@ -1,0 +1,50 @@
+# Deepgram Flux on the endpointing bench — the lane this bench exists for:
+# its end-of-turn is a model decision, not VAD silence. Supersede-merges into
+# the canonical endpointing rankings. Cartesia Ink-2 is English-only and runs
+# through stt-sweep-endpointing-ink2.yaml instead.
+#
+#   uv run audio-harness stt configs/stt-sweep-endpointing.yaml
+
+stt:
+  - name: deepgram-flux
+    modes: [stream]
+    options:
+      model: flux-general-multi
+      language_hint: [en, ja, de, fr]
+      eot_threshold: 0.7
+      eot_timeout_ms: 5000
+      # eager_eot_threshold intentionally omitted: eager events are recorded
+      # as raw metadata, never scored as EOU.
+
+dataset:
+  id_column: id
+  audio_column: audio
+  silence_spans_column: silence_spans
+  words_column: words
+  sources:
+    - parquet: data/hf/eot-bench-data/data/en/validation-*.parquet
+      language: en-US
+      limit: 50
+      sample_seed: 20260806
+    - parquet: data/hf/eot-bench-data/data/ja/validation-*.parquet
+      language: ja-JP
+      limit: 50
+      sample_seed: 20260806
+    - parquet: data/hf/eot-bench-data/data/de/validation-*.parquet
+      language: de-DE
+      limit: 50
+      sample_seed: 20260806
+    - parquet: data/hf/eot-bench-data/data/fr/validation-*.parquet
+      language: fr-FR
+      limit: 50
+      sample_seed: 20260806
+
+run:
+  repeats: 1
+  warmup: 1
+  chunk_ms: 20
+  realtime: true
+  provider_concurrency: 1
+  vendor_concurrency: 1
+  timeout_s: 300
+  output_dir: results

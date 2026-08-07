@@ -1,0 +1,52 @@
+# Stage-2 new-lane sweep over the internal 12-language corpus. Results
+# supersede-merge into the canonical multilingual rankings, mirroring the
+# stt-xai.yaml lane pattern. INTERNAL ONLY: Speech-MASSIVE is CC BY-NC-SA.
+#
+#   uv run audio-harness stt configs/stt-sweep-multi.yaml
+#
+# gladia-solaria3 is NOT here: it accepts only en/fr/de/es/it, so it sweeps
+# through stt-sweep-multi-solaria3.yaml over the de/es/fr subset instead.
+
+stt:
+  - name: deepgram-flux
+    modes: [stream]
+    options:
+      model: flux-general-multi
+      language_hint: [ar, de, es, fr, hu, ko, nl, pl, pt, ru, tr, vi]
+  - name: or-parakeet
+    modes: [batch]
+  - name: openai-gpt4o-transcribe
+    modes: [batch]
+  - name: openai-gpt4o-transcribe-diarize
+    modes: [batch]
+  - name: apple-speech-stt
+    modes: [stream]
+
+dataset:
+  id_column: id
+  audio_column: audio
+  text_column: utt
+  limit: 30
+  sample_seed: 20260805
+  sources:
+    - { parquet: "data/hf/speech-massive/ar-SA/validation-*.parquet", language: ar-SA }
+    - { parquet: "data/hf/speech-massive/de-DE/validation-*.parquet", language: de-DE }
+    - { parquet: "data/hf/speech-massive/es-ES/validation-*.parquet", language: es-ES }
+    - { parquet: "data/hf/speech-massive/fr-FR/validation-*.parquet", language: fr-FR }
+    - { parquet: "data/hf/speech-massive/hu-HU/validation-*.parquet", language: hu-HU }
+    - { parquet: "data/hf/speech-massive/ko-KR/validation-*.parquet", language: ko-KR }
+    - { parquet: "data/hf/speech-massive/nl-NL/validation-*.parquet", language: nl-NL }
+    - { parquet: "data/hf/speech-massive/pl-PL/validation-*.parquet", language: pl-PL }
+    - { parquet: "data/hf/speech-massive/pt-PT/validation-*.parquet", language: pt-PT }
+    - { parquet: "data/hf/speech-massive/ru-RU/validation-*.parquet", language: ru-RU }
+    - { parquet: "data/hf/speech-massive/tr-TR/validation-*.parquet", language: tr-TR }
+    - { parquet: "data/hf/speech-massive/vi-VN/validation-*.parquet", language: vi-VN }
+
+run:
+  repeats: 1
+  warmup: 1
+  chunk_ms: 20
+  realtime: true
+  provider_concurrency: 3
+  timeout_s: 300
+  output_dir: results

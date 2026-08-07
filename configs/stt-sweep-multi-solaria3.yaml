@@ -1,0 +1,29 @@
+# Gladia Solaria-3 sweep over the internal-corpus languages it supports
+# (en/fr/de/es/it minus it/en here: the internal corpus carries de/es/fr).
+# The English lane runs in stt-sweep-en.yaml. INTERNAL ONLY (CC BY-NC-SA).
+#
+#   uv run audio-harness stt configs/stt-sweep-multi-solaria3.yaml
+
+stt:
+  - name: gladia-solaria3
+    modes: [batch]
+
+dataset:
+  id_column: id
+  audio_column: audio
+  text_column: utt
+  limit: 30
+  sample_seed: 20260805
+  sources:
+    - { parquet: "data/hf/speech-massive/de-DE/validation-*.parquet", language: de-DE }
+    - { parquet: "data/hf/speech-massive/es-ES/validation-*.parquet", language: es-ES }
+    - { parquet: "data/hf/speech-massive/fr-FR/validation-*.parquet", language: fr-FR }
+
+run:
+  repeats: 1
+  warmup: 1
+  chunk_ms: 20
+  realtime: true
+  provider_concurrency: 1
+  timeout_s: 600
+  output_dir: results

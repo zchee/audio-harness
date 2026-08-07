@@ -1,0 +1,28 @@
+# Stage-2 new-lane Japanese TTS sweep: only the two ja-capable additions.
+# mistral-voxtral-tts has no Japanese and xai starts English-first; the or-*
+# OSS lanes are English-voiced. Judge mirrors tts-ja.yaml (whisper-local only).
+#
+#   uv run audio-harness tts configs/tts-sweep-ja.yaml
+
+tts:
+  - name: elevenlabs-v3
+    modes: [batch, stream]
+    options:
+      voice_id: EXAVITQu4vr4xnSDxMaL
+  - name: gemini-tts-31
+    modes: [batch, stream]
+
+dataset:
+  prompts: data/prompts-ja/bench.txt
+  language: ja-JP
+  limit: null
+
+roundtrip_stt:
+  - name: whisper-local
+
+run:
+  repeats: 3
+  warmup: 1
+  provider_concurrency: 2
+  timeout_s: 300
+  output_dir: results

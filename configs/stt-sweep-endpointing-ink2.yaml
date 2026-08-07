@@ -1,0 +1,36 @@
+# Cartesia Ink-2 on the English slice of the endpointing bench: the
+# /stt/turns/websocket surface is English-only, so the other languages of the
+# canonical endpointing config cannot apply. Knobs are pinned explicitly so
+# endpoint_config records the effective configuration.
+#
+#   uv run audio-harness stt configs/stt-sweep-endpointing-ink2.yaml
+
+stt:
+  - name: cartesia-ink2
+    modes: [stream]
+    options:
+      turn_start_threshold: 0.8
+      turn_eager_end_threshold: 0.4
+      turn_end_threshold: 0.2
+      turn_end_timeout_ms: 5600
+
+dataset:
+  id_column: id
+  audio_column: audio
+  silence_spans_column: silence_spans
+  words_column: words
+  sources:
+    - parquet: data/hf/eot-bench-data/data/en/validation-*.parquet
+      language: en-US
+      limit: 50
+      sample_seed: 20260806
+
+run:
+  repeats: 1
+  warmup: 1
+  chunk_ms: 20
+  realtime: true
+  provider_concurrency: 1
+  vendor_concurrency: 1
+  timeout_s: 300
+  output_dir: results

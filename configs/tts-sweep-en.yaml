@@ -1,0 +1,50 @@
+# Stage-2 new-lane English TTS sweep (supersede-merges into the canonical en
+# TTS rankings). Judges mirror tts-en.yaml exactly — changing them changes
+# every score. The or-* lanes are OpenRouter-hosted (hosted-proxy latency
+# caveat rides every result) and batch-only.
+#
+#   uv run audio-harness tts configs/tts-sweep-en.yaml
+
+tts:
+  - name: elevenlabs-v3
+    modes: [batch, stream]
+    options:
+      # "Sarah" — same pinned premade voice as elevenlabs-flash25, so the
+      # model comparison is not a voice comparison.
+      voice_id: EXAVITQu4vr4xnSDxMaL
+  - name: gemini-tts-31
+    modes: [batch, stream]
+  - name: xai-grok-tts
+    modes: [batch, stream]
+  - name: mistral-voxtral-tts
+    modes: [batch, stream]
+  - name: or-kokoro
+    modes: [batch]
+  - name: or-orpheus
+    modes: [batch]
+  - name: or-csm
+    modes: [batch]
+  - name: or-zonos
+    modes: [batch]
+  - name: or-minimax-turbo
+    modes: [batch]
+  - name: or-minimax-hd
+    modes: [batch]
+
+dataset:
+  prompts: data/prompts-en.txt
+  language: en-US
+  limit: null
+
+roundtrip_stt:
+  - name: deepgram-nova3
+    options:
+      smart_format: false
+  - name: whisper-local
+
+run:
+  repeats: 3
+  warmup: 1
+  provider_concurrency: 3
+  timeout_s: 300
+  output_dir: results
