@@ -136,6 +136,12 @@ STT_PRICING: dict[str, SttPricing] = {
         note="on-device local compute; bills no hosted vendor. Latency and "
         "throughput depend on this Mac's Apple silicon, not a service",
     ),
+    "parakeet-ane": SttPricing(
+        batch_per_hour=0.0,
+        note="on-device local compute through the Swift/FluidAudio sidecar; "
+        "bills no hosted vendor. Throughput depends on this Mac's Apple "
+        "silicon (Neural Engine)",
+    ),
     "openai-live-transcribe": SttPricing(
         stream_per_hour=1.02,
         note="$0.017/audio-minute, the purpose-built low-latency live "

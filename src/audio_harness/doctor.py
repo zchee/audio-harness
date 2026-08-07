@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 import os
+import subprocess
 import sys
 from typing import Any
 
@@ -539,6 +540,54 @@ def _check_apple_speech() -> CheckResult:
     )
 
 
+def _check_parakeet_ane() -> CheckResult:
+    """Verify the Swift sidecar binary exists and its CoreML model loads.
+
+    ``selfcheck`` is the cheapest call that proves the whole lane: with a warm
+    model cache it answers in well under a second while exercising the binary,
+    FluidAudio and the CoreML model together. The first-ever call instead
+    downloads ~3 GB, so a timeout reports that condition rather than hanging.
+    """
+    from audio_harness.stt.parakeet_ane import BUILD_HINT, resolve_binary
+
+    binary = resolve_binary()
+    if not binary.is_file():
+        return CheckResult(
+            provider="Parakeet ANE",
+            env_var="PARAKEET_ANE_BINARY",
+            ok=False,
+            detail=f"sidecar binary not found — build it with: {BUILD_HINT}",
+            skipped=True,
+        )
+    try:
+        completed = subprocess.run([str(binary), "selfcheck"], capture_output=True, timeout=120, check=False)
+    except subprocess.TimeoutExpired:
+        return CheckResult(
+            provider="Parakeet ANE",
+            env_var="PARAKEET_ANE_BINARY",
+            ok=False,
+            detail="selfcheck timed out after 120s (the first run downloads ~3 GB; run selfcheck manually once)",
+        )
+    if completed.returncode != 0:
+        detail = (completed.stdout or completed.stderr).decode(errors="replace").strip()[:120]
+        return CheckResult(
+            provider="Parakeet ANE",
+            env_var="PARAKEET_ANE_BINARY",
+            ok=False,
+            detail=f"selfcheck failed: {detail or '<no output>'}",
+        )
+    payload = orjson.loads(completed.stdout)
+    return CheckResult(
+        provider="Parakeet ANE",
+        env_var="PARAKEET_ANE_BINARY",
+        ok=True,
+        detail=(
+            f"model {payload.get('model_id', '?')} loads in "
+            f"{float(payload.get('load_s', 0.0)):.2f}s on {payload.get('compute_units', '?')}"
+        ),
+    )
+
+
 async def run_checks() -> list[CheckResult]:
     """Probe every configured credential concurrently.
 
@@ -552,4 +601,4 @@ async def run_checks() -> list[CheckResult]:
             _check_azure_speech(client),
         )
     soniox = await _check_soniox_session()
-    return [*results, soniox, _check_google_cloud(), _check_apple_speech()]
+    return [*results, soniox, _check_google_cloud(), _check_apple_speech(), _check_parakeet_ane()]
