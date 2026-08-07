@@ -81,6 +81,37 @@ STT_PRICING: dict[str, SttPricing] = {
         stream_per_hour=0.12,
         note="token-billed ($2/M audio tokens); hourly figure is an estimate",
     ),
+    "gladia-solaria1": SttPricing(
+        batch_per_hour=0.61,
+        stream_per_hour=0.75,
+        note="pay-as-you-go Starter tier; Growth volume commitments step "
+        "down to $0.20/hr batch, $0.25/hr streaming; verified 2026-08-07",
+    ),
+    "mistral-voxtral-realtime": SttPricing(
+        stream_per_hour=0.36,
+        note="$0.006/audio-min streaming (La Plateforme pay-as-you-go); the "
+        "batch voxtral-mini-transcribe model is $0.003/audio-min but this "
+        "adapter only implements the realtime lane; verified 2026-08-07",
+    ),
+    "azure-speech-stt": SttPricing(
+        stream_per_hour=1.00,
+        note="S1 standard tier, pay-as-you-go (Azure Retail Prices API, "
+        "japaneast); batch transcription is $0.18/hr but this adapter only "
+        "implements the realtime lane; verified 2026-08-07",
+    ),
+    "openai-gpt4o-transcribe": SttPricing(
+        stream_per_hour=0.36,
+        note="token-billed; OpenAI's own ~$0.006/audio-min estimate at "
+        "typical speech density (Realtime-session and REST transcription "
+        "use the same model/rate) — this adapter only implements the "
+        "realtime lane; verified 2026-08-07",
+    ),
+    "openai-live-transcribe": SttPricing(
+        stream_per_hour=1.02,
+        note="$0.017/audio-minute, the purpose-built low-latency live "
+        "streaming model (distinct rate from gpt-4o-transcribe); "
+        "verified 2026-08-07",
+    ),
 }
 
 TTS_PRICING: dict[str, TtsPricing] = {
@@ -100,6 +131,21 @@ TTS_PRICING: dict[str, TtsPricing] = {
         per_million_chars=25.0,
         note="on-demand (no subscription) rate; paid plan tiers step down to "
         "$12.50/M, enterprise as low as $5/M; verified 2026-08-07",
+    ),
+    "minimax-speech28turbo": TtsPricing(
+        per_million_chars=60.0,
+        note="pay-as-you-go rate (speech-2.8-hd costs $100/M); verified 2026-08-07",
+    ),
+    "azure-neural-tts": TtsPricing(
+        per_million_chars=15.0,
+        note="S1 standard prebuilt Neural voices, pay-as-you-go (Azure Retail "
+        "Prices API, japaneast); Neural HD voices cost $22/M, custom voices "
+        "more; verified 2026-08-07",
+    ),
+    "openai-gpt4o-mini-tts": TtsPricing(
+        per_audio_minute=0.015,
+        note="token-billed ($0.60/M text input + $12/M audio output tokens); "
+        "the audio-minute figure is OpenAI's own estimate; verified 2026-08-07",
     ),
 }
 

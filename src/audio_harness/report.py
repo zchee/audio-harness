@@ -628,4 +628,12 @@ LEGEND = """
   *inside* the speech — chunk-boundary seams that batch synthesis of the same
   text does not produce. Cold and load-pass runs are excluded from both
   sides.
+- **SDK-wrapped adapters** — Google (Chirp 3) and Azure (Speech STT / Neural
+  TTS) go through the vendor's official SDK instead of a raw WebSocket, since
+  both vendors' realtime wire protocols are unsupported or underdocumented
+  for direct use. Every result from these adapters carries
+  `raw["sdk_buffered"] = True`: the SDK owns its own buffering, batching and
+  retry schedule on a native thread, so their TTFT/Finalize/TTFB/TTFA figures
+  include that overhead and are not directly comparable to the
+  WebSocket-native adapters' numbers.
 """.strip()

@@ -210,7 +210,9 @@ def _select_rows(frame: pl.LazyFrame, *, limit: int | None, seed: int | None) ->
         return frame.collect()
 
     chosen = pl.int_range(total, eager=True).sample(n=limit, seed=seed, shuffle=False).sort()
-    return frame.with_row_index("__row").filter(pl.col("__row").is_in(chosen)).drop("__row").collect()
+    # implode() makes the set-membership semantics explicit; a bare Series of
+    # the same dtype is deprecated as ambiguous since polars 1.43.
+    return frame.with_row_index("__row").filter(pl.col("__row").is_in(chosen.implode())).drop("__row").collect()
 
 
 def _join_words(value: object) -> str | None:

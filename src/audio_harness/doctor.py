@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 import os
+from urllib.parse import urlencode
 
 import httpx
 import orjson
@@ -94,6 +95,26 @@ _CHECKS: tuple[_HttpCheck, ...] = (
         provider="Speechmatics",
         env_var="SPEECHMATICS_API_KEY",
         url="https://asr.api.speechmatics.com/v2/jobs?limit=1",
+        header="Authorization",
+        template="Bearer {key}",
+    ),
+    _HttpCheck(
+        provider="Gladia",
+        env_var="GLADIA_API_KEY",
+        url="https://api.gladia.io/v2/pre-recorded?limit=1",
+        header="x-gladia-key",
+    ),
+    _HttpCheck(
+        provider="Mistral",
+        env_var="MISTRAL_API_KEY",
+        url="https://api.mistral.ai/v1/models",
+        header="Authorization",
+        template="Bearer {key}",
+    ),
+    _HttpCheck(
+        provider="OpenAI",
+        env_var="OPENAI_API_KEY",
+        url="https://api.openai.com/v1/models",
         header="Authorization",
         template="Bearer {key}",
     ),
@@ -225,6 +246,128 @@ async def _check_quota(client: httpx.AsyncClient, check: _HttpCheck, headers: di
     )
 
 
+MINIMAX_FILES_URL = "https://api.minimax.io/v1/files/list?purpose=voice_clone"
+
+
+async def _check_minimax(client: httpx.AsyncClient) -> CheckResult:
+    """List MiniMax files, the cheapest authenticated call available.
+
+    MiniMax authenticates with a Bearer key but scopes every account to a
+    GroupId that the vendor's own client libraries send as a query parameter
+    on this endpoint, so both credentials are required for the probe to mean
+    anything — a valid key with the wrong GroupId is rejected the same as no
+    key at all. A 200 response can still carry a failure in ``base_resp``, so
+    that field is checked rather than trusting the HTTP status alone.
+    """
+    api_key = os.environ.get("MINIMAX_API_KEY")
+    group_id = os.environ.get("MINIMAX_GROUP_ID")
+    if not api_key or not group_id:
+        return CheckResult(
+            provider="MiniMax",
+            env_var="MINIMAX_API_KEY" if not api_key else "MINIMAX_GROUP_ID",
+            ok=False,
+            detail="not set — see docs/ACCOUNTS.md",
+            skipped=True,
+        )
+
+    url = f"{MINIMAX_FILES_URL}&{urlencode({'GroupId': group_id})}"
+    try:
+        response = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
+    except httpx.HTTPError as exc:
+        return CheckResult(
+            provider="MiniMax",
+            env_var="MINIMAX_API_KEY",
+            ok=False,
+            detail=f"unreachable: {type(exc).__name__}: {exc}",
+        )
+
+    if response.status_code in {401, 403}:
+        return CheckResult(
+            provider="MiniMax",
+            env_var="MINIMAX_API_KEY",
+            ok=False,
+            detail=f"rejected (HTTP {response.status_code}) — key or GroupId invalid",
+        )
+    if response.status_code >= 400:
+        return CheckResult(
+            provider="MiniMax",
+            env_var="MINIMAX_API_KEY",
+            ok=False,
+            detail=f"HTTP {response.status_code}: {response.text[:120]}",
+        )
+
+    base_resp = response.json().get("base_resp") or {}
+    code = base_resp.get("status_code", 0)
+    if code:
+        return CheckResult(
+            provider="MiniMax",
+            env_var="MINIMAX_API_KEY",
+            ok=False,
+            detail=f"HTTP 200 but base_resp {code}: {base_resp.get('status_msg', 'error')}",
+        )
+    return CheckResult(
+        provider="MiniMax",
+        env_var="MINIMAX_API_KEY",
+        ok=True,
+        detail=f"authenticated (HTTP {response.status_code})",
+    )
+
+
+AZURE_TOKEN_URL = "https://{region}.api.cognitive.microsoft.com/sts/v1.0/issueToken"
+
+
+async def _check_azure_speech(client: httpx.AsyncClient) -> CheckResult:
+    """Issue a Speech Services auth token, the cheapest authenticated call.
+
+    The endpoint is region-scoped (``{region}.api.cognitive.microsoft.com``),
+    so unlike every other vendor here this probe cannot be expressed as a
+    static :class:`_HttpCheck` entry -- the URL itself depends on a second
+    environment variable.
+    """
+    key = os.environ.get("AZURE_SPEECH_KEY")
+    region = os.environ.get("AZURE_SPEECH_REGION")
+    if not key or not region:
+        return CheckResult(
+            provider="Azure Speech",
+            env_var="AZURE_SPEECH_KEY" if not key else "AZURE_SPEECH_REGION",
+            ok=False,
+            detail="not set — see docs/ACCOUNTS.md",
+            skipped=True,
+        )
+
+    url = AZURE_TOKEN_URL.format(region=region)
+    try:
+        response = await client.post(url, headers={"Ocp-Apim-Subscription-Key": key})
+    except httpx.HTTPError as exc:
+        return CheckResult(
+            provider="Azure Speech",
+            env_var="AZURE_SPEECH_KEY",
+            ok=False,
+            detail=f"unreachable: {type(exc).__name__}: {exc}",
+        )
+
+    if response.status_code in {401, 403}:
+        return CheckResult(
+            provider="Azure Speech",
+            env_var="AZURE_SPEECH_KEY",
+            ok=False,
+            detail=f"rejected (HTTP {response.status_code}) — key invalid, region wrong, or scoped out",
+        )
+    if response.status_code >= 400:
+        return CheckResult(
+            provider="Azure Speech",
+            env_var="AZURE_SPEECH_KEY",
+            ok=False,
+            detail=f"HTTP {response.status_code}: {response.text[:120]}",
+        )
+    return CheckResult(
+        provider="Azure Speech",
+        env_var="AZURE_SPEECH_KEY",
+        ok=True,
+        detail=f"authenticated (HTTP {response.status_code}), region {region}",
+    )
+
+
 SONIOX_STREAM_URL = "wss://stt-rt.soniox.com/transcribe-websocket"
 
 
@@ -339,6 +482,10 @@ async def run_checks() -> list[CheckResult]:
         One result per provider, in a stable order for display.
     """
     async with httpx.AsyncClient(timeout=TIMEOUT_S, follow_redirects=True) as client:
-        http_results = await asyncio.gather(*(_run_http_check(client, check) for check in _CHECKS))
+        results = await asyncio.gather(
+            *(_run_http_check(client, check) for check in _CHECKS),
+            _check_minimax(client),
+            _check_azure_speech(client),
+        )
     soniox = await _check_soniox_session()
-    return [*http_results, soniox, _check_google_cloud()]
+    return [*results, soniox, _check_google_cloud()]

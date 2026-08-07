@@ -1,0 +1,27 @@
+# Re-run of the en elevenlabs-flash25 lanes that died on quota during the
+# first 6-lane bench. Same prompts, judges and voice pin as configs/tts-en.yaml
+# so the supersede merge is apples-to-apples.
+
+tts:
+  - name: elevenlabs-flash25
+    modes: [batch, stream]
+    options:
+      voice_id: EXAVITQu4vr4xnSDxMaL
+
+dataset:
+  prompts: data/prompts-en.txt
+  language: en-US
+  limit: null
+
+roundtrip_stt:
+  - name: deepgram-nova3
+    options:
+      smart_format: false
+  - name: whisper-local
+
+run:
+  repeats: 3
+  warmup: 1
+  provider_concurrency: 1
+  timeout_s: 300
+  output_dir: results

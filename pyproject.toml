@@ -33,6 +33,11 @@ dev = [
     "ruff>=0.16.1",
     "ty>=0.0.69",
 ]
+# Azure AI Speech STT + Neural TTS (see stt/azure.py, tts/azure.py). Verified
+# installing and running its native bindings on Python 3.14.6/arm64 macOS.
+azure = [
+    "azure-cognitiveservices-speech>=1.51.1",
+]
 # Local Whisper round-trip judge (Apple Silicon; see stt/whisper_local.py).
 # The numba floor keeps resolution on a line with Python 3.14 wheels; without
 # it the resolver backtracks to numba 0.53 / llvmlite 0.36, which only build

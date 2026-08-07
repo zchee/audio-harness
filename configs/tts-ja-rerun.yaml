@@ -1,0 +1,29 @@
+# Re-run of the ja lanes that died on vendor quotas (Cartesia 402,
+# ElevenLabs 401) during the first 6-lane bench. Same prompts, same judge,
+# same voice pins as configs/tts-ja.yaml so the supersede merge is
+# apples-to-apples.
+
+tts:
+  - name: cartesia-sonic35
+    modes: [batch, stream]
+  - name: cartesia-sonic3
+    modes: [batch, stream]
+  - name: elevenlabs-flash25
+    modes: [batch, stream]
+    options:
+      voice_id: EXAVITQu4vr4xnSDxMaL
+
+dataset:
+  prompts: data/prompts-ja/bench.txt
+  language: ja-JP
+  limit: null
+
+roundtrip_stt:
+  - name: whisper-local
+
+run:
+  repeats: 3
+  warmup: 1
+  provider_concurrency: 3
+  timeout_s: 300
+  output_dir: results
