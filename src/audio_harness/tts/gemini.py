@@ -91,6 +91,24 @@ class GeminiTts(TtsProvider):
         return result
 
 
+@register
+class GeminiTts31(GeminiTts):
+    """PREVIEW Gemini 3.1 Flash TTS lane with inline emotion-tag support.
+
+    "Preview models may change before becoming stable and have more restrictive rate limits."
+    Prompt authors may use inline emotion tags such as ``[whispers]``; the
+    adapter passes prompt text through unchanged and performs no tag injection.
+
+    Pricing verified 2026-08-08: $1.00/M input tokens and $20.00/M audio
+    output tokens; at 25 audio tokens per second, output is about $0.03/minute.
+    """
+
+    key = "gemini-tts-31"
+
+    def _model(self) -> str:
+        return str(self.options.get("model", "gemini-3.1-flash-tts-preview"))
+
+
 def _extract_audio(response: Any) -> list[bytes]:
     """Pull inline audio payloads out of a generate-content response.
 

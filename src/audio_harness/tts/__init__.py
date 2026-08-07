@@ -6,7 +6,7 @@ any key that appears in a benchmark configuration.
 
 from __future__ import annotations
 
-from . import azure, cartesia, deepgram, elevenlabs, gemini, inworld, openai, openrouter
+from . import azure, cartesia, deepgram, elevenlabs, gemini, inworld, mistral, openai, openrouter, xai
 from .base import TtsProvider, available, create, family_of, register
 
 
@@ -21,7 +21,9 @@ __all__ = [
     "family_of",
     "gemini",
     "inworld",
+    "mistral",
     "openai",
     "openrouter",
     "register",
+    "xai",
 ]

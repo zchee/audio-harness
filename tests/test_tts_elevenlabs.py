@@ -1,4 +1,4 @@
-"""Tests for the ElevenLabs Flash v2.5 TTS adapter's wire protocols.
+"""Tests for the ElevenLabs TTS adapters' wire protocols.
 
 Three transports are exercised: the plain and ``/stream`` HTTP endpoints
 (mocked with ``httpx.MockTransport`` so the request shape and response
@@ -75,6 +75,14 @@ class _RecordingHttp:
 def _mocked_adapter(respond: Respond) -> tuple[elevenlabs.ElevenLabsFlash25, _RecordingHttp]:
     adapter = tts.create("elevenlabs-flash25")
     assert isinstance(adapter, elevenlabs.ElevenLabsFlash25)
+    recorder = _RecordingHttp(respond)
+    adapter._http = recorder.client()
+    return adapter, recorder
+
+
+def _mocked_v3_adapter(respond: Respond) -> tuple[elevenlabs.ElevenLabsV3, _RecordingHttp]:
+    adapter = tts.create("elevenlabs-v3")
+    assert isinstance(adapter, elevenlabs.ElevenLabsV3)
     recorder = _RecordingHttp(respond)
     adapter._http = recorder.client()
     return adapter, recorder
@@ -195,6 +203,44 @@ class TestOutputFormatValidation:
 
         with pytest.raises(ValueError, match="unsupported sample rate"):
             adapter._output_format()  # exercising the validation directly
+
+
+class TestV3Protocol:
+    """V3 reuses HTTP transports but never exposes stream-input."""
+
+    pytestmark = pytest.mark.usefixtures("_credentials")
+
+    async def test_batch_and_stream_use_eleven_v3(self) -> None:
+        pcm = b"\x00\x01" * 10
+
+        def respond(request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("/stream"):
+                return httpx.Response(200, stream=_Chunks([pcm]))
+            return httpx.Response(200, content=pcm)
+
+        adapter, recorder = _mocked_v3_adapter(respond)
+
+        batch = await adapter.synthesize(PROMPT)
+        stream = await adapter.synthesize_stream(PROMPT)
+
+        assert batch.audio == pcm
+        assert stream.audio == pcm
+        assert [orjson.loads(request.content)["model_id"] for request in recorder.requests] == [
+            "eleven_v3",
+            "eleven_v3",
+        ]
+        assert [request.url.path for request in recorder.requests] == [
+            "/v1/text-to-speech/test-voice",
+            "/v1/text-to-speech/test-voice/stream",
+        ]
+
+    async def test_input_streaming_is_unsupported_by_the_base_contract(self) -> None:
+        adapter, _ = _mocked_v3_adapter(lambda request: httpx.Response(200, content=b""))
+
+        assert adapter.supports_input_streaming is False
+        assert "synthesize_incremental" not in elevenlabs.ElevenLabsV3.__dict__
+        with pytest.raises(NotImplementedError, match="does not accept streamed input text"):
+            await adapter.synthesize_incremental(PROMPT, token_rate=40.0)
 
 
 class FakeElevenLabsServer:
@@ -365,3 +411,30 @@ class TestLiveSmoke:
         assert result.ok, result.error
         assert result.raw["input_streaming"] is True
         assert result.audio_s > 0
+
+    @_needs("ELEVENLABS_API_KEY", "ELEVENLABS_VOICE_ID")
+    async def test_v3_batch_en(self) -> None:
+        adapter = tts.create("elevenlabs-v3")
+        try:
+            result = await adapter.synthesize(
+                TtsPrompt(prompt_id="smoke-v3-en", text="A quiet evening begins.", language="en-US")
+            )
+        finally:
+            await adapter.aclose()
+
+        assert result.ok, result.error
+        assert result.audio_s > 0
+
+    @_needs("ELEVENLABS_API_KEY", "ELEVENLABS_VOICE_ID")
+    async def test_v3_stream_ja(self) -> None:
+        adapter = tts.create("elevenlabs-v3")
+        try:
+            result = await adapter.synthesize_stream(
+                TtsPrompt(prompt_id="smoke-v3-ja", text="静かな夜が始まります。", language="ja-JP")
+            )
+        finally:
+            await adapter.aclose()
+
+        assert result.ok, result.error
+        assert result.audio_s > 0
+        assert result.ttfa_s is not None

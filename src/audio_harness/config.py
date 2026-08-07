@@ -152,6 +152,26 @@ TTS_PRICING: dict[str, TtsPricing] = {
         note="Flash/Turbo rate ($0.05/1k chars pay-as-you-go); Multilingual v2 "
         "costs roughly double per character; verified 2026-08-07",
     ),
+    "elevenlabs-v3": TtsPricing(
+        per_million_chars=100.0,
+        note="standard 1x API rate ($0.10/1K characters); Flash v2.5 is 0.5x; "
+        "verified 2026-08-08",
+    ),
+    "gemini-tts-31": TtsPricing(
+        per_audio_minute=0.03,
+        note="PREVIEW; $20/M audio output tokens at 25 tokens/s, plus $1.00/M "
+        "input text tokens. Preview models may change before becoming stable "
+        "and have more restrictive rate limits; verified 2026-08-08",
+    ),
+    "xai-grok-tts": TtsPricing(
+        per_million_chars=15.0,
+        note="$15.00/M input characters; verified 2026-08-08",
+    ),
+    "mistral-voxtral-tts": TtsPricing(
+        per_million_chars=16.0,
+        note="$0.016/1K characters; English-focused (no Japanese support); "
+        "verified 2026-08-08",
+    ),
     "inworld-tts2": TtsPricing(
         per_million_chars=25.0,
         note="on-demand (no subscription) rate; paid plan tiers step down to "

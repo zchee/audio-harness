@@ -45,35 +45,17 @@ above require a Pro-tier account (docs: elevenlabs.io/docs/api-reference/
 text-to-speech/convert)."""
 
 
-@register
-class ElevenLabsFlash25(TtsProvider):
-    """ElevenLabs Flash v2.5, batch, HTTP streaming and WS stream-input.
+class _ElevenLabsHttp(TtsProvider):
+    """Shared ElevenLabs batch and HTTP-streaming transport."""
 
-    Flash v2.5 is the low-latency multilingual model (~75 ms model latency,
-    32 languages including the ``eleven_multilingual_v2`` set plus Hungarian,
-    Norwegian and Vietnamese). Three transports are exercised: the plain
-    endpoint for :meth:`synthesize`, the chunked ``/stream`` endpoint for
-    :meth:`synthesize_stream`, and the ``stream-input`` WebSocket — the one
-    wire protocol that actually accepts text appended to an open generation —
-    for :meth:`synthesize_incremental`.
-
-    Options:
-        voice_id: Voice id. Pin this across models; comparing two models on
-            different voices measures the voices, not the models.
-        model_id: Defaults to ``eleven_flash_v2_5``.
-        sample_rate: Output rate; must be one of the vendor's PCM formats
-            (8000, 16000, 22050, 24000, 32000, 44100, 48000). Defaults to
-            24000.
-    """
-
-    key = "elevenlabs-flash25"
     vendor = "elevenlabs"
     supports_batch = True
     supports_stream = True
-    supports_input_streaming = True
+
+    default_model_id: str
 
     def _model(self) -> str:
-        return str(self.options.get("model_id", "eleven_flash_v2_5"))
+        return str(self.options.get("model_id", self.default_model_id))
 
     def _voice_id(self) -> str:
         voice = self.options.get("voice_id")
@@ -139,6 +121,32 @@ class ElevenLabsFlash25(TtsProvider):
                 timeline.add(chunk)
 
         return _finish_stream(result, timeline)
+
+
+@register
+class ElevenLabsFlash25(_ElevenLabsHttp):
+    """ElevenLabs Flash v2.5, batch, HTTP streaming and WS stream-input.
+
+    Flash v2.5 is the low-latency multilingual model (~75 ms model latency,
+    32 languages including the ``eleven_multilingual_v2`` set plus Hungarian,
+    Norwegian and Vietnamese). Three transports are exercised: the plain
+    endpoint for :meth:`synthesize`, the chunked ``/stream`` endpoint for
+    :meth:`synthesize_stream`, and the ``stream-input`` WebSocket — the one
+    wire protocol that actually accepts text appended to an open generation —
+    for :meth:`synthesize_incremental`.
+
+    Options:
+        voice_id: Voice id. Pin this across models; comparing two models on
+            different voices measures the voices, not the models.
+        model_id: Defaults to ``eleven_flash_v2_5``.
+        sample_rate: Output rate; must be one of the vendor's PCM formats
+            (8000, 16000, 22050, 24000, 32000, 44100, 48000). Defaults to
+            24000.
+    """
+
+    key = "elevenlabs-flash25"
+    supports_input_streaming = True
+    default_model_id = "eleven_flash_v2_5"
 
     def _ws_url(self, prompt: TtsPrompt) -> str:
         params = {
@@ -207,6 +215,24 @@ class ElevenLabsFlash25(TtsProvider):
                     await feeder
 
         return _finish_stream(result, timeline)
+
+
+@register
+class ElevenLabsV3(_ElevenLabsHttp):
+    """ElevenLabs v3 quality-axis lane for audiobooks and emotional dialogue.
+
+    The GA ``eleven_v3`` model covers 70+ languages, including Japanese, and
+    targets expressive long-form and emotional-dialogue content. ElevenLabs
+    still recommends Flash v2.5 for realtime and low-latency use, so this lane
+    intentionally measures quality rather than input-streaming latency.
+
+    The standard API rate is $0.10 per 1K characters (1x), versus Flash v2.5's
+    0.5x rate; pricing verified 2026-08-08.
+    """
+
+    key = "elevenlabs-v3"
+    supports_input_streaming = False
+    default_model_id = "eleven_v3"
 
 
 def _finish(result: TtsResult, audio: bytes) -> TtsResult:

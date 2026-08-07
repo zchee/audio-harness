@@ -240,6 +240,18 @@ def pcm16_to_float(pcm: bytes) -> np.ndarray:
     return np.frombuffer(pcm[:usable], dtype="<i2").astype(np.float32) / 32768.0
 
 
+def pcm_f32le_to_s16le(payload: bytes) -> bytes:
+    """Convert little-endian float32 mono PCM to little-endian int16 PCM.
+
+    Samples are clamped to ``[-1, 1]`` before scaling. A trailing partial
+    float32 sample is dropped, matching :func:`pcm16_to_float`'s handling of
+    truncated input.
+    """
+    usable = len(payload) // 4 * 4
+    samples = np.frombuffer(payload[:usable], dtype="<f4")
+    return (np.clip(samples, -1.0, 1.0) * 32767.0).astype("<i2").tobytes()
+
+
 def wav_data_offset(payload: bytes) -> int:
     """Byte offset of the PCM samples, skipping a RIFF/WAVE header when present.
 
