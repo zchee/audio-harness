@@ -7,6 +7,7 @@ any key that appears in a benchmark configuration.
 from __future__ import annotations
 
 from . import (
+    apple_speech,
     assemblyai,
     azure,
     cartesia,
@@ -28,6 +29,7 @@ from .base import StreamTimeline, SttProvider, available, create, family_of, reg
 __all__ = [
     "StreamTimeline",
     "SttProvider",
+    "apple_speech",
     "assemblyai",
     "available",
     "azure",

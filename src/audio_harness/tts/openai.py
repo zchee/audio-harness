@@ -26,6 +26,11 @@ REALTIME_SAMPLE_RATE = 24000
 class OpenAiGpt4oMiniTts(TtsProvider):
     """gpt-4o-mini-tts over the ``/v1/audio/speech`` HTTP endpoint.
 
+    The default is pinned to the dated ``gpt-4o-mini-tts-2025-12-15``
+    snapshot so TTS scores remain reproducible across runs. The floating
+    ``gpt-4o-mini-tts`` alias remains available through the ``model_id``
+    option when tracking the vendor's current alias is desired.
+
     ``response_format=pcm`` returns headerless 16-bit PCM at a fixed 24 kHz —
     same reasoning as Inworld's ``PCM`` choice, so no WAV header bytes get
     counted as audio. The plain endpoint answers with the complete body in
@@ -39,7 +44,7 @@ class OpenAiGpt4oMiniTts(TtsProvider):
             Falls back to the ``OPENAI_VOICE_ID`` environment variable, then
             ``alloy``. Pin this across models; comparing two models on
             different voices measures the voices, not the models.
-        model_id: Defaults to ``gpt-4o-mini-tts``.
+        model_id: Defaults to ``gpt-4o-mini-tts-2025-12-15``.
         instructions: Optional free-text voice-control directive (tone,
             pacing, accent). Unsupported by the legacy ``tts-1`` models.
         speed: Playback rate, 0.25 to 4.0; defaults to 1.0.
@@ -53,7 +58,7 @@ class OpenAiGpt4oMiniTts(TtsProvider):
     default_sample_rate = REALTIME_SAMPLE_RATE
 
     def _model(self) -> str:
-        return str(self.options.get("model_id", "gpt-4o-mini-tts"))
+        return str(self.options.get("model_id", "gpt-4o-mini-tts-2025-12-15"))
 
     def _voice(self) -> str:
         voice = self.options.get("voice_id")

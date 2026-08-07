@@ -125,11 +125,16 @@ STT_PRICING: dict[str, SttPricing] = {
         "implements the realtime lane; verified 2026-08-07",
     ),
     "openai-gpt4o-transcribe": SttPricing(
+        batch_per_hour=0.36,
         stream_per_hour=0.36,
         note="token-billed; OpenAI's own ~$0.006/audio-min estimate at "
         "typical speech density (Realtime-session and REST transcription "
-        "use the same model/rate) — this adapter only implements the "
-        "realtime lane; verified 2026-08-07",
+        "use the same model/rate); verified 2026-08-07",
+    ),
+    "apple-speech-stt": SttPricing(
+        stream_per_hour=0.0,
+        note="on-device local compute; bills no hosted vendor. Latency and "
+        "throughput depend on this Mac's Apple silicon, not a service",
     ),
     "openai-live-transcribe": SttPricing(
         stream_per_hour=1.02,
@@ -154,8 +159,7 @@ TTS_PRICING: dict[str, TtsPricing] = {
     ),
     "elevenlabs-v3": TtsPricing(
         per_million_chars=100.0,
-        note="standard 1x API rate ($0.10/1K characters); Flash v2.5 is 0.5x; "
-        "verified 2026-08-08",
+        note="standard 1x API rate ($0.10/1K characters); Flash v2.5 is 0.5x; verified 2026-08-08",
     ),
     "gemini-tts-31": TtsPricing(
         per_audio_minute=0.03,
@@ -169,8 +173,7 @@ TTS_PRICING: dict[str, TtsPricing] = {
     ),
     "mistral-voxtral-tts": TtsPricing(
         per_million_chars=16.0,
-        note="$0.016/1K characters; English-focused (no Japanese support); "
-        "verified 2026-08-08",
+        note="$0.016/1K characters; English-focused (no Japanese support); verified 2026-08-08",
     ),
     "inworld-tts2": TtsPricing(
         per_million_chars=25.0,
@@ -179,33 +182,27 @@ TTS_PRICING: dict[str, TtsPricing] = {
     ),
     "or-kokoro": TtsPricing(
         per_million_chars=0.62,
-        note="OpenRouter-hosted; hosted-proxy latency is not direct-vendor "
-        "comparable; pricing verified 2026-08-07",
+        note="OpenRouter-hosted; hosted-proxy latency is not direct-vendor comparable; pricing verified 2026-08-07",
     ),
     "or-orpheus": TtsPricing(
         per_million_chars=7.0,
-        note="OpenRouter-hosted; hosted-proxy latency is not direct-vendor "
-        "comparable; pricing verified 2026-08-07",
+        note="OpenRouter-hosted; hosted-proxy latency is not direct-vendor comparable; pricing verified 2026-08-07",
     ),
     "or-csm": TtsPricing(
         per_million_chars=7.0,
-        note="OpenRouter-hosted; hosted-proxy latency is not direct-vendor "
-        "comparable; pricing verified 2026-08-07",
+        note="OpenRouter-hosted; hosted-proxy latency is not direct-vendor comparable; pricing verified 2026-08-07",
     ),
     "or-zonos": TtsPricing(
         per_million_chars=7.0,
-        note="OpenRouter-hosted; hosted-proxy latency is not direct-vendor "
-        "comparable; pricing verified 2026-08-07",
+        note="OpenRouter-hosted; hosted-proxy latency is not direct-vendor comparable; pricing verified 2026-08-07",
     ),
     "or-minimax-turbo": TtsPricing(
         per_million_chars=60.0,
-        note="OpenRouter-hosted; hosted-proxy latency is not direct-vendor "
-        "comparable; pricing verified 2026-08-07",
+        note="OpenRouter-hosted; hosted-proxy latency is not direct-vendor comparable; pricing verified 2026-08-07",
     ),
     "or-minimax-hd": TtsPricing(
         per_million_chars=100.0,
-        note="OpenRouter-hosted; hosted-proxy latency is not direct-vendor "
-        "comparable; pricing verified 2026-08-07",
+        note="OpenRouter-hosted; hosted-proxy latency is not direct-vendor comparable; pricing verified 2026-08-07",
     ),
     "azure-neural-tts": TtsPricing(
         per_million_chars=15.0,
@@ -216,7 +213,9 @@ TTS_PRICING: dict[str, TtsPricing] = {
     "openai-gpt4o-mini-tts": TtsPricing(
         per_audio_minute=0.015,
         note="token-billed ($0.60/M text input + $12/M audio output tokens); "
-        "the audio-minute figure is OpenAI's own estimate; verified 2026-08-07",
+        "the audio-minute figure is OpenAI's own estimate; adapter pins the "
+        "gpt-4o-mini-tts-2025-12-15 snapshot for reproducibility; "
+        "verified 2026-08-07",
     ),
 }
 

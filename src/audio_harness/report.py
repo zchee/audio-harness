@@ -640,4 +640,8 @@ LEGEND = """
   `raw["hosted_proxy"] = True`: OpenRouter adds routing latency on top of the
   hosted model, so its latency figures are not directly comparable to lanes
   that call the model vendor directly.
+- **Local-compute adapters** — Every apple-speech-stt result carries
+  `raw["local_compute"] = True`: latency reflects this machine's silicon
+  (Apple Neural Engine / CPU), not a hosted vendor service, so its figures are
+  not directly comparable to the network lanes above.
 """.strip()

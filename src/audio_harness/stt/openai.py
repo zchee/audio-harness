@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 from dataclasses import replace
+import time
 from typing import Any
 
 import numpy as np
@@ -11,15 +12,16 @@ import orjson
 import soxr
 from websockets.asyncio.client import ClientConnection
 
-from audio_harness.audio import pcm16_to_float
+from audio_harness.audio import pcm16_to_float, wrap_wav
 from audio_harness.config import require_env
 from audio_harness.types import AudioClip, EventKind, Mode, SttResult
 
-from .base import StreamTimeline, SttProvider, register
+from .base import StreamTimeline, SttProvider, raise_for_status, register
 from .ws import OnInputDone, StreamProtocolError, run_stream
 
 
 STREAM_URL = "wss://api.openai.com/v1/realtime?intent=transcription"
+TRANSCRIPTIONS_URL = "https://api.openai.com/v1/audio/transcriptions"
 
 REALTIME_SAMPLE_RATE = 24000
 """Fixed rate the Realtime API's ``audio/pcm`` input format requires."""
@@ -50,7 +52,9 @@ class OpenAiGpt4oTranscribe(SttProvider):
     available as the EOU signal.
 
     Options:
-        model: Transcription model; defaults to ``gpt-4o-transcribe``.
+        model: Transcription model; defaults to ``gpt-4o-transcribe``. The
+            batch endpoint also accepts ``gpt-transcribe`` as a frontier
+            alternative.
         language: ISO-639-1 language hint; defaults to the clip's language.
         threshold: Server VAD activation threshold, 0.0-1.0 (vendor default
             0.5).
@@ -63,6 +67,7 @@ class OpenAiGpt4oTranscribe(SttProvider):
     key = "openai-gpt4o-transcribe"
     vendor = "openai"
     family = "openai"
+    supports_batch = True
     supports_stream = True
 
     def _model(self) -> str:
@@ -73,6 +78,27 @@ class OpenAiGpt4oTranscribe(SttProvider):
 
     def _auth(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {require_env('OPENAI_API_KEY', self.key)}"}
+
+    def _batch_data(self, clip: AudioClip) -> dict[str, str]:
+        """Build the multipart text fields shared by OpenAI batch variants."""
+        return {"model": self._model(), "language": self._language(clip)}
+
+    async def transcribe_batch(self, clip: AudioClip) -> SttResult:
+        """Upload a WAV-wrapped clip to OpenAI's batch transcription API."""
+        result = self._result(clip, Mode.BATCH)
+        started = time.perf_counter()
+        response = await self.http.post(
+            TRANSCRIPTIONS_URL,
+            headers=self._auth(),
+            data=self._batch_data(clip),
+            files={"file": ("audio.wav", wrap_wav(clip.pcm, clip.sample_rate), "audio/wav")},
+        )
+        raise_for_status(response, self.key)
+        payload = response.json()
+        result.total_s = time.perf_counter() - started
+        result.text = str(payload.get("text", ""))
+        result.raw["response"] = payload
+        return result
 
     def _turn_detection(self) -> dict[str, Any] | None:
         turn_detection: dict[str, Any] = {
@@ -155,6 +181,38 @@ class OpenAiGpt4oTranscribe(SttProvider):
 
 
 @register
+class OpenAiGpt4oTranscribeDiarize(OpenAiGpt4oTranscribe):
+    """Batch-only GPT-4o transcription with speaker-labelled segments.
+
+    ``diarized_json`` is required for speaker annotations. The response's
+    ``segments`` array is retained verbatim in ``result.raw`` for later
+    offline analysis; OpenAI exposes no separate top-level speakers summary.
+    """
+
+    key = "openai-gpt4o-transcribe-diarize"
+    vendor = "openai"
+    family = "openai"
+    supports_batch = True
+    supports_stream = False
+
+    def _model(self) -> str:
+        return str(self.options.get("model", "gpt-4o-transcribe-diarize"))
+
+    def _batch_data(self, clip: AudioClip) -> dict[str, str]:
+        data = super()._batch_data(clip)
+        data["response_format"] = "diarized_json"
+        return data
+
+    async def transcribe_batch(self, clip: AudioClip) -> SttResult:
+        """Transcribe a whole clip and preserve diarized segments verbatim."""
+        result = await super().transcribe_batch(clip)
+        payload = result.raw["response"]
+        if isinstance(payload, dict):
+            result.raw["segments"] = payload.get("segments", [])
+        return result
+
+
+@register
 class OpenAiGptLiveTranscribe(OpenAiGpt4oTranscribe):
     """gpt-live-transcribe: OpenAI's purpose-built low-latency live-streaming model.
 
@@ -202,6 +260,7 @@ class OpenAiGptLiveTranscribe(OpenAiGpt4oTranscribe):
     """
 
     key = "openai-live-transcribe"
+    supports_batch = False
 
     def _model(self) -> str:
         return str(self.options.get("model", "gpt-live-transcribe"))

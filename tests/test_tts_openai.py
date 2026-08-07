@@ -101,7 +101,7 @@ class TestBatchProtocol:
         assert request.headers["Authorization"] == "Bearer test-key"
         body = orjson.loads(request.content)
         assert body == {
-            "model": "gpt-4o-mini-tts",
+            "model": "gpt-4o-mini-tts-2025-12-15",
             "input": PROMPT.text,
             "voice": "alloy",
             "response_format": "pcm",
@@ -132,11 +132,11 @@ class TestBatchProtocol:
             return httpx.Response(200, content=b"")
 
         adapter, recorder = _mocked_adapter(respond)
-        adapter.options["model_id"] = "gpt-4o-mini-tts-2025-12-15"
+        adapter.options["model_id"] = "gpt-4o-mini-tts"
 
         await adapter.synthesize(PROMPT)
 
-        assert orjson.loads(recorder.requests[0].content)["model"] == "gpt-4o-mini-tts-2025-12-15"
+        assert orjson.loads(recorder.requests[0].content)["model"] == "gpt-4o-mini-tts"
 
     async def test_instructions_and_speed_options_are_included_when_set(self) -> None:
         def respond(request: httpx.Request) -> httpx.Response:

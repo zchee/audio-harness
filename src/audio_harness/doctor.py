@@ -17,6 +17,8 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 import os
+import sys
+from typing import Any
 
 import httpx
 import orjson
@@ -481,6 +483,62 @@ def _check_google_cloud() -> CheckResult:
     )
 
 
+def _check_apple_speech() -> CheckResult:
+    """Probe on-device Speech availability without triggering any TCC prompt.
+
+    File-based recognition needs no speech-recognition grant (verified
+    2026-08-08), so this never calls ``requestAuthorization_`` — it only
+    proves the framework imports and the en-US recognizer reports on-device
+    support. Bills nothing: the whole lane runs on this machine.
+    """
+    if sys.platform != "darwin":
+        return CheckResult(
+            provider="Apple Speech",
+            env_var="",
+            ok=False,
+            detail="requires macOS",
+            skipped=True,
+        )
+    try:
+        import Foundation
+        import Speech
+    except ImportError:
+        return CheckResult(
+            provider="Apple Speech",
+            env_var="",
+            ok=False,
+            detail="pyobjc-framework-Speech not installed — run: uv sync --extra apple-speech",
+            skipped=True,
+        )
+
+    # PyObjC populates framework members dynamically, so the type checker
+    # cannot see them; the Any views mirror stt/apple_speech.py's guard.
+    foundation: Any = Foundation
+    speech: Any = Speech
+    locale = foundation.NSLocale.localeWithLocaleIdentifier_("en-US")
+    recognizer = speech.SFSpeechRecognizer.alloc().initWithLocale_(locale)
+    if recognizer is None or not recognizer.isAvailable():
+        return CheckResult(
+            provider="Apple Speech",
+            env_var="",
+            ok=False,
+            detail="SFSpeechRecognizer is unavailable for en-US",
+        )
+    if not recognizer.supportsOnDeviceRecognition():
+        return CheckResult(
+            provider="Apple Speech",
+            env_var="",
+            ok=False,
+            detail="on-device recognition is unsupported for en-US",
+        )
+    return CheckResult(
+        provider="Apple Speech",
+        env_var="",
+        ok=True,
+        detail="on-device recognition available (en-US)",
+    )
+
+
 async def run_checks() -> list[CheckResult]:
     """Probe every configured credential concurrently.
 
@@ -494,4 +552,4 @@ async def run_checks() -> list[CheckResult]:
             _check_azure_speech(client),
         )
     soniox = await _check_soniox_session()
-    return [*results, soniox, _check_google_cloud()]
+    return [*results, soniox, _check_google_cloud(), _check_apple_speech()]

@@ -38,6 +38,12 @@ dev = [
 azure = [
     "azure-cognitiveservices-speech>=1.51.1",
 ]
+# On-device macOS speech recognition via PyObjC SFSpeechRecognizer (see
+# stt/apple_speech.py). File-based on-device recognition needs no TCC grant;
+# verified on Python 3.14/arm64 macOS 26 (STEP 0, 2026-08-08).
+apple-speech = [
+    "pyobjc-framework-Speech>=12.1",
+]
 # Local Whisper round-trip judge (Apple Silicon; see stt/whisper_local.py).
 # The numba floor keeps resolution on a line with Python 3.14 wheels; without
 # it the resolver backtracks to numba 0.53 / llvmlite 0.36, which only build

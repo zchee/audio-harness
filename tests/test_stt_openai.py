@@ -14,10 +14,16 @@ from __future__ import annotations
 
 import asyncio
 import base64
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
+from email.parser import BytesParser
+from email.policy import default
+from io import BytesIO
+import logging
 import os
 from urllib.parse import parse_qsl, urlsplit
+import wave
 
+import httpx
 import orjson
 import pytest
 import websockets
@@ -25,6 +31,7 @@ from websockets.asyncio.server import ServerConnection, serve
 
 from audio_harness import stt
 from audio_harness.stt import openai
+from audio_harness.stt.base import ProviderHttpError
 from audio_harness.stt.ws import StreamProtocolError
 from audio_harness.types import AudioClip
 
@@ -108,6 +115,168 @@ class FakeOpenAiWs:
                 "transcript": self.transcript,
             }).decode()
         )
+
+
+Respond = Callable[[httpx.Request], httpx.Response]
+
+
+def _mocked_batch_adapter(key: str, respond: Respond) -> tuple[openai.OpenAiGpt4oTranscribe, list[httpx.Request]]:
+    """Create an OpenAI adapter whose HTTP client records batch requests."""
+    requests: list[httpx.Request] = []
+
+    def record(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return respond(request)
+
+    adapter = stt.create(key)
+    assert isinstance(adapter, openai.OpenAiGpt4oTranscribe)
+    adapter._http = httpx.AsyncClient(transport=httpx.MockTransport(record))
+    return adapter, requests
+
+
+def _multipart_parts(request: httpx.Request) -> dict[str, list[tuple[str | None, bytes]]]:
+    """Parse an HTTPX multipart request into named filename/payload parts."""
+    content_type = request.headers["Content-Type"]
+    message = BytesParser(policy=default).parsebytes(
+        f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode() + request.content
+    )
+    assert message.is_multipart()
+    parts: dict[str, list[tuple[str | None, bytes]]] = {}
+    for part in message.iter_parts():
+        name = part.get_param("name", header="content-disposition")
+        payload = part.get_payload(decode=True)
+        assert isinstance(name, str)
+        assert isinstance(payload, bytes)
+        parts.setdefault(name, []).append((part.get_filename(), payload))
+    return parts
+
+
+class TestBatchProtocol:
+    """OpenAI's multipart batch transcription contract."""
+
+    pytestmark = pytest.mark.usefixtures("_credentials")
+
+    async def test_request_shape_transcript_response_and_wav_wrapping(self) -> None:
+        payload = {"text": "hello world", "usage": {"type": "duration", "seconds": 1}}
+        adapter, requests = _mocked_batch_adapter(
+            "openai-gpt4o-transcribe", lambda request: httpx.Response(200, json=payload)
+        )
+        clip = make_clip()
+
+        result = await adapter.transcribe_batch(clip)
+
+        assert result.ok, result.error
+        assert result.text == "hello world"
+        assert result.raw["response"] == payload
+        assert result.total_s > 0
+        assert result.ttft_s is None
+        assert result.finalize_s is None
+
+        [request] = requests
+        assert request.method == "POST"
+        assert request.url == openai.TRANSCRIPTIONS_URL
+        assert request.headers["Authorization"] == "Bearer test-key"
+        parts = _multipart_parts(request)
+        assert set(parts) == {"file", "model", "language"}
+        assert parts["model"] == [(None, b"gpt-4o-transcribe")]
+        assert parts["language"] == [(None, b"en")]
+
+        [(filename, wav_payload)] = parts["file"]
+        assert filename == "audio.wav"
+        with wave.open(BytesIO(wav_payload), "rb") as handle:
+            assert handle.getnchannels() == 1
+            assert handle.getsampwidth() == 2
+            assert handle.getframerate() == clip.sample_rate
+            assert handle.readframes(handle.getnframes()) == clip.pcm
+
+    async def test_model_and_language_options_override_defaults(self) -> None:
+        adapter, requests = _mocked_batch_adapter(
+            "openai-gpt4o-transcribe", lambda request: httpx.Response(200, json={"text": "bonjour"})
+        )
+        adapter.options.update({"model": "gpt-transcribe", "language": "fr"})
+
+        await adapter.transcribe_batch(make_clip())
+
+        parts = _multipart_parts(requests[0])
+        assert parts["model"] == [(None, b"gpt-transcribe")]
+        assert parts["language"] == [(None, b"fr")]
+
+    async def test_http_error_is_raised_with_the_body(self) -> None:
+        adapter, _ = _mocked_batch_adapter(
+            "openai-gpt4o-transcribe", lambda request: httpx.Response(429, text="rate limited by OpenAI")
+        )
+
+        with pytest.raises(ProviderHttpError, match="rate limited by OpenAI"):
+            await adapter.transcribe_batch(make_clip())
+
+    def test_supports_batch(self) -> None:
+        assert openai.OpenAiGpt4oTranscribe.supports_batch is True
+
+    def test_live_variant_remains_stream_only(self) -> None:
+        assert openai.OpenAiGptLiveTranscribe.supports_batch is False
+        assert openai.OpenAiGptLiveTranscribe.supports_stream is True
+
+
+class TestDiarizeBatchProtocol:
+    """OpenAI's documented ``diarized_json`` response contract."""
+
+    pytestmark = pytest.mark.usefixtures("_credentials")
+
+    async def test_request_and_documented_response_are_preserved(self) -> None:
+        segments = [
+            {
+                "type": "transcript.text.segment",
+                "id": "seg_001",
+                "start": 0.0,
+                "end": 1.2,
+                "text": "Hello there.",
+                "speaker": "A",
+            },
+            {
+                "type": "transcript.text.segment",
+                "id": "seg_002",
+                "start": 1.2,
+                "end": 2.4,
+                "text": "General Kenobi.",
+                "speaker": "B",
+            },
+        ]
+        payload = {
+            "task": "transcribe",
+            "duration": 2.4,
+            "text": "Hello there. General Kenobi.",
+            "segments": segments,
+            "usage": {"type": "duration", "seconds": 3},
+        }
+        adapter, requests = _mocked_batch_adapter(
+            "openai-gpt4o-transcribe-diarize", lambda request: httpx.Response(200, json=payload)
+        )
+
+        result = await adapter.transcribe_batch(make_clip())
+
+        assert result.text == "Hello there. General Kenobi."
+        assert result.raw["response"] == payload
+        assert result.raw["segments"] == segments
+        response = result.raw["response"]
+        assert isinstance(response, dict)
+        assert result.raw["segments"] is response["segments"]
+        assert "speakers" not in result.raw
+
+        parts = _multipart_parts(requests[0])
+        assert set(parts) == {"file", "model", "language", "response_format"}
+        assert parts["model"] == [(None, b"gpt-4o-transcribe-diarize")]
+        assert parts["language"] == [(None, b"en")]
+        assert parts["response_format"] == [(None, b"diarized_json")]
+
+    def test_batch_only_registration(self) -> None:
+        adapter = stt.create("openai-gpt4o-transcribe-diarize")
+
+        assert isinstance(adapter, openai.OpenAiGpt4oTranscribeDiarize)
+        assert adapter.vendor == "openai"
+        assert adapter.family == "openai"
+        assert adapter.supports_batch is True
+        assert adapter.supports_stream is False
+        assert stt.family_of("openai-gpt4o-transcribe-diarize") == "openai"
 
 
 @pytest.fixture
@@ -394,6 +563,64 @@ LIVE_FLAG = "AUDIO_HARNESS_TEST_OPENAI_STT_LIVE"
 def _needs(*names: str) -> pytest.MarkDecorator:
     missing = [name for name in names if not os.environ.get(name)]
     return pytest.mark.skipif(bool(missing), reason=f"{', '.join(names)} not set")
+
+
+@pytest.mark.skipif(
+    not os.environ.get(LIVE_FLAG),
+    reason=f"set {LIVE_FLAG}=1 to run two short OpenAI batch transcriptions (fractions of a cent total)",
+)
+class TestLiveBatchSmoke:
+    """One short English clip through the plain and diarized batch lanes."""
+
+    @staticmethod
+    def _live_clip() -> AudioClip:
+        """Load one real English utterance: silence yields no diarize segments."""
+        from pathlib import Path
+
+        import polars as pl
+
+        from audio_harness.audio import load_clip_bytes
+
+        corpus = Path(__file__).parents[1] / "data/hf/stt-benchmark-data/data/train-00000-of-00001.parquet"
+        if not corpus.is_file():
+            pytest.skip(f"live smoke corpus not found: {corpus}")
+        row = pl.read_parquet(corpus, n_rows=1).select("sample_id", "transcription", "audio").to_dicts()[0]
+        return load_clip_bytes(
+            row["audio"]["bytes"],
+            clip_id=str(row["sample_id"]),
+            reference=str(row["transcription"]),
+            language="en-US",
+            source_path=f"{corpus}#{row['sample_id']}",
+        )
+
+    @_needs("OPENAI_API_KEY")
+    async def test_batch_en(self) -> None:
+        adapter = stt.create("openai-gpt4o-transcribe")
+        try:
+            result = await adapter.transcribe_batch(self._live_clip())
+        finally:
+            await adapter.aclose()
+
+        assert result.error is None, result.error
+        assert result.total_s > 0
+        assert result.text.strip()
+        assert "response" in result.raw
+
+    @_needs("OPENAI_API_KEY")
+    async def test_diarize_en(self) -> None:
+        adapter = stt.create("openai-gpt4o-transcribe-diarize")
+        try:
+            result = await adapter.transcribe_batch(self._live_clip())
+        finally:
+            await adapter.aclose()
+
+        assert result.error is None, result.error
+        assert result.total_s > 0
+        segments = result.raw["segments"]
+        assert isinstance(segments, list)
+        assert segments
+        assert all("speaker" in segment for segment in segments)
+        logging.getLogger(__name__).info("OpenAI diarize live segments: %r", segments)
 
 
 @pytest.mark.skipif(
