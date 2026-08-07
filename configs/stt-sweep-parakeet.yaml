@@ -1,0 +1,42 @@
+# parakeet-ane sweep: the Swift/FluidAudio sidecar over both canonical
+# corpora. $0 lane — every clip decodes on this machine's Neural Engine.
+# provider_concurrency stays 1: each subprocess loads the full CoreML model.
+#
+#   uv run audio-harness stt configs/stt-sweep-parakeet.yaml
+#
+# INTERNAL ONLY for the multilingual sources (Speech-MASSIVE is CC BY-NC-SA).
+
+stt:
+  - name: parakeet-ane
+    modes: [batch]
+    options:
+      timeout_s: 1800.0
+
+dataset:
+  id_column: id
+  audio_column: audio
+  text_column: utt
+  limit: 30
+  sample_seed: 20260805
+  sources:
+    - { parquet: "data/hf/speech-massive/ar-SA/validation-*.parquet", language: ar-SA }
+    - { parquet: "data/hf/speech-massive/de-DE/validation-*.parquet", language: de-DE }
+    - { parquet: "data/hf/speech-massive/es-ES/validation-*.parquet", language: es-ES }
+    - { parquet: "data/hf/speech-massive/fr-FR/validation-*.parquet", language: fr-FR }
+    - { parquet: "data/hf/speech-massive/hu-HU/validation-*.parquet", language: hu-HU }
+    - { parquet: "data/hf/speech-massive/ko-KR/validation-*.parquet", language: ko-KR }
+    - { parquet: "data/hf/speech-massive/nl-NL/validation-*.parquet", language: nl-NL }
+    - { parquet: "data/hf/speech-massive/pl-PL/validation-*.parquet", language: pl-PL }
+    - { parquet: "data/hf/speech-massive/pt-PT/validation-*.parquet", language: pt-PT }
+    - { parquet: "data/hf/speech-massive/ru-RU/validation-*.parquet", language: ru-RU }
+    - { parquet: "data/hf/speech-massive/tr-TR/validation-*.parquet", language: tr-TR }
+    - { parquet: "data/hf/speech-massive/vi-VN/validation-*.parquet", language: vi-VN }
+
+run:
+  repeats: 1
+  warmup: 1
+  chunk_ms: 20
+  realtime: true
+  provider_concurrency: 1
+  timeout_s: 1800
+  output_dir: results
