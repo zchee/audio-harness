@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
 from typing import Any
 from urllib.parse import urlencode
 
 import orjson
 from websockets.asyncio.client import ClientConnection
 
+from audio_harness.audio import wrap_wav
 from audio_harness.config import require_env
 from audio_harness.types import AudioClip, EventKind, Mode, SttResult
 
@@ -16,6 +19,10 @@ from .ws import run_stream
 
 
 INIT_URL = "https://api.gladia.io/v2/live"
+UPLOAD_URL = "https://api.gladia.io/v2/upload"
+PRE_RECORDED_URL = "https://api.gladia.io/v2/pre-recorded"
+POLL_INTERVAL_S = 1.0
+SOLARIA3_LANGUAGES = frozenset({"en", "fr", "de", "es", "it"})
 
 
 @register
@@ -146,6 +153,106 @@ class GladiaSolaria1(SttProvider):
                 "maximum_duration_without_endpointing": max_duration,
             }
         return result
+
+
+@register
+class GladiaSolaria3(SttProvider):
+    """Gladia Solaria-3 over the asynchronous pre-recorded pipeline.
+
+    The batch flow first uploads a WAV to ``POST /v2/upload``, then submits
+    its returned ``audio_url`` to ``POST /v2/pre-recorded`` with the
+    ``solaria-3`` model, and polls the returned ``result_url`` until Gladia
+    reports ``done`` or ``error``. The entire upload, init, and polling flow
+    is bounded by ``poll_timeout_s`` so a stuck job cannot hang a run.
+
+    Solaria-3 accepts exactly one language and supports only ``en``, ``fr``,
+    ``de``, ``es``, and ``it``; the clip's primary BCP-47 language subtag is
+    pinned and code switching is disabled. Solaria-3 and Solaria-1 use this
+    repository's same inferred/shared pricing because Gladia does not publish
+    a static Solaria-3-specific hourly rate.
+
+    Options:
+        poll_timeout_s: Overall timeout in seconds for upload, init, and
+            result polling; defaults to 300 seconds.
+    """
+
+    key = "gladia-solaria3"
+    vendor = "gladia"
+    supports_batch = True
+
+    def _auth(self) -> dict[str, str]:
+        return {"x-gladia-key": require_env("GLADIA_API_KEY", self.key)}
+
+    @staticmethod
+    def _language(clip: AudioClip) -> str:
+        language = clip.language.split("-", 1)[0].lower()
+        if language not in SOLARIA3_LANGUAGES:
+            supported = ", ".join(sorted(SOLARIA3_LANGUAGES))
+            raise ValueError(
+                f"gladia-solaria3: unsupported clip language {clip.language!r}; supported languages: {supported}"
+            )
+        return language
+
+    async def transcribe_batch(self, clip: AudioClip) -> SttResult:
+        """Upload a WAV, initialize transcription, and poll for its result."""
+        language = self._language(clip)
+        result = self._result(clip, Mode.BATCH)
+        started = time.perf_counter()
+        timeout_s = float(self.options.get("poll_timeout_s", 300.0))
+
+        async with asyncio.timeout(timeout_s):
+            upload_started = time.perf_counter()
+            upload = await self.http.post(
+                UPLOAD_URL,
+                headers=self._auth(),
+                files={"audio": ("audio.wav", wrap_wav(clip.pcm, clip.sample_rate), "audio/wav")},
+            )
+            raise_for_status(upload, self.key)
+            result.raw["upload_s"] = time.perf_counter() - upload_started
+
+            created = await self.http.post(
+                PRE_RECORDED_URL,
+                headers={**self._auth(), "Content-Type": "application/json"},
+                json={
+                    "audio_url": upload.json()["audio_url"],
+                    "model": "solaria-3",
+                    "language_config": {
+                        "languages": [language],
+                        "code_switching": False,
+                    },
+                },
+            )
+            poll_started = time.perf_counter()
+            raise_for_status(created, self.key)
+            session = created.json()
+            result.raw["transcription_id"] = session.get("id")
+
+            payload = await self._poll(str(session["result_url"]))
+            result.raw["queue_poll_s"] = time.perf_counter() - poll_started
+
+        result.total_s = time.perf_counter() - started
+        result.raw["response"] = payload
+        if payload.get("status") == "error":
+            result.error = str(
+                payload.get("error")
+                or (f"transcription failed (error_code={payload['error_code']})" if payload.get("error_code") else None)
+                or "transcription failed"
+            )
+            return result
+
+        transcription = payload.get("result", {}).get("transcription", {})
+        result.text = str(transcription.get("full_transcript") or "")
+        return result
+
+    async def _poll(self, result_url: str) -> dict[str, Any]:
+        """Poll Gladia's result URL until it reports ``done`` or ``error``."""
+        while True:
+            response = await self.http.get(result_url, headers=self._auth())
+            raise_for_status(response, self.key)
+            payload: dict[str, Any] = response.json()
+            if payload.get("status") in {"done", "error"}:
+                return payload
+            await asyncio.sleep(POLL_INTERVAL_S)
 
 
 def _handle_message(payload: Any, timeline: StreamTimeline) -> bool:

@@ -62,6 +62,19 @@ STT_PRICING: dict[str, SttPricing] = {
         stream_per_hour=0.46,
         note="pay-as-you-go; multilingual streaming is cheaper at ~$0.35/hr",
     ),
+    "deepgram-flux": SttPricing(
+        stream_per_hour=0.39,
+        note="flux-general-en is $0.0065/audio-minute pay-as-you-go; "
+        "flux-general-multi is $0.0078/audio-minute ($0.468/hr); "
+        "verified 2026-08-07",
+    ),
+    "cartesia-ink2": SttPricing(
+        stream_per_hour=0.3888,
+        note="3 credits/audio-second; Scale-plan reference is about $0.39/hr "
+        "($0.000108/audio-second). Billing is a monthly tiered credit pool "
+        "with rollover and optional overages, not metered pay-as-you-go; "
+        "verified 2026-08-07",
+    ),
     "elevenlabs-scribe2": SttPricing(
         batch_per_hour=0.36,
         stream_per_hour=0.36,
@@ -86,6 +99,13 @@ STT_PRICING: dict[str, SttPricing] = {
         stream_per_hour=0.75,
         note="pay-as-you-go Starter tier; Growth volume commitments step "
         "down to $0.20/hr batch, $0.25/hr streaming; verified 2026-08-07",
+    ),
+    "gladia-solaria3": SttPricing(
+        batch_per_hour=0.61,
+        note="shared/inferred from the existing Solaria-1 Starter batch rate; "
+        "Gladia publishes no static Solaria-3-specific hourly rate and exposes "
+        "pricing through a client-rendered calculator. This is not a separately "
+        "vendor-confirmed Solaria-3 rate; inferred 2026-08-07",
     ),
     "or-parakeet": SttPricing(
         batch_per_hour=5.40,

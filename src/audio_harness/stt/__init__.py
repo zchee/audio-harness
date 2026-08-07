@@ -9,6 +9,7 @@ from __future__ import annotations
 from . import (
     assemblyai,
     azure,
+    cartesia,
     deepgram,
     elevenlabs,
     gladia,
@@ -30,6 +31,7 @@ __all__ = [
     "assemblyai",
     "available",
     "azure",
+    "cartesia",
     "create",
     "deepgram",
     "elevenlabs",
