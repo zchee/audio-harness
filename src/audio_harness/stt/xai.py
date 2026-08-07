@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
+from urllib.parse import urlencode
 
 import orjson
 from websockets.asyncio.client import ClientConnection
 
 from audio_harness.audio import wrap_wav
 from audio_harness.config import require_env
-from audio_harness.types import AudioClip, Mode, SttResult
+from audio_harness.types import AudioClip, EventKind, Mode, SttResult
 
 from .base import StreamTimeline, SttProvider, raise_for_status, register
 from .ws import StreamProtocolError, run_stream
@@ -24,15 +26,20 @@ class XaiGrokStt(SttProvider):
     """Grok STT over the xAI REST and WebSocket endpoints.
 
     Options:
-        model: Model identifier; defaults to ``grok-stt``.
-        format: Whether xAI applies inverse text normalization and punctuation.
+        model: Model identifier for the REST endpoint; defaults to
+            ``grok-stt``. The realtime socket takes no model parameter.
+        format: Whether xAI applies inverse text normalization and punctuation
+            (REST only).
+        endpointing: Streaming silence threshold in milliseconds (0-5000)
+            before ``speech_final``; xAI's server default is 10 ms when unset.
 
     Note:
-        The REST contract is documented by xAI. The realtime frame names used
-        here (``session.update``, ``audio.done``, ``transcript.delta`` and
-        ``transcript.done``) were taken from third-party integrations rather
-        than a first-party schema, so verify streaming results against a known
-        transcript before trusting the streaming latency figures.
+        The realtime socket is configured entirely through URL query
+        parameters and accepts only ``audio.done``/``finalize`` control
+        frames — a config message such as ``session.update`` is rejected with
+        "unknown variant" (verified against the live server, 2026-08-07).
+        Transcripts arrive as ``transcript`` events carrying ``transcript``,
+        ``is_final`` and ``speech_final`` fields.
     """
 
     key = "xai-grok-stt"
@@ -73,33 +80,30 @@ class XaiGrokStt(SttProvider):
         return result
 
     async def transcribe_stream(self, clip: AudioClip, *, chunk_ms: int, realtime: bool) -> SttResult:
-        """Stream raw PCM frames over the realtime socket."""
+        """Stream raw PCM binary frames over the query-configured socket."""
         result = self._result(clip, Mode.STREAM)
         timeline = StreamTimeline()
-
-        async def configure(socket: ClientConnection) -> None:
-            await socket.send(
-                orjson.dumps({
-                    "type": "session.update",
-                    "model": self._model(),
-                    "language": clip.language.split("-")[0],
-                    "sample_rate": clip.sample_rate,
-                    "interim_results": True,
-                }).decode()
-            )
+        params = {
+            "sample_rate": str(clip.sample_rate),
+            "encoding": "pcm",
+            "language": clip.language.split("-")[0],
+            "interim_results": "true",
+        }
+        endpointing = self.options.get("endpointing")
+        if endpointing is not None:
+            params["endpointing"] = str(endpointing)
 
         async def audio_done(socket: ClientConnection) -> None:
             await socket.send(orjson.dumps({"type": "audio.done"}).decode())
 
         await run_stream(
-            url=STREAM_URL,
+            url=f"{STREAM_URL}?{urlencode(params)}",
             headers=self._auth(),
             clip=clip,
             chunk_ms=chunk_ms,
             realtime=realtime,
             timeline=timeline,
-            handle_message=_handle_message,
-            on_open=configure,
+            handle_message=make_handler(),
             on_input_done=audio_done,
         )
 
@@ -108,22 +112,56 @@ class XaiGrokStt(SttProvider):
         result.ttft_s = timeline.ttft_s
         result.finalize_s = timeline.finalize_s
         result.total_s = timeline.total_s
+        result.raw["ws_rtt_s"] = timeline.ws_rtt_s
+        result.raw["eou_source"] = "speech_final"
+        result.raw["endpoint_config"] = {
+            "endpointing": endpointing if endpointing is not None else 10,
+        }
         return result
 
 
-def _handle_message(payload: Any, timeline: StreamTimeline) -> bool:
-    """Record one realtime event."""
-    if not isinstance(payload, dict):
-        return False
-    kind = payload.get("type", "")
+def make_handler() -> Callable[[Any, StreamTimeline], bool]:
+    """Build a per-session handler for ``transcript.partial`` events.
 
-    if kind == "error" or "error" in payload:
-        raise StreamProtocolError(f"xai: {payload.get('error', kind)}")
-    if kind in {"session.done", "transcript.complete"}:
-        return True
-    if kind == "transcript.delta":
-        timeline.record(str(payload.get("text", "")), is_final=False)
+    xAI emits per-segment hypotheses: interims, then a final without
+    ``speech_final``, then the same segment text again with
+    ``speech_final: true`` once the endpointing decision lands (observed
+    live 2026-08-07). Concatenating both finals would double every segment,
+    so the restated frame is recorded as a bare EOU event instead — which
+    needs one segment of state, hence a closure per session.
+
+    The error frame is raised with its full raw payload: the server's
+    message text is the only protocol documentation xAI exposes, and a
+    truncated "xai: error" cost a whole 360-clip run to diagnose once.
+    """
+    last_final: tuple[Any, str] | None = None
+
+    def handle(payload: Any, timeline: StreamTimeline) -> bool:
+        nonlocal last_final
+        if not isinstance(payload, dict):
+            return False
+        kind = payload.get("type", "")
+
+        if kind == "error" or "error" in payload:
+            raise StreamProtocolError(f"xai: {orjson.dumps(payload).decode()}")
+        if kind == "transcript.done":
+            return True
+        if kind != "transcript.partial":
+            return False
+
+        text = str(payload.get("text", ""))
+        if bool(payload.get("speech_final")):
+            if (payload.get("start"), text) == last_final:
+                timeline.record("", is_final=False, kind=EventKind.EOU)
+                return False
+            last_final = (payload.get("start"), text)
+            timeline.record(text, is_final=True, kind=EventKind.EOU)
+            return False
+        if bool(payload.get("is_final")):
+            last_final = (payload.get("start"), text)
+            timeline.record(text, is_final=True)
+            return False
+        timeline.record(text, is_final=False)
         return False
-    if kind == "transcript.done":
-        timeline.record(str(payload.get("text", "")), is_final=True)
-    return False
+
+    return handle
