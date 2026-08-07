@@ -1,0 +1,126 @@
+"""OpenRouter-hosted text-to-speech adapters."""
+
+from __future__ import annotations
+
+import time
+from typing import ClassVar
+
+from audio_harness.audio import decode_audio_duration, decode_container_pcm16
+from audio_harness.config import require_env
+from audio_harness.stt.base import raise_for_status
+from audio_harness.types import Mode, TtsPrompt, TtsResult
+
+from .base import TtsProvider, register
+
+
+SPEECH_URL = "https://openrouter.ai/api/v1/audio/speech"
+
+
+class OpenRouterTts(TtsProvider):
+    """Batch TTS through OpenRouter's OpenAI-compatible speech endpoint.
+
+    Subclasses pin a registry key, model slug, and a voice accepted by that
+    model. The ``voice`` option overrides the pinned default.
+
+    Options:
+        voice: Model-specific voice identifier.
+    """
+
+    vendor = "openrouter"
+    family = "openrouter"
+    supports_batch = True
+    supports_stream = False
+    model: ClassVar[str]
+    default_voice: ClassVar[str]
+
+    def _auth(self) -> dict[str, str]:
+        """Build the OpenRouter bearer-authentication header."""
+        return {"Authorization": f"Bearer {require_env('OPENROUTER_API_KEY', self.key)}"}
+
+    def _voice(self) -> str:
+        """Return the configured voice or this model's supported default."""
+        return str(self.options.get("voice", self.default_voice))
+
+    async def synthesize(self, prompt: TtsPrompt) -> TtsResult:
+        """Synthesize MP3 audio, then decode it to native-rate mono PCM."""
+        result = self._result(prompt, Mode.BATCH)
+        result.raw["hosted_proxy"] = True
+        started = time.perf_counter()
+        response = await self.http.post(
+            SPEECH_URL,
+            headers=self._auth(),
+            json={
+                "model": self.model,
+                "input": prompt.text,
+                "voice": self._voice(),
+                "response_format": "mp3",
+            },
+        )
+        raise_for_status(response, self.key)
+        result.total_s = time.perf_counter() - started
+        result.ttfb_s = None
+
+        pcm, sample_rate = decode_container_pcm16(response.content)
+        result.audio = pcm
+        result.encoding = "pcm_s16le"
+        result.sample_rate = sample_rate
+        result.audio_s = decode_audio_duration(pcm, encoding=result.encoding, sample_rate=sample_rate)
+        result.raw["wire_format"] = "mp3"
+        generation_id = response.headers.get("X-Generation-Id")
+        if generation_id:
+            result.raw["generation_id"] = generation_id
+        return result
+
+
+@register
+class OpenRouterKokoro(OpenRouterTts):
+    """OpenRouter-hosted Hexgrad Kokoro 82M."""
+
+    key = "or-kokoro"
+    model = "hexgrad/kokoro-82m"
+    default_voice = "af_heart"
+
+
+@register
+class OpenRouterOrpheus(OpenRouterTts):
+    """OpenRouter-hosted Canopy Labs Orpheus 3B."""
+
+    key = "or-orpheus"
+    model = "canopylabs/orpheus-3b-0.1-ft"
+    default_voice = "tara"
+
+
+@register
+class OpenRouterCsm(OpenRouterTts):
+    """OpenRouter-hosted Sesame CSM 1B."""
+
+    key = "or-csm"
+    model = "sesame/csm-1b"
+    default_voice = "conversational_a"
+
+
+@register
+class OpenRouterZonos(OpenRouterTts):
+    """OpenRouter-hosted Zyphra Zonos v0.1 Hybrid."""
+
+    key = "or-zonos"
+    model = "zyphra/zonos-v0.1-hybrid"
+    default_voice = "american_female"
+
+
+@register
+class OpenRouterMiniMaxTurbo(OpenRouterTts):
+    """OpenRouter-hosted MiniMax Speech-2.8 Turbo."""
+
+    key = "or-minimax-turbo"
+    model = "minimax/speech-2.8-turbo"
+    default_voice = "English_expressive_narrator"
+
+
+@register
+class OpenRouterMiniMaxHd(OpenRouterTts):
+    """OpenRouter-hosted MiniMax Speech-2.8 HD."""
+
+    key = "or-minimax-hd"
+    model = "minimax/speech-2.8-hd"
+    default_voice = "English_expressive_narrator"

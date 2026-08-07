@@ -636,4 +636,8 @@ LEGEND = """
   retry schedule on a native thread, so their TTFT/Finalize/TTFB/TTFA figures
   include that overhead and are not directly comparable to the
   WebSocket-native adapters' numbers.
+- **Hosted-proxy adapters** — Every OpenRouter result carries
+  `raw["hosted_proxy"] = True`: OpenRouter adds routing latency on top of the
+  hosted model, so its latency figures are not directly comparable to lanes
+  that call the model vendor directly.
 """.strip()

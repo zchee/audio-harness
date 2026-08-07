@@ -87,6 +87,11 @@ STT_PRICING: dict[str, SttPricing] = {
         note="pay-as-you-go Starter tier; Growth volume commitments step "
         "down to $0.20/hr batch, $0.25/hr streaming; verified 2026-08-07",
     ),
+    "or-parakeet": SttPricing(
+        batch_per_hour=5.40,
+        note="$0.0015/audio-second through OpenRouter; hosted-proxy latency is "
+        "not direct-vendor comparable; pricing verified 2026-08-07",
+    ),
     "mistral-voxtral-realtime": SttPricing(
         stream_per_hour=0.36,
         note="$0.006/audio-min streaming (La Plateforme pay-as-you-go); the "
@@ -132,9 +137,35 @@ TTS_PRICING: dict[str, TtsPricing] = {
         note="on-demand (no subscription) rate; paid plan tiers step down to "
         "$12.50/M, enterprise as low as $5/M; verified 2026-08-07",
     ),
-    "minimax-speech28turbo": TtsPricing(
+    "or-kokoro": TtsPricing(
+        per_million_chars=0.62,
+        note="OpenRouter-hosted; hosted-proxy latency is not direct-vendor "
+        "comparable; pricing verified 2026-08-07",
+    ),
+    "or-orpheus": TtsPricing(
+        per_million_chars=7.0,
+        note="OpenRouter-hosted; hosted-proxy latency is not direct-vendor "
+        "comparable; pricing verified 2026-08-07",
+    ),
+    "or-csm": TtsPricing(
+        per_million_chars=7.0,
+        note="OpenRouter-hosted; hosted-proxy latency is not direct-vendor "
+        "comparable; pricing verified 2026-08-07",
+    ),
+    "or-zonos": TtsPricing(
+        per_million_chars=7.0,
+        note="OpenRouter-hosted; hosted-proxy latency is not direct-vendor "
+        "comparable; pricing verified 2026-08-07",
+    ),
+    "or-minimax-turbo": TtsPricing(
         per_million_chars=60.0,
-        note="pay-as-you-go rate (speech-2.8-hd costs $100/M); verified 2026-08-07",
+        note="OpenRouter-hosted; hosted-proxy latency is not direct-vendor "
+        "comparable; pricing verified 2026-08-07",
+    ),
+    "or-minimax-hd": TtsPricing(
+        per_million_chars=100.0,
+        note="OpenRouter-hosted; hosted-proxy latency is not direct-vendor "
+        "comparable; pricing verified 2026-08-07",
     ),
     "azure-neural-tts": TtsPricing(
         per_million_chars=15.0,

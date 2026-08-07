@@ -105,6 +105,26 @@ def load_clip_bytes(
     )
 
 
+def decode_container_pcm16(payload: bytes) -> tuple[bytes, int]:
+    """Decode container audio to native-rate mono 16-bit PCM.
+
+    Args:
+        payload: Encoded audio in a format supported by libsndfile.
+
+    Returns:
+        A pair of little-endian mono PCM bytes and the decoded sample rate.
+
+    Raises:
+        ValueError: If the payload is empty or decodes to zero samples.
+    """
+    if not payload:
+        raise ValueError("audio payload is empty")
+    data, sample_rate = sf.read(BytesIO(payload), dtype="float32", always_2d=True)
+    if data.shape[0] == 0:
+        raise ValueError("audio payload decoded to zero samples")
+    return _float_to_pcm16(data.mean(axis=1)), int(sample_rate)
+
+
 def _decode(
     source: Path | BytesIO,
     *,

@@ -17,7 +17,6 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 import os
-from urllib.parse import urlencode
 
 import httpx
 import orjson
@@ -246,70 +245,77 @@ async def _check_quota(client: httpx.AsyncClient, check: _HttpCheck, headers: di
     )
 
 
-MINIMAX_FILES_URL = "https://api.minimax.io/v1/files/list?purpose=voice_clone"
+OPENROUTER_KEY_URL = "https://openrouter.ai/api/v1/key"
 
 
-async def _check_minimax(client: httpx.AsyncClient) -> CheckResult:
-    """List MiniMax files, the cheapest authenticated call available.
+async def _check_openrouter(client: httpx.AsyncClient) -> CheckResult:
+    """Fetch OpenRouter's current-key metadata, a non-billable authenticated call.
 
-    MiniMax authenticates with a Bearer key but scopes every account to a
-    GroupId that the vendor's own client libraries send as a query parameter
-    on this endpoint, so both credentials are required for the probe to mean
-    anything — a valid key with the wrong GroupId is rejected the same as no
-    key at all. A 200 response can still carry a failure in ``base_resp``, so
-    that field is checked rather than trusting the HTTP status alone.
+    An HTTP 200 alone is not proof the key can run inference: a management
+    key authenticates here yet cannot call inference endpoints, and a key
+    whose per-key spending limit is exhausted authenticates while every
+    audio request would be refused. Both conditions are read from the key
+    metadata and rejected explicitly.
     """
-    api_key = os.environ.get("MINIMAX_API_KEY")
-    group_id = os.environ.get("MINIMAX_GROUP_ID")
-    if not api_key or not group_id:
+    api_key = os.environ.get("OPENROUTER_API_KEY")
+    if not api_key:
         return CheckResult(
-            provider="MiniMax",
-            env_var="MINIMAX_API_KEY" if not api_key else "MINIMAX_GROUP_ID",
+            provider="OpenRouter",
+            env_var="OPENROUTER_API_KEY",
             ok=False,
             detail="not set — see docs/ACCOUNTS.md",
             skipped=True,
         )
 
-    url = f"{MINIMAX_FILES_URL}&{urlencode({'GroupId': group_id})}"
     try:
-        response = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
+        response = await client.get(OPENROUTER_KEY_URL, headers={"Authorization": f"Bearer {api_key}"})
     except httpx.HTTPError as exc:
         return CheckResult(
-            provider="MiniMax",
-            env_var="MINIMAX_API_KEY",
+            provider="OpenRouter",
+            env_var="OPENROUTER_API_KEY",
             ok=False,
             detail=f"unreachable: {type(exc).__name__}: {exc}",
         )
 
     if response.status_code in {401, 403}:
         return CheckResult(
-            provider="MiniMax",
-            env_var="MINIMAX_API_KEY",
+            provider="OpenRouter",
+            env_var="OPENROUTER_API_KEY",
             ok=False,
-            detail=f"rejected (HTTP {response.status_code}) — key or GroupId invalid",
+            detail=f"rejected (HTTP {response.status_code})",
         )
     if response.status_code >= 400:
         return CheckResult(
-            provider="MiniMax",
-            env_var="MINIMAX_API_KEY",
+            provider="OpenRouter",
+            env_var="OPENROUTER_API_KEY",
             ok=False,
             detail=f"HTTP {response.status_code}: {response.text[:120]}",
         )
 
-    base_resp = response.json().get("base_resp") or {}
-    code = base_resp.get("status_code", 0)
-    if code:
+    data = response.json().get("data") or {}
+    if data.get("is_management_key"):
         return CheckResult(
-            provider="MiniMax",
-            env_var="MINIMAX_API_KEY",
+            provider="OpenRouter",
+            env_var="OPENROUTER_API_KEY",
             ok=False,
-            detail=f"HTTP 200 but base_resp {code}: {base_resp.get('status_msg', 'error')}",
+            detail="management key — cannot call inference endpoints",
         )
+    remaining = data.get("limit_remaining")
+    if isinstance(remaining, int | float) and remaining <= 0:
+        return CheckResult(
+            provider="OpenRouter",
+            env_var="OPENROUTER_API_KEY",
+            ok=False,
+            detail=f"per-key spending limit exhausted (limit_remaining={remaining})",
+        )
+    detail = f"authenticated (HTTP {response.status_code})"
+    if isinstance(remaining, int | float):
+        detail += f", ${remaining:.2f} key limit remaining"
     return CheckResult(
-        provider="MiniMax",
-        env_var="MINIMAX_API_KEY",
+        provider="OpenRouter",
+        env_var="OPENROUTER_API_KEY",
         ok=True,
-        detail=f"authenticated (HTTP {response.status_code})",
+        detail=detail,
     )
 
 
@@ -484,7 +490,7 @@ async def run_checks() -> list[CheckResult]:
     async with httpx.AsyncClient(timeout=TIMEOUT_S, follow_redirects=True) as client:
         results = await asyncio.gather(
             *(_run_http_check(client, check) for check in _CHECKS),
-            _check_minimax(client),
+            _check_openrouter(client),
             _check_azure_speech(client),
         )
     soniox = await _check_soniox_session()
