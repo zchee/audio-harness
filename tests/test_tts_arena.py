@@ -9,11 +9,14 @@ spending a single API call.
 from __future__ import annotations
 
 import asyncio
+import base64
+import itertools
 import math
 import os
 from pathlib import Path
 
 import numpy as np
+import orjson
 import pytest
 import soundfile as sf
 
@@ -31,17 +34,21 @@ from audio_harness.judge.tts_arena import (
     bt_table,
     ci_separated_pairs,
     comparisons_from_verdicts,
+    evaluate_cross_family_gate,
     evaluate_gate,
     exact_permutation_p,
     inter_rater_agreement,
+    judge_family,
     load_arena_prompts,
     order_flip_stats,
     pair_wav_bytes,
     parse_verdict,
     render_arena_markdown,
+    render_cross_family_gate,
     run_arena,
     spearman_rho,
     write_arena_outputs,
+    write_cross_family_gate,
 )
 from audio_harness.types import TtsPrompt
 
@@ -157,6 +164,117 @@ class TestParseVerdict:
     def test_garbage_returns_none(self) -> None:
         assert parse_verdict("I cannot compare these clips.") is None
         assert parse_verdict("") is None
+
+
+class TestJudgeFamily:
+    """Model ids select a persisted family or fail closed."""
+
+    @pytest.mark.parametrize("model", ["gemini-2.5-flash", "gemini-live-audio"])
+    def test_gemini_prefix(self, model: str) -> None:
+        assert judge_family(model) == "gemini"
+
+    @pytest.mark.parametrize(
+        "model",
+        ["gpt-audio", "gpt-audio-2025-08-28", "gpt-audio-mini-2025-12-15", "gpt-audio-1.5"],
+    )
+    def test_openai_prefix(self, model: str) -> None:
+        assert judge_family(model) == "openai"
+
+    def test_unknown_prefix_is_rejected(self) -> None:
+        with pytest.raises(ArenaError, match="unknown judge model family"):
+            judge_family("claude-audio")
+
+    @pytest.mark.parametrize("aspect", tts_arena.ASPECTS)
+    def test_instruction_preamble_is_family_specific(self, aspect: str) -> None:
+        gemini = tts_arena.aspect_instruction(aspect)
+        openai = tts_arena.aspect_instruction(aspect, "openai")
+        assert gemini.startswith("You will hear one audio file containing")
+        assert openai.startswith("The attached audio contains")
+        suffix = gemini.removeprefix("You will hear one audio file containing")
+        assert openai.removeprefix("The attached audio contains") == suffix
+        assert "Answer with exactly one word" in suffix
+
+    def test_cost_estimate_dispatches_by_family(self) -> None:
+        gemini = tts_arena.ArenaRun(
+            model="gemini-2.5-flash",
+            live_prompt_tokens=2_000_000,
+            live_output_tokens=1_000_000,
+        )
+        openai = tts_arena.ArenaRun(
+            model="gpt-audio-2025-08-28",
+            live_prompt_tokens=2_000_000,
+            live_output_tokens=1_000_000,
+        )
+
+        assert gemini.est_usd == pytest.approx(4.5)
+        assert openai.est_usd == pytest.approx(74.0)
+
+
+class TestOpenAiJudge:
+    """The OpenAI factory uses raw HTTP with the documented audio part."""
+
+    async def test_chat_completions_request_and_usage(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        captured: dict[str, object] = {}
+
+        class StubResponse:
+            text = ""
+
+            def raise_for_status(self) -> None:
+                return None
+
+            def json(self) -> dict[str, object]:
+                return {
+                    "id": "chatcmpl_test",
+                    "object": "chat.completion",
+                    "choices": [{"message": {"role": "assistant", "content": "SECOND"}}],
+                    "usage": {
+                        "prompt_tokens": 321,
+                        "completion_tokens": 7,
+                        "total_tokens": 328,
+                    },
+                }
+
+        class StubClient:
+            def __init__(self, *, timeout: None) -> None:
+                captured["timeout"] = timeout
+
+            async def post(self, url: str, *, headers: dict[str, str], json: dict[str, object]) -> StubResponse:
+                captured.update(url=url, headers=headers, json=json)
+                return StubResponse()
+
+        monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+        monkeypatch.setattr(tts_arena.httpx, "AsyncClient", StubClient)
+        model = "gpt-audio-2025-08-28"
+        wav = b"RIFF-test-wav"
+        instruction = "Choose FIRST, SECOND, or TIE."
+
+        reply = await tts_arena._openai_judge(model)(wav, instruction)
+
+        assert captured["url"] == tts_arena.OPENAI_CHAT_COMPLETIONS_URL
+        assert captured["timeout"] is None
+        assert captured["headers"] == {
+            "Authorization": "Bearer test-openai-key",
+            "Content-Type": "application/json",
+        }
+        body = captured["json"]
+        assert isinstance(body, dict)
+        assert body["model"] == model
+        assert body["modalities"] == ["text"]
+        assert body["temperature"] == 0
+        content = body["messages"][0]["content"]
+        assert content[0] == {"type": "text", "text": instruction}
+        assert content[1] == {
+            "type": "input_audio",
+            "input_audio": {
+                "data": base64.b64encode(wav).decode("ascii"),
+                "format": "wav",
+            },
+        }
+        assert reply == JudgeReply(text="SECOND", prompt_tokens=321, output_tokens=7)
+        assert parse_verdict(reply.text) == "second"
 
 
 class TestBradleyTerry:
@@ -482,6 +600,57 @@ class TestRunArenaCache:
         assert sorted(v.winner for v in second.verdicts) == sorted(v.winner for v in first.verdicts)
         assert all(v.cached for v in second.verdicts)
 
+    async def test_cache_keys_are_separate_across_judge_models(self, tmp_path: Path) -> None:
+        audio_dir, prompts = self._stage(tmp_path)
+        cache = tmp_path / "judge-cache.jsonl"
+        gemini_model = "gemini-2.5-flash"
+        openai_model = "gpt-audio-2025-08-28"
+
+        gemini_judge = CountingJudge()
+        gemini_first = await run_arena(
+            audio_dir=audio_dir,
+            systems=("sysa", "sysb"),
+            prompts=prompts,
+            cache_path=cache,
+            model=gemini_model,
+            judge=gemini_judge,
+        )
+        openai_judge = CountingJudge()
+        openai_first = await run_arena(
+            audio_dir=audio_dir,
+            systems=("sysa", "sysb"),
+            prompts=prompts,
+            cache_path=cache,
+            model=openai_model,
+            judge=openai_judge,
+        )
+
+        assert gemini_judge.calls == openai_judge.calls == 12
+        assert (gemini_first.live_calls, gemini_first.cached_calls) == (12, 0)
+        assert (openai_first.live_calls, openai_first.cached_calls) == (12, 0)
+
+        gemini_cached = await run_arena(
+            audio_dir=audio_dir,
+            systems=("sysa", "sysb"),
+            prompts=prompts,
+            cache_path=cache,
+            model=gemini_model,
+            judge=CountingJudge(),
+        )
+        openai_cached = await run_arena(
+            audio_dir=audio_dir,
+            systems=("sysa", "sysb"),
+            prompts=prompts,
+            cache_path=cache,
+            model=openai_model,
+            judge=CountingJudge(),
+        )
+
+        assert (gemini_cached.live_calls, gemini_cached.cached_calls) == (0, 12)
+        assert (openai_cached.live_calls, openai_cached.cached_calls) == (0, 12)
+        assert {verdict.model for verdict in gemini_cached.verdicts} == {gemini_model}
+        assert {verdict.model for verdict in openai_cached.verdicts} == {openai_model}
+
     async def test_positional_stub_judge_flips_everything(self, tmp_path: Path) -> None:
         audio_dir, prompts = self._stage(tmp_path)
 
@@ -551,6 +720,85 @@ class TestRunArenaCache:
         assert run.error_calls == 6
         assert all("Timeout" in (v.error or "") for v in run.verdicts)
 
+    async def test_httpx_status_uses_the_shared_retry_loop(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        audio_dir, prompts = self._stage(tmp_path)
+        monkeypatch.setattr(tts_arena, "_RETRY_BASE_S", 0.0)
+
+        class RateLimitedOncePerJob:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            async def __call__(self, wav: bytes, instruction: str) -> JudgeReply:
+                self.calls += 1
+                if self.calls % 2:
+                    request = tts_arena.httpx.Request("POST", tts_arena.OPENAI_CHAT_COMPLETIONS_URL)
+                    response = tts_arena.httpx.Response(429, request=request)
+                    raise tts_arena.httpx.HTTPStatusError(
+                        "rate limited",
+                        request=request,
+                        response=response,
+                    )
+                return JudgeReply(text="FIRST", prompt_tokens=100, output_tokens=1)
+
+        judge = RateLimitedOncePerJob()
+        run = await run_arena(
+            audio_dir=audio_dir,
+            systems=("sysa", "sysb"),
+            prompts=prompts[:1],
+            cache_path=tmp_path / "cache.jsonl",
+            model="gpt-audio",
+            judge=judge,
+            concurrency=1,
+        )
+
+        assert judge.calls == 12
+        assert (run.live_calls, run.error_calls) == (6, 0)
+
+    async def test_malformed_openai_usage_is_retried_and_recorded(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        audio_dir, prompts = self._stage(tmp_path)
+        monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+        monkeypatch.setattr(tts_arena, "_RETRY_BASE_S", 0.0)
+        posts = 0
+
+        class StubResponse:
+            text = ""
+
+            def raise_for_status(self) -> None:
+                return None
+
+            def json(self) -> dict[str, object]:
+                return {
+                    "choices": [{"message": {"content": "FIRST"}}],
+                    "usage": "not-an-object",
+                }
+
+        class StubClient:
+            def __init__(self, *, timeout: None) -> None:
+                assert timeout is None
+
+            async def post(self, url: str, **kwargs: object) -> StubResponse:
+                nonlocal posts
+                posts += 1
+                return StubResponse()
+
+        monkeypatch.setattr(tts_arena.httpx, "AsyncClient", StubClient)
+
+        run = await run_arena(
+            audio_dir=audio_dir,
+            systems=("sysa", "sysb"),
+            prompts=prompts[:1],
+            cache_path=tmp_path / "cache.jsonl",
+            model="gpt-audio",
+        )
+
+        assert posts == 6 * tts_arena._JUDGE_ATTEMPTS
+        assert run.error_calls == 6
+        assert all("usage is not an object" in (verdict.error or "") for verdict in run.verdicts)
+
     async def test_one_system_is_rejected(self, tmp_path: Path) -> None:
         with pytest.raises(ArenaError, match="at least two"):
             await run_arena(
@@ -560,6 +808,166 @@ class TestRunArenaCache:
                 cache_path=tmp_path / "cache.jsonl",
                 judge=CountingJudge(),
             )
+
+
+def _write_cross_family_fixture(
+    directory: Path,
+    *,
+    model: str,
+    family: str,
+    systems: list[str],
+    strengths: dict[str, float],
+    winner_overrides: dict[tuple[str, str], str] | None = None,
+    language: str = "en-US",
+) -> Path:
+    """Write one completed summary plus order-counterbalanced verdicts."""
+    directory.mkdir()
+    summary = directory / "arena-summary.json"
+    summary.write_bytes(
+        orjson.dumps(
+            {
+                "language": language,
+                "model": model,
+                "family": family,
+                "systems": systems,
+                "bt": [
+                    {
+                        "system": system,
+                        "log_strength": strength,
+                        "ci_low": strength - 0.1,
+                        "ci_high": strength + 0.1,
+                        "wins": 10.0,
+                        "games": 12.0,
+                    }
+                    for system, strength in strengths.items()
+                ],
+            },
+            option=orjson.OPT_INDENT_2,
+        )
+    )
+
+    verdicts = []
+    overrides = winner_overrides or {}
+    for one, two in itertools.combinations(sorted(systems), 2):
+        outcome = overrides.get((one, two), one)
+        for first, second in ((one, two), (two, one)):
+            if outcome == "tie":
+                winner = "tie"
+            elif outcome == first:
+                winner = "first"
+            elif outcome == second:
+                winner = "second"
+            else:
+                raise AssertionError(f"invalid fixture outcome {outcome!r} for {one!r}/{two!r}")
+            verdicts.append({
+                "aspect": "naturalness",
+                "prompt_id": "p1",
+                "first": first,
+                "second": second,
+                "winner": winner,
+                "model": model,
+            })
+    (directory / "arena-results.jsonl").write_bytes(b"".join(orjson.dumps(verdict) + b"\n" for verdict in verdicts))
+    return summary
+
+
+class TestCrossFamilyGate:
+    """Persisted summaries make criterion (ii) independently computable."""
+
+    def test_perfect_bt_rho_and_pair_agreement_diagnostic(self, tmp_path: Path) -> None:
+        systems = ["a", "b", "c", "d"]
+        summary_a = _write_cross_family_fixture(
+            tmp_path / "gemini",
+            model="gemini-2.5-flash",
+            family="gemini",
+            systems=systems,
+            strengths={"a": 4.0, "b": 3.0, "c": 2.0, "d": 1.0},
+            winner_overrides={("a", "b"): "tie"},
+        )
+        summary_b = _write_cross_family_fixture(
+            tmp_path / "openai",
+            model="gpt-audio-2025-08-28",
+            family="openai",
+            systems=list(reversed(systems)),
+            strengths={"d": 10.0, "b": 30.0, "a": 40.0, "c": 20.0},
+            winner_overrides={("a", "b"): "tie", ("c", "d"): "d"},
+        )
+
+        result = evaluate_cross_family_gate(summary_a, summary_b)
+
+        assert result.rho == pytest.approx(1.0)
+        assert result.criterion.status == "pass"
+        assert result.pair_agreement.compared == 6
+        assert result.pair_agreement.agreements == 5
+        assert result.pair_agreement.rate == pytest.approx(5 / 6)
+        markdown = render_cross_family_gate(result)
+        assert "| cross-family judge agreement | pass |" in markdown
+        assert "5/6 comparable pair groups" in markdown
+        assert "agree = 83.3%" in markdown
+        report = write_cross_family_gate(result)
+        assert report == summary_a.with_name("arena-cross-family-gate.md")
+        assert report.read_text(encoding="utf-8") == markdown + "\n"
+
+    def test_same_family_is_rejected(self, tmp_path: Path) -> None:
+        systems = ["a", "b"]
+        summary_a = _write_cross_family_fixture(
+            tmp_path / "one",
+            model="gemini-2.5-flash",
+            family="gemini",
+            systems=systems,
+            strengths={"a": 1.0, "b": -1.0},
+        )
+        summary_b = _write_cross_family_fixture(
+            tmp_path / "two",
+            model="gemini-2.5-pro",
+            family="gemini",
+            systems=systems,
+            strengths={"a": 2.0, "b": -2.0},
+        )
+
+        with pytest.raises(ArenaError, match=r"different judge families.*gemini.*gemini"):
+            evaluate_cross_family_gate(summary_a, summary_b)
+
+    def test_mismatched_system_sets_name_the_difference(self, tmp_path: Path) -> None:
+        summary_a = _write_cross_family_fixture(
+            tmp_path / "one",
+            model="gemini-2.5-flash",
+            family="gemini",
+            systems=["a", "b", "c"],
+            strengths={"a": 2.0, "b": 1.0, "c": 0.0},
+        )
+        summary_b = _write_cross_family_fixture(
+            tmp_path / "two",
+            model="gpt-audio",
+            family="openai",
+            systems=["a", "b", "d"],
+            strengths={"a": 2.0, "b": 1.0, "d": 0.0},
+        )
+
+        with pytest.raises(ArenaError, match=r"symmetric difference: \['c', 'd'\]"):
+            evaluate_cross_family_gate(summary_a, summary_b)
+
+    def test_mismatched_languages_are_rejected(self, tmp_path: Path) -> None:
+        systems = ["a", "b"]
+        summary_a = _write_cross_family_fixture(
+            tmp_path / "one",
+            model="gemini-2.5-flash",
+            family="gemini",
+            systems=systems,
+            strengths={"a": 1.0, "b": -1.0},
+            language="en-US",
+        )
+        summary_b = _write_cross_family_fixture(
+            tmp_path / "two",
+            model="gpt-audio",
+            family="openai",
+            systems=systems,
+            strengths={"a": 1.0, "b": -1.0},
+            language="ja-JP",
+        )
+
+        with pytest.raises(ArenaError, match=r"languages differ: 'en-US' vs 'ja-JP'"):
+            evaluate_cross_family_gate(summary_a, summary_b)
 
 
 class TestOutputs:
@@ -601,6 +1009,7 @@ class TestOutputs:
         assert report.is_file()
         payload = orjson.loads(summary.read_bytes())
         assert payload["language"] == "en-US"
+        assert payload["family"] == "gemini"
         assert payload["gate"]["criteria"][1]["status"] == "uncomputable"
         # One aspect over four prompts: four swap-groups, none flipped.
         assert payload["order_flip"]["judged"] == 4

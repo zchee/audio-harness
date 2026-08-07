@@ -647,9 +647,11 @@ def tts_arena_command(
             "general + entities only"
         )
 
-    # Verdicts live next to the audio they judged; the cache spans run dirs.
+    # Keep each judge model's persisted evidence beside the audio run without
+    # letting the second family overwrite the first; the cache spans run dirs.
+    judge_output_dir = audio_dir.parent / "judge-results" / judge_model.replace("/", "_")
     results_path, summary_path, report_path = tts_arena.write_arena_outputs(
-        audio_dir.parent, run, scores, flips, gate, notes=notes
+        judge_output_dir, run, scores, flips, gate, notes=notes
     )
     console.print()
     console.print(tts_arena.render_arena_markdown(run, scores, gate, notes=notes))
@@ -662,6 +664,37 @@ def tts_arena_command(
     console.print(f"[dim]raw verdicts:[/dim] {results_path}")
     console.print(f"[dim]summary:[/dim]      {summary_path}")
     console.print(f"[dim]report:[/dim]       {report_path}")
+
+
+@app.command("arena-gate")
+def arena_gate_command(
+    summary_a: Annotated[Path, typer.Argument(help="First completed arena-summary.json.")],
+    summary_b: Annotated[
+        Path,
+        typer.Argument(help="Second completed arena-summary.json from another judge family."),
+    ],
+) -> None:
+    """Compare completed Gemini/OpenAI arena runs for gate criterion (ii).
+
+    Bradley-Terry vectors come from the two summaries. The diagnostic
+    per-pair verdict agreement comes from each summary's sibling
+    ``arena-results.jsonl``. The Markdown result is printed and written as
+    ``arena-cross-family-gate.md`` beside the first summary.
+    """
+    from .judge import tts_arena
+
+    try:
+        result = tts_arena.evaluate_cross_family_gate(summary_a, summary_b)
+        report_path = tts_arena.write_cross_family_gate(result)
+    except tts_arena.ArenaError as exc:
+        console.print(f"[red]arena gate error:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+
+    console.print(tts_arena.render_cross_family_gate(result))
+    console.print()
+    console.print(f"[dim]cross-family gate report:[/dim] {report_path}")
+    if result.criterion.status != "pass":
+        raise typer.Exit(code=1)
 
 
 @app.command("sim")

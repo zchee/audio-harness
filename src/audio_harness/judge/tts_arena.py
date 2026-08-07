@@ -21,20 +21,21 @@ of systems stated at gate time):
       never as the decision). No panel has been collected yet, so the lane
       renders "experimental (panel pending)".
 (ii)  Cross-family judge agreement rho >= :data:`CROSS_FAMILY_RHO_GATE`
-      between judges from different model families. Only a Gemini audio-in
-      judge is available today (no OpenAI key), so this criterion is
-      UNCOMPUTABLE; it is reported as such and never faked.
+      between judges from different model families. Gemini and OpenAI
+      audio-in judges share the same arena protocol; after one completed run
+      from each family, :func:`evaluate_cross_family_gate` computes this
+      criterion from their persisted summaries.
 (iii) Order-flip rate <= :data:`ORDER_FLIP_GATE`: computable now and
       computed on every run.
 
-Because criterion (ii) cannot currently be evaluated, the gate can never
-pass with a single judge family: the arena stays "experimental - not ranked"
-by construction, which is the honest reading of the evidence.
+The gate can never pass from a single judge-family run alone: until a second
+family summary is compared, criterion (ii) remains explicitly uncomputable.
 """
 
 from __future__ import annotations
 
 import asyncio
+import base64
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 import hashlib
@@ -42,9 +43,11 @@ import itertools
 from pathlib import Path
 import random
 import re
+from typing import Any
 
 from google import genai
 from google.genai import errors as genai_errors, types as genai_types
+import httpx
 import numpy as np
 import orjson
 import soxr
@@ -57,8 +60,19 @@ from audio_harness.types import TtsPrompt
 JUDGE_MODEL = "gemini-2.5-flash"
 """Pinned audio-in judge model. Changing it invalidates every cached verdict."""
 
-JUDGE_FAMILY = "gemini"
-"""Model family of the pinned judge, for the cross-family gate criterion."""
+
+def judge_family(model: str) -> str:
+    """Derive the cross-family gate label from a judge model id.
+
+    Raises:
+        ArenaError: If the model prefix is not a supported judge family.
+    """
+    if model.startswith("gemini"):
+        return "gemini"
+    if model.startswith("gpt-"):
+        return "openai"
+    raise ArenaError(f"unknown judge model family for {model!r}")
+
 
 ARENA_SAMPLE_RATE = 16000
 """Rate every clip is resampled to before concatenation; Gemini's audio floor."""
@@ -103,6 +117,21 @@ JUDGE_USD_PER_M_INPUT_TOKENS = 1.00
 every prompt token is priced at the audio rate (a slight over-estimate)."""
 
 JUDGE_USD_PER_M_OUTPUT_TOKENS = 2.50
+
+JUDGE_PRICING_CHECKED_OPENAI = "2026-08-07"
+JUDGE_USD_PER_M_INPUT_TOKENS_OPENAI = 32.00
+"""OpenAI gpt-audio audio-input rate in USD per million audio tokens."""
+
+JUDGE_USD_PER_M_OUTPUT_TOKENS_OPENAI = 10.00
+"""OpenAI gpt-audio text-output rate in USD per million text tokens."""
+
+# The official gpt-audio-mini page currently omits audio-token rates. Until
+# OpenAI publishes a mini-specific audio-input price, judge_pricing applies
+# the verified non-mini gpt-audio rate as a conservative mini estimate rather
+# than silently using its much lower text-input rate for audio tokens.
+
+OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions"
+CROSS_FAMILY_REPORT_NAME = "arena-cross-family-gate.md"
 
 
 class ArenaError(RuntimeError):
@@ -313,6 +342,44 @@ class GateReport:
         return f"experimental (panel pending; n={self.n_systems} systems)"
 
 
+@dataclass(slots=True, frozen=True)
+class PairAgreementStats:
+    """Cross-family agreement over order-consistent unordered pair groups.
+
+    Each family contributes two presentation orders per ``(aspect, prompt,
+    unordered system pair)``. A group is compared only when both orders from
+    each family normalize to one outcome: a named winning system, or ``tie``.
+    Two ties count as agreement; a tie versus a system win does not. Groups
+    with an error or an order flip in either family are dropped.
+    """
+
+    compared: int
+    agreements: int
+    dropped: int
+
+    @property
+    def rate(self) -> float | None:
+        """Agreement fraction, or ``None`` when no group was comparable."""
+        if self.compared == 0:
+            return None
+        return self.agreements / self.compared
+
+
+@dataclass(slots=True, frozen=True)
+class CrossFamilyGateResult:
+    """Criterion (ii) plus the diagnostic pair-agreement evidence."""
+
+    summary_a: Path
+    summary_b: Path
+    model_a: str
+    model_b: str
+    family_a: str
+    family_b: str
+    rho: float | None
+    criterion: Criterion
+    pair_agreement: PairAgreementStats
+
+
 @dataclass(slots=True)
 class ArenaRun:
     """Everything one arena execution produced and spent.
@@ -351,10 +418,23 @@ class ArenaRun:
         a call is a few dozen tokens against hundreds of audio tokens — so
         the figure is a slight over-estimate, never an under-estimate.
         """
-        return (
-            self.live_prompt_tokens * JUDGE_USD_PER_M_INPUT_TOKENS
-            + self.live_output_tokens * JUDGE_USD_PER_M_OUTPUT_TOKENS
-        ) / 1e6
+        input_rate, output_rate = judge_pricing(self.model)
+        return (self.live_prompt_tokens * input_rate + self.live_output_tokens * output_rate) / 1e6
+
+
+def judge_pricing(model: str) -> tuple[float, float]:
+    """Return input/output USD-per-million-token rates for ``model``."""
+    family = judge_family(model)
+    if family == "gemini":
+        return JUDGE_USD_PER_M_INPUT_TOKENS, JUDGE_USD_PER_M_OUTPUT_TOKENS
+    return JUDGE_USD_PER_M_INPUT_TOKENS_OPENAI, JUDGE_USD_PER_M_OUTPUT_TOKENS_OPENAI
+
+
+def judge_pricing_checked(model: str) -> str:
+    """Return the source-check date for the model family's judge rates."""
+    if judge_family(model) == "gemini":
+        return JUDGE_PRICING_CHECKED
+    return JUDGE_PRICING_CHECKED_OPENAI
 
 
 def load_arena_prompts(specs: Sequence[str], *, language: str, seed: int) -> list[TtsPrompt]:
@@ -452,14 +532,27 @@ def pair_wav_bytes(first: np.ndarray, second: np.ndarray, *, gap_s: float = PAIR
     return wrap_wav(_float_to_pcm16(combined), ARENA_SAMPLE_RATE)
 
 
-def aspect_instruction(aspect: str) -> str:
+def aspect_instruction(aspect: str, family: str = "gemini") -> str:
     """Build the pinned judge instruction for one aspect.
+
+    The preamble is family-specific: gpt-audio models refuse the assertive
+    "You will hear ..." framing ("I can't listen to audio files") yet judge
+    normally when the same request says "The attached audio contains ..." —
+    observed live 2026-08-08 with the audio demonstrably attached
+    (usage.prompt_tokens_details.audio_tokens > 0) in both phrasings. The
+    aspect focus and the answer contract are identical across families;
+    Gemini keeps its original wording so its cached verdicts stay valid.
 
     Raises:
         KeyError: If ``aspect`` is not one of :data:`ASPECTS`.
     """
+    preamble = (
+        "The attached audio contains two text-to-speech clips "
+        if family == "openai"
+        else "You will hear one audio file containing two text-to-speech clips "
+    )
     return (
-        "You will hear one audio file containing two text-to-speech clips "
+        f"{preamble}"
         "speaking the same text, separated by a short pause: clip one, then "
         f"clip two. {_ASPECT_FOCUS[aspect]} "
         "Answer with exactly one word: FIRST if clip one is better, SECOND "
@@ -509,6 +602,85 @@ def _gemini_judge(model: str) -> JudgeCall:
             text=response.text or "",
             prompt_tokens=int(getattr(usage, "prompt_token_count", 0) or 0),
             output_tokens=int(getattr(usage, "candidates_token_count", 0) or 0),
+        )
+
+    return judge
+
+
+def _openai_judge(model: str) -> JudgeCall:
+    """Build a raw-HTTP Chat Completions audio-input judge.
+
+    The shared :func:`run_arena` job loop owns timeouts and retries, so this
+    callable performs exactly one HTTP attempt and exposes HTTP status and
+    transport errors to that loop. The client is pooled across calls just as
+    the Gemini client created by :func:`_gemini_judge` is.
+    """
+    api_key = require_env("OPENAI_API_KEY", "tts-arena")
+    client = httpx.AsyncClient(timeout=None)
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    async def judge(wav: bytes, instruction: str) -> JudgeReply:
+        response = await client.post(
+            OPENAI_CHAT_COMPLETIONS_URL,
+            headers=headers,
+            json={
+                "model": model,
+                "modalities": ["text"],
+                "temperature": 0,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": instruction},
+                            {
+                                "type": "input_audio",
+                                "input_audio": {
+                                    "data": base64.b64encode(wav).decode("ascii"),
+                                    "format": "wav",
+                                },
+                            },
+                        ],
+                    }
+                ],
+            },
+        )
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            body = response.text.strip().replace("\n", " ")
+            raise httpx.HTTPStatusError(
+                f"{exc}; response body: {body[:500] or '<empty body>'}",
+                request=exc.request,
+                response=exc.response,
+            ) from exc
+
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise OSError(f"malformed OpenAI judge response: {exc}") from exc
+        if not isinstance(payload, dict):
+            raise OSError("malformed OpenAI judge response: response is not an object")
+        try:
+            text = payload["choices"][0]["message"]["content"]
+            usage = payload.get("usage") or {}
+        except (KeyError, IndexError, TypeError) as exc:
+            raise OSError(f"malformed OpenAI judge response: {exc}") from exc
+        if not isinstance(text, str):
+            raise OSError("malformed OpenAI judge response: choices[0].message.content is not text")
+        if not isinstance(usage, dict):
+            raise OSError("malformed OpenAI judge response: usage is not an object")
+        try:
+            prompt_tokens = int(usage.get("prompt_tokens", 0) or 0)
+            output_tokens = int(usage.get("completion_tokens", 0) or 0)
+        except (TypeError, ValueError) as exc:
+            raise OSError(f"malformed OpenAI judge response: {exc}") from exc
+        return JudgeReply(
+            text=text,
+            prompt_tokens=prompt_tokens,
+            output_tokens=output_tokens,
         )
 
     return judge
@@ -593,8 +765,8 @@ async def run_arena(
         cache_path: JSONL judge-call cache, created if absent. Errors are
             never cached, so a transient failure is retried on the next run.
         model: Judge model; part of every cache key.
-        judge: Injected judge callable for tests; ``None`` uses the live
-            pinned Gemini judge.
+        judge: Injected judge callable for tests; ``None`` selects the live
+            Gemini or OpenAI judge from ``model``.
         concurrency: Concurrent judge calls in flight.
         call_timeout_s: Deadline per judge attempt; a timed-out attempt is
             retried like any transient failure.
@@ -641,7 +813,12 @@ async def run_arena(
     cache_file = Path(cache_path)
     cache_file.parent.mkdir(parents=True, exist_ok=True)
     cache = _load_cache(cache_file)
-    judge_call = judge if judge is not None else _gemini_judge(model)
+    if judge is not None:
+        judge_call = judge
+    elif judge_family(model) == "gemini":
+        judge_call = _gemini_judge(model)
+    else:
+        judge_call = _openai_judge(model)
     limiter = asyncio.Semaphore(concurrency)
     write_lock = asyncio.Lock()
     done = 0
@@ -665,7 +842,7 @@ async def run_arena(
             winner="error",
             model=model,
         )
-        instruction = aspect_instruction(aspect)
+        instruction = aspect_instruction(aspect, judge_family(model))
         async with limiter:
             for attempt in range(_JUDGE_ATTEMPTS):
                 try:
@@ -675,7 +852,11 @@ async def run_arena(
                     code = getattr(exc, "code", None)
                     if code not in _RETRYABLE_CODES:
                         break
-                except (TimeoutError, OSError) as exc:
+                except httpx.HTTPStatusError as exc:
+                    verdict.error = f"judge call failed: {exc}"
+                    if exc.response.status_code not in _RETRYABLE_CODES:
+                        break
+                except (httpx.TransportError, TimeoutError, OSError) as exc:
                     verdict.error = f"judge call failed: {exc!r}"
                 else:
                     run.live_calls += 1
@@ -1148,11 +1329,11 @@ def evaluate_gate(
             name="cross-family judge agreement",
             status="uncomputable",
             detail=(
-                f"only the {JUDGE_FAMILY} judge family is available (no "
-                "OpenAI audio key), so agreement rho >= "
-                f"{CROSS_FAMILY_RHO_GATE} between judge families cannot be "
-                "computed. Reported as uncomputable rather than faked; the "
-                "gate cannot pass until a second family is judged."
+                "no second-family Bradley-Terry vector was supplied, so "
+                f"agreement rho >= {CROSS_FAMILY_RHO_GATE} between judge "
+                "families cannot be computed. Reported as uncomputable "
+                "rather than faked; compare two completed family summaries "
+                "with the arena-gate command."
             ),
         )
     else:
@@ -1195,6 +1376,249 @@ def _fmt(value: float | None) -> str:
     return "n/a" if value is None else f"{value:.3f}"
 
 
+def _load_arena_summary(path: Path) -> dict[str, Any]:
+    """Load one persisted arena summary with path-aware errors."""
+    if not path.is_file():
+        raise ArenaError(f"arena summary not found: {path}")
+    try:
+        payload = orjson.loads(path.read_bytes())
+    except (OSError, orjson.JSONDecodeError) as exc:
+        raise ArenaError(f"could not read arena summary {path}: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ArenaError(f"arena summary must be a JSON object: {path}")
+    return payload
+
+
+def _summary_identity(payload: dict[str, Any], path: Path) -> tuple[str, str, str, tuple[str, ...]]:
+    """Extract the persisted model, family, language and system population."""
+    model = payload.get("model")
+    family = payload.get("family")
+    language = payload.get("language")
+    systems = payload.get("systems")
+    if not isinstance(model, str) or not model:
+        raise ArenaError(f"arena summary has no model: {path}")
+    if not isinstance(family, str) or not family:
+        raise ArenaError(f"arena summary has no judge family: {path}")
+    if not isinstance(language, str) or not language:
+        raise ArenaError(f"arena summary has no language: {path}")
+    if not isinstance(systems, list) or not systems or not all(isinstance(system, str) for system in systems):
+        raise ArenaError(f"arena summary has no valid systems list: {path}")
+    if len(set(systems)) != len(systems):
+        raise ArenaError(f"arena summary has duplicate systems: {path}")
+    return model, family, language, tuple(systems)
+
+
+def _summary_bt_table(payload: dict[str, Any], systems: set[str], path: Path) -> list[BtScore]:
+    """Rehydrate a completed summary's Bradley-Terry table."""
+    rows = payload.get("bt")
+    if not isinstance(rows, list):
+        raise ArenaError(f"arena summary has no Bradley-Terry table: {path}")
+    scores: dict[str, BtScore] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ArenaError(f"malformed Bradley-Terry table in {path}: BT row is not an object")
+        try:
+            system = str(row["system"])
+            score = BtScore(
+                system=system,
+                log_strength=float(row["log_strength"]),
+                ci_low=float(row["ci_low"]),
+                ci_high=float(row["ci_high"]),
+                wins=float(row["wins"]),
+                games=float(row["games"]),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ArenaError(f"malformed Bradley-Terry table in {path}: {exc}") from exc
+        if system in scores:
+            raise ArenaError(f"arena summary has duplicate BT row for {system!r}: {path}")
+        scores[system] = score
+    if set(scores) != systems:
+        difference = sorted(set(scores) ^ systems)
+        raise ArenaError(f"BT/system mismatch in {path}; symmetric difference: {difference}")
+    return [scores[system] for system in sorted(systems)]
+
+
+_PairKey = tuple[str, str, tuple[str, str]]
+
+
+def _pair_outcomes(
+    summary_path: Path,
+    *,
+    systems: set[str],
+    model: str,
+) -> dict[_PairKey, str | None]:
+    """Load orientation-normalized consensus outcomes from sibling results."""
+    results_path = summary_path.with_name("arena-results.jsonl")
+    if not results_path.is_file():
+        raise ArenaError(f"arena verdict results not found next to summary: {results_path}")
+
+    groups: dict[_PairKey, list[str | None]] = {}
+    try:
+        lines = results_path.read_bytes().splitlines()
+    except OSError as exc:
+        raise ArenaError(f"could not read arena verdict results {results_path}: {exc}") from exc
+    for number, line in enumerate(lines, start=1):
+        if not line.strip():
+            continue
+        try:
+            record = orjson.loads(line)
+        except orjson.JSONDecodeError as exc:
+            raise ArenaError(f"malformed arena verdict {results_path}:{number}: {exc}") from exc
+        if not isinstance(record, dict):
+            raise ArenaError(f"malformed arena verdict {results_path}:{number}: record is not an object")
+        try:
+            aspect = str(record["aspect"])
+            prompt_id = str(record["prompt_id"])
+            first = str(record["first"])
+            second = str(record["second"])
+            winner = str(record["winner"])
+            record_model = str(record["model"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ArenaError(f"malformed arena verdict {results_path}:{number}: {exc}") from exc
+        if record_model != model:
+            raise ArenaError(
+                f"arena verdict model mismatch at {results_path}:{number}: summary={model!r}, verdict={record_model!r}"
+            )
+        if first == second or first not in systems or second not in systems:
+            raise ArenaError(f"invalid system pair at {results_path}:{number}: {first!r} vs {second!r}")
+        one, two = sorted((first, second))
+        key = (aspect, prompt_id, (one, two))
+        if winner == "first":
+            outcome: str | None = first
+        elif winner == "second":
+            outcome = second
+        elif winner == "tie":
+            outcome = "tie"
+        else:
+            outcome = None
+        groups.setdefault(key, []).append(outcome)
+
+    outcomes: dict[_PairKey, str | None] = {}
+    for key, members in groups.items():
+        usable = [member for member in members if member is not None]
+        outcomes[key] = usable[0] if len(usable) >= 2 and len(set(usable)) == 1 else None
+    return outcomes
+
+
+def _format_pair_key(key: _PairKey) -> str:
+    """Render a pair-population key for a validation error."""
+    aspect, prompt_id, (one, two) = key
+    return f"{aspect}/{prompt_id}/{one}~{two}"
+
+
+def evaluate_cross_family_gate(
+    summary_a: str | Path,
+    summary_b: str | Path,
+) -> CrossFamilyGateResult:
+    """Evaluate criterion (ii) from two completed arena runs.
+
+    The summaries must carry different persisted ``family`` values, the same
+    language, and the same system set. Their sibling
+    ``arena-results.jsonl`` files must also cover the same ``(aspect, prompt,
+    unordered pair)`` population.
+
+    Per-pair agreement is diagnostic only. Each family's two presentation
+    orders are first normalized to a winning system (or ``tie``); a group is
+    compared only when both orders agree. Equal system winners agree, two
+    ties agree, and a tie versus a system win disagrees.
+    """
+    path_a = Path(summary_a)
+    path_b = Path(summary_b)
+    payload_a = _load_arena_summary(path_a)
+    payload_b = _load_arena_summary(path_b)
+    model_a, family_a, language_a, systems_a = _summary_identity(payload_a, path_a)
+    model_b, family_b, language_b, systems_b = _summary_identity(payload_b, path_b)
+
+    system_set_a = set(systems_a)
+    system_set_b = set(systems_b)
+    if system_set_a != system_set_b:
+        difference = sorted(system_set_a ^ system_set_b)
+        raise ArenaError(f"arena system sets differ; symmetric difference: {difference}")
+    if language_a != language_b:
+        raise ArenaError(f"arena languages differ: {language_a!r} vs {language_b!r}")
+    if family_a == family_b:
+        raise ArenaError(f"cross-family gate requires different judge families, got {family_a!r} and {family_b!r}")
+
+    scores_a = _summary_bt_table(payload_a, system_set_a, path_a)
+    scores_b = _summary_bt_table(payload_b, system_set_b, path_b)
+    second_family_scores = {score.system: score.log_strength for score in scores_b}
+    gate = evaluate_gate(
+        scores_a,
+        OrderFlipStats(judged=0, flips=0, dropped=0),
+        None,
+        second_family_scores=second_family_scores,
+    )
+    base_criterion = gate.criteria[1]
+    criterion = Criterion(
+        name=base_criterion.name,
+        status=base_criterion.status,
+        detail=(f"{family_a} `{model_a}` vs {family_b} `{model_b}`: {base_criterion.detail}"),
+    )
+    rho = spearman_rho(
+        [score.log_strength for score in scores_a],
+        [second_family_scores[score.system] for score in scores_a],
+    )
+
+    outcomes_a = _pair_outcomes(path_a, systems=system_set_a, model=model_a)
+    outcomes_b = _pair_outcomes(path_b, systems=system_set_b, model=model_b)
+    keys_a = set(outcomes_a)
+    keys_b = set(outcomes_b)
+    if keys_a != keys_b:
+        difference = sorted(_format_pair_key(key) for key in keys_a ^ keys_b)
+        raise ArenaError(f"arena pair populations differ; symmetric difference: {difference}")
+    comparable = [key for key in keys_a if outcomes_a[key] is not None and outcomes_b[key] is not None]
+    agreements = sum(outcomes_a[key] == outcomes_b[key] for key in comparable)
+    pair_agreement = PairAgreementStats(
+        compared=len(comparable),
+        agreements=agreements,
+        dropped=len(keys_a) - len(comparable),
+    )
+    return CrossFamilyGateResult(
+        summary_a=path_a,
+        summary_b=path_b,
+        model_a=model_a,
+        model_b=model_b,
+        family_a=family_a,
+        family_b=family_b,
+        rho=rho,
+        criterion=criterion,
+        pair_agreement=pair_agreement,
+    )
+
+
+def render_cross_family_gate(result: CrossFamilyGateResult) -> str:
+    """Render criterion (ii) and pair agreement in the arena table idiom."""
+    agreement = result.pair_agreement
+    agreement_rate = "n/a" if agreement.rate is None else f"{agreement.rate:.1%}"
+    detail = (
+        f"{agreement.agreements}/{agreement.compared} comparable pair groups "
+        f"agree = {agreement_rate}; {agreement.dropped} dropped because "
+        "one family errored or flipped across presentation orders; two ties "
+        "count as agreement"
+    )
+    return "\n".join((
+        "## TTS arena cross-family gate",
+        "",
+        f"Summary A: `{result.summary_a}` ({result.family_a}, `{result.model_a}`)",
+        f"Summary B: `{result.summary_b}` ({result.family_b}, `{result.model_b}`)",
+        "",
+        "| Gate criterion | Status | Detail |",
+        "|---|---|---|",
+        f"| {result.criterion.name} | {result.criterion.status} | {result.criterion.detail} |",
+        f"| per-pair verdict agreement (diagnostic) | diagnostic | {detail} |",
+    ))
+
+
+def write_cross_family_gate(result: CrossFamilyGateResult) -> Path:
+    """Write the rendered cross-family gate beside summary A."""
+    output_path = result.summary_a.with_name(CROSS_FAMILY_REPORT_NAME)
+    try:
+        output_path.write_text(render_cross_family_gate(result) + "\n", encoding="utf-8")
+    except OSError as exc:
+        raise ArenaError(f"could not write cross-family gate report {output_path}: {exc}") from exc
+    return output_path
+
+
 def render_arena_markdown(
     run: ArenaRun,
     scores: Sequence[BtScore],
@@ -1235,7 +1659,7 @@ def render_arena_markdown(
         "",
         f"Calls: {run.live_calls} live + {run.cached_calls} cached, "
         f"{run.error_calls} errored; est. judge spend this run "
-        f"${run.est_usd:.2f} (rates checked {JUDGE_PRICING_CHECKED}).",
+        f"${run.est_usd:.2f} (rates checked {judge_pricing_checked(run.model)}).",
     ]
     if run.missing_audio:
         lines.append(
@@ -1294,6 +1718,7 @@ def write_arena_outputs(
             {
                 "language": run.language,
                 "model": run.model,
+                "family": judge_family(run.model),
                 "systems": list(run.systems),
                 "gate": {
                     "label": gate.label,
