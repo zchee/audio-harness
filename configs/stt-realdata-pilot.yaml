@@ -1,0 +1,27 @@
+# Stage 3 pilot: three on-device lanes over 30 real interview clips.
+# Reference-free corpus - accuracy columns render as em dashes; latency,
+# stability and RTF are the scored axes. Audio never leaves this machine.
+#
+#   uv run audio-harness stt configs/stt-realdata-pilot.yaml
+
+stt:
+  - name: whisper-local
+    modes: [batch]
+  - name: parakeet-ane
+    modes: [batch]
+  - name: apple-speech-stt
+    modes: [stream]
+
+dataset:
+  manifest: data/realdata/pilot-30.jsonl
+  language: en-US
+  limit: null
+
+run:
+  repeats: 1
+  warmup: 1
+  chunk_ms: 20
+  realtime: true
+  provider_concurrency: 3
+  timeout_s: 600
+  output_dir: results

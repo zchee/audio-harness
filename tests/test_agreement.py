@@ -145,11 +145,20 @@ class TestAgreementComputation:
 class TestAgreementLoading:
     """Run loading accepts directories and direct result paths."""
 
-    def test_single_run_directory_is_rejected(self, tmp_path: Path) -> None:
-        run = _write_run(tmp_path, "one", [_result("alpha", "c1", "hello", "en-US")])
+    def test_single_multi_lane_run_directory_is_accepted(self, tmp_path: Path) -> None:
+        run = _write_run(
+            tmp_path,
+            "one",
+            [_result("alpha", "c1", "hello", "en-US"), _result("bravo", "c1", "hello", "en-US")],
+        )
 
-        with pytest.raises(ValueError, match="at least two run"):
-            load_agreement_runs([run])
+        runs = load_agreement_runs([run])
+
+        assert set(runs) == {("alpha", "stream"), ("bravo", "stream")}
+
+    def test_empty_run_list_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="at least one run"):
+            load_agreement_runs([])
 
     def test_missing_results_file_is_clear(self, tmp_path: Path) -> None:
         first = tmp_path / "missing-a"

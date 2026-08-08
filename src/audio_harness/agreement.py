@@ -82,8 +82,9 @@ def load_agreement_runs(run_dirs: Sequence[str | Path]) -> dict[AgreementLane, l
     """Load completed STT runs and group their results into lanes.
 
     Each input may be a run directory containing ``stt-results.jsonl`` or a
-    direct path to that file. At least two run paths are required; having
-    fewer cannot establish cross-run agreement.
+    direct path to that file. A single multi-lane run is a valid input:
+    agreement needs two *lanes*, not two run directories, and the caller
+    checks the lane count on the returned mapping.
 
     Args:
         run_dirs: Completed STT run directories or result-file paths.
@@ -92,12 +93,12 @@ def load_agreement_runs(run_dirs: Sequence[str | Path]) -> dict[AgreementLane, l
         Results grouped by ``(provider, mode)`` lane.
 
     Raises:
-        ValueError: If fewer than two run paths are provided.
+        ValueError: If no run path is provided.
         FileNotFoundError: If any run lacks its results file.
     """
     paths = tuple(Path(path) for path in run_dirs)
-    if len(paths) < 2:
-        raise ValueError("agreement needs at least two run directories or result files")
+    if not paths:
+        raise ValueError("agreement needs at least one run directory or results file")
 
     runs: dict[AgreementLane, list[SttResult]] = {}
     for path in paths:
