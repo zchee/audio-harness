@@ -206,6 +206,16 @@ TTS_PRICING: dict[str, TtsPricing] = {
         per_million_chars=60.0,
         note="OpenRouter-hosted; hosted-proxy latency is not direct-vendor comparable; pricing verified 2026-08-07",
     ),
+    "or-qwen-tts-flash": TtsPricing(
+        per_million_chars=15.0,
+        note="OpenRouter-hosted (direct DashScope lane blocked on an account "
+        "model grant); hosted-proxy latency is not direct-vendor comparable; "
+        "pricing verified 2026-08-08",
+    ),
+    "or-qwen-tts-plus": TtsPricing(
+        per_million_chars=20.0,
+        note="OpenRouter-hosted; hosted-proxy latency is not direct-vendor comparable; pricing verified 2026-08-08",
+    ),
     "or-minimax-hd": TtsPricing(
         per_million_chars=100.0,
         note="OpenRouter-hosted; hosted-proxy latency is not direct-vendor comparable; pricing verified 2026-08-07",

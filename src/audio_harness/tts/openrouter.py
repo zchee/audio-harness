@@ -124,3 +124,26 @@ class OpenRouterMiniMaxHd(OpenRouterTts):
     key = "or-minimax-hd"
     model = "minimax/speech-2.8-hd"
     default_voice = "English_expressive_narrator"
+
+
+@register
+class OpenRouterQwenTtsFlash(OpenRouterTts):
+    """OpenRouter-hosted Qwen-Audio-3.0-TTS Flash.
+
+    The direct DashScope-international lane stays blocked on an account
+    model grant (Model.AccessDenied), so this hosted route is how the
+    Qwen voice family gets measured at all.
+    """
+
+    key = "or-qwen-tts-flash"
+    model = "qwen/qwen-audio-3.0-tts-flash"
+    default_voice = "loongjohn"
+
+
+@register
+class OpenRouterQwenTtsPlus(OpenRouterTts):
+    """OpenRouter-hosted Qwen-Audio-3.0-TTS Plus."""
+
+    key = "or-qwen-tts-plus"
+    model = "qwen/qwen-audio-3.0-tts-plus"
+    default_voice = "longanlingxin"

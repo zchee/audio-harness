@@ -26,6 +26,8 @@ LANES = [
     ("or-zonos", "zyphra/zonos-v0.1-hybrid", "american_female"),
     ("or-minimax-turbo", "minimax/speech-2.8-turbo", "English_expressive_narrator"),
     ("or-minimax-hd", "minimax/speech-2.8-hd", "English_expressive_narrator"),
+    ("or-qwen-tts-flash", "qwen/qwen-audio-3.0-tts-flash", "loongjohn"),
+    ("or-qwen-tts-plus", "qwen/qwen-audio-3.0-tts-plus", "longanlingxin"),
 ]
 
 
