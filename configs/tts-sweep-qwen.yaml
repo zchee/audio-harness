@@ -1,0 +1,29 @@
+# Qwen-Audio-3.0-TTS flash/plus through OpenRouter (the direct DashScope lane
+# stays blocked on an account model grant). Supersede-merges into the
+# canonical en TTS rankings; judges mirror tts-en.yaml exactly.
+#
+#   uv run audio-harness tts configs/tts-sweep-qwen.yaml
+
+tts:
+  - name: or-qwen-tts-flash
+    modes: [batch]
+  - name: or-qwen-tts-plus
+    modes: [batch]
+
+dataset:
+  prompts: data/prompts-en.txt
+  language: en-US
+  limit: null
+
+roundtrip_stt:
+  - name: deepgram-nova3
+    options:
+      smart_format: false
+  - name: whisper-local
+
+run:
+  repeats: 3
+  warmup: 1
+  provider_concurrency: 2
+  timeout_s: 300
+  output_dir: results
