@@ -13,6 +13,7 @@ import pytest
 from audio_harness import report, runner, stt, tts
 from audio_harness.audio import detect_speech_end_s
 from audio_harness.config import BenchmarkConfig, ProviderConfig, RunConfig
+from audio_harness.metrics import summarize
 from audio_harness.runner import _is_transient, _rebase_finalize
 from audio_harness.stt.ws import StreamProtocolError
 from audio_harness.types import (
@@ -50,6 +51,44 @@ def _result(final_at_s: float | None, eof_finalize: float | None = None) -> SttR
         partials=partials,
         finalize_s=eof_finalize,
     )
+
+
+class TestReferenceFreeResults:
+    """Latency and stability remain scoreable without transcript ground truth."""
+
+    def test_empty_persisted_reference_keeps_non_accuracy_metrics(self, tmp_path: Path) -> None:
+        result = _result(final_at_s=1.2, eof_finalize=0.3)
+        result.audio_s = 2.0
+        result.total_s = 1.0
+        result.ttft_s = 0.2
+        result.partials = [
+            Partial(t_s=0.2, text="hel", is_final=False),
+            Partial(t_s=0.4, text="hello", is_final=False),
+            Partial(t_s=1.2, text="hello", is_final=True),
+        ]
+        path = runner.write_stt_results([result], tmp_path)
+
+        loaded = runner.read_stt_results(path)
+        summary = summarize(loaded, "en-US")[0]
+
+        assert loaded[0].raw["reference"] == ""
+        assert summary.error_rate is None
+        assert summary.ttft_s == [0.2]
+        assert summary.finalize_s == [0.3]
+        assert summary.rtf == [0.5]
+        assert summary.instability == [0.0]
+
+    def test_report_renders_missing_error_rate_as_em_dash(self) -> None:
+        result = _result(final_at_s=1.2, eof_finalize=0.3)
+        result.audio_s = 2.0
+        result.total_s = 1.0
+        result.ttft_s = 0.2
+
+        markdown = report.render_stt_markdown(report.stt_summary_frame([result], "en-US"))
+        header = [cell.strip() for cell in markdown.splitlines()[0].strip("|").split("|")]
+        row = [cell.strip() for cell in markdown.splitlines()[2].strip("|").split("|")]
+
+        assert row[header.index("Error rate")] == "—"
 
 
 class TestSpeechEndDetection:

@@ -86,6 +86,15 @@ def load_source(source: SourceConfig, *, sample_rate: int = 16000) -> list[Audio
                 return load_curated_clips(source, sample_rate=sample_rate)
             except CuratedManifestError as exc:
                 raise DatasetError(str(exc)) from exc
+        # Real recordings use a local `clip` path and deliberately carry no
+        # ground-truth transcript. Shape detection keeps the existing config
+        # surface unchanged and leaves ordinary `audio` manifests untouched.
+        from .realdata_manifest import is_realdata_manifest
+
+        if is_realdata_manifest(Path(source.manifest)):
+            from .realdata_manifest import load_realdata_clips
+
+            return load_realdata_clips(source, sample_rate=sample_rate)
     return load_clips_from_manifest(source, sample_rate=sample_rate)
 
 

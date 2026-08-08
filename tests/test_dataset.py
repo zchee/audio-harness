@@ -11,7 +11,9 @@ import polars as pl
 import pytest
 
 from audio_harness.config import DatasetConfig
+from audio_harness.curated import is_curated_manifest
 from audio_harness.dataset import DatasetError, load_clips, load_prompts
+from audio_harness.realdata_manifest import is_realdata_manifest
 
 
 def _wav(seconds: float, rate: int = 16000) -> bytes:
@@ -200,6 +202,93 @@ class TestManifest:
             "a manifest pointing at missing audio should name both the line "
             "and the file, not surface a bare FileNotFoundError"
         )
+
+
+class TestRealdataManifest:
+    """Reference-free recordings use a distinct `clip` manifest shape."""
+
+    def test_loads_reference_free_recordings_end_to_end(self, tmp_path: Path) -> None:
+        session_dir = tmp_path / "sessions" / "2026-08-01"
+        session_dir.mkdir(parents=True)
+        (session_dir / "clip-001.wav").write_bytes(_wav(0.4))
+        (session_dir / "clip-002.wav").write_bytes(_wav(0.6))
+        manifest = tmp_path / "pilot.jsonl"
+        manifest.write_bytes(
+            b"\n".join([
+                orjson.dumps({
+                    "clip": "sessions/2026-08-01/clip-001.wav",
+                    "session": "2026-08-01",
+                    "language": "en-US",
+                    "duration_s": 0.4,
+                    "text": "must be ignored",
+                }),
+                orjson.dumps({
+                    "clip": "sessions/2026-08-01/clip-002.wav",
+                    "session": "2026-08-01",
+                    "duration_s": 0.6,
+                }),
+                b"",
+            ])
+        )
+
+        clips = load_clips(DatasetConfig(manifest=str(manifest), language="mixed"))
+
+        assert [clip.clip_id for clip in clips] == ["clip-001", "clip-002"]
+        assert all(clip.reference is None for clip in clips)
+        assert [clip.language for clip in clips] == ["en-US", "mixed"]
+        assert [clip.duration_s for clip in clips] == pytest.approx([0.4, 0.6], abs=0.01)
+        assert clips[0].source_path == str(session_dir / "clip-001.wav")
+
+    def test_detector_distinguishes_all_manifest_shapes(self, tmp_path: Path) -> None:
+        realdata = tmp_path / "realdata.jsonl"
+        plain = tmp_path / "plain.jsonl"
+        curated = tmp_path / "curated.jsonl"
+        realdata.write_bytes(orjson.dumps({"clip": "clip.wav", "session": "s1"}) + b"\n")
+        plain.write_bytes(orjson.dumps({"audio": "clip.wav", "text": "hello"}) + b"\n")
+        curated.write_bytes(
+            orjson.dumps({"clip": "must-not-win.wav", "utt_id": "u1", "gold_status": "verified"}) + b"\n"
+        )
+
+        assert is_realdata_manifest(realdata)
+        assert not is_realdata_manifest(plain)
+        assert not is_realdata_manifest(curated)
+        assert not is_curated_manifest(realdata)
+        assert not is_curated_manifest(plain)
+        assert is_curated_manifest(curated)
+
+    def test_per_record_language_overrides_source_fallback(self, tmp_path: Path) -> None:
+        (tmp_path / "en.wav").write_bytes(_wav(0.2))
+        (tmp_path / "ja.wav").write_bytes(_wav(0.2))
+        manifest = tmp_path / "mixed.jsonl"
+        manifest.write_bytes(
+            b"\n".join([
+                orjson.dumps({"clip": "en.wav"}),
+                orjson.dumps({"clip": "ja.wav", "language": "ja-JP"}),
+                b"",
+            ])
+        )
+
+        clips = load_clips(DatasetConfig(manifest=str(manifest), language="en-US"))
+
+        assert [clip.language for clip in clips] == ["en-US", "ja-JP"]
+
+    def test_malformed_record_reports_its_line_number(self, tmp_path: Path) -> None:
+        (tmp_path / "ok.wav").write_bytes(_wav(0.2))
+        manifest = tmp_path / "realdata.jsonl"
+        manifest.write_bytes(
+            orjson.dumps({"clip": "ok.wav"}) + b"\n" + orjson.dumps({"session": "missing-clip"}) + b"\n"
+        )
+
+        with pytest.raises(DatasetError, match=r"realdata\.jsonl:2.*'clip'"):
+            load_clips(DatasetConfig(manifest=str(manifest)))
+
+    def test_missing_audio_file_reports_its_line_number(self, tmp_path: Path) -> None:
+        manifest = tmp_path / "realdata.jsonl"
+        manifest.write_bytes(orjson.dumps({"clip": "sessions/gone.wav"}) + b"\n")
+
+        with pytest.raises(DatasetError, match=r"realdata\.jsonl:1") as excinfo:
+            load_clips(DatasetConfig(manifest=str(manifest)))
+        assert "sessions/gone.wav" in str(excinfo.value)
 
 
 class TestPrompts:
