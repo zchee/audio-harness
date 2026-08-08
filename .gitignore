@@ -232,3 +232,4 @@ data/musan/
 # Extracted curated-lane audio segments (re-fetched on demand by the loader)
 data/cache/
 results/
+data/realdata/
