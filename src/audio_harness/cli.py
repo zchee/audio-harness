@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 from pathlib import Path
+import random
 from typing import Annotated
 
 import orjson
@@ -12,7 +13,7 @@ from rich.console import Console
 from rich.table import Table
 import typer
 
-from . import doctor as doctor_module, report, runner, stt, tts
+from . import agreement, doctor as doctor_module, realdata, report, runner, stt, tts
 from .config import PRICING_CHECKED, BenchmarkConfig, ConfigError
 from .dataset import DatasetError, load_clips, load_prompts
 from .types import SttResult, TtsResult
@@ -912,6 +913,101 @@ def judge_semantic_command(
     )
     console.print(f"[dim]raw results:[/dim] {out_path}")
     console.print(f"[dim]report:[/dim]      {report_path}")
+
+
+@app.command("agree")
+def agree_command(
+    runs: Annotated[list[Path], typer.Argument(help="Two or more completed STT run directories.")],
+    output_dir: Annotated[Path, typer.Option(help="Directory receiving agreement.md and agreement.json.")] = Path(
+        "results/agreement"
+    ),
+) -> None:
+    """Compare completed STT runs on pairwise inter-model agreement."""
+    loaded = agreement.load_agreement_runs(runs)
+    if len(loaded) < 2:
+        console.print("[red]agreement error:[/red] need results from at least two lanes")
+        raise typer.Exit(code=2)
+
+    agreement_report = agreement.compute_agreement(loaded)
+    markdown_path, json_path = agreement.write_agreement_report(agreement_report, output_dir)
+    console.print(agreement.render_agreement_markdown(agreement_report))
+    console.print(f"[green]wrote[/green] {markdown_path} and {json_path}")
+
+
+@app.command("realdata")
+def realdata_command(
+    video_prefix: Annotated[str, typer.Argument(help="GCS prefix holding LiveKit video egress recordings.")],
+    dest: Annotated[Path, typer.Option(help="Local real-data root; must stay gitignored.")] = Path("data/realdata"),
+    sessions: Annotated[int, typer.Option(help="Sessions to download before clip selection.")] = 40,
+    pilot: Annotated[int, typer.Option(help="Pilot manifest size.")] = 30,
+    label: Annotated[int, typer.Option(help="Human-labeling sheet size.")] = 50,
+    audio_prefix: Annotated[str, typer.Option(help="Optional GCS prefix with MP3-only recordings to include.")] = "",
+    seed: Annotated[int, typer.Option(help="Deterministic sampling seed.")] = 20260808,
+    dry_run: Annotated[bool, typer.Option(help="Reuse files already under dest; never touch the network.")] = False,
+) -> None:
+    """Stage real recordings into a reference-free local benchmark corpus."""
+    video_dir = dest / "video"
+    clips_dir = dest / "clips"
+    clips_path = dest / "clips.jsonl"
+    join_path = dest / "join.jsonl"
+
+    manifests = realdata.list_manifests(video_dir, video_prefix, dry_run=dry_run)
+    realdata.build_join(manifests, output_path=join_path)
+    objects = realdata.dedupe_sessions(realdata.list_video_objects(video_dir, video_prefix, dry_run=dry_run))
+    all_sessions = sorted({item.session_id for item in objects})
+    chosen = sorted(random.Random(seed).sample(all_sessions, k=min(sessions, len(all_sessions))))
+    console.print(f"{len(all_sessions)} sessions listed, staging {len(chosen)}")
+
+    videos = realdata.ingest_video(video_dir, video_prefix, chosen, dry_run=dry_run)
+    session_by_name = {item.filename: item.session_id for item in objects}
+
+    clips_path.unlink(missing_ok=True)
+    for video_path in videos:
+        video_session = session_by_name.get(video_path.name)
+        if video_session is None:
+            continue
+        cut = realdata.cut_video_clips(video_path, video_session, clips_dir, metadata_path=clips_path)
+        console.print(f"  {video_session}: {len(cut)} clips (video)")
+
+    if audio_prefix:
+        audio_dir = dest / "audio"
+        realdata.ingest(audio_dir, audio_prefix, dry_run=dry_run)
+        merged_by_session: dict[str, Path] = {}
+        track_by_session: dict[str, Path] = {}
+        for mp3_path in sorted(audio_dir.rglob("*.mp3")):
+            mp3_session = mp3_path.name.split("_", 1)[0]
+            if mp3_path.stem.endswith("_merged"):
+                merged_by_session[mp3_session] = mp3_path
+            else:
+                track_by_session[mp3_session] = mp3_path
+        for mp3_session, merged_path in sorted(merged_by_session.items()):
+            triage = realdata.triage_session(track_by_session.get(mp3_session), merged_path)
+            # An agent-classified track is synthesized speech, so the merged
+            # mix is the only file that still contains the user's voice.
+            if triage.source == "user":
+                cut = realdata.cut_clips(
+                    track_by_session[mp3_session], mp3_session, clips_dir, source="user", metadata_path=clips_path
+                )
+            else:
+                cut = realdata.cut_clips(merged_path, mp3_session, clips_dir, source="merged", metadata_path=clips_path)
+            console.print(f"  {mp3_session}: {len(cut)} clips ({triage.source})")
+
+    rows = [orjson.loads(line) for line in clips_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    tagged = 0
+    for row in rows:
+        if row.get("language") not in {"en", "ja", "other"}:
+            row["language"] = realdata.identify_language(Path(str(row["clip_path"])))
+            tagged += 1
+    clips_path.write_bytes(b"".join(orjson.dumps(row) + b"\n" for row in rows))
+    console.print(f"language-tagged {tagged} of {len(rows)} clips")
+
+    pilot_path = dest / f"pilot-{pilot}.jsonl"
+    selected = realdata.select_pilot(
+        pilot, seed=seed, clips_path=clips_path, join_path=join_path, output_path=pilot_path
+    )
+    sheet = realdata.select_label_candidates(label, seed=seed, clips_path=clips_path, join_path=join_path)
+    console.print(f"[green]pilot[/green] {len(selected)} clips -> {pilot_path}")
+    console.print(f"[green]label sheet[/green] {len(sheet)} rows -> data/anchors/realdata/")
 
 
 def main() -> None:
