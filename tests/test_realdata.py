@@ -12,6 +12,7 @@ import orjson
 import pytest
 
 from audio_harness import realdata
+from audio_harness.realdata_manifest import is_realdata_manifest
 
 
 FFMPEG = shutil.which("ffmpeg")
@@ -383,12 +384,13 @@ def test_select_pilot_is_seeded_stratified_video_first_and_session_capped(tmp_pa
     assert first == repeated
     assert first != changed
     assert len(first) == 14
-    assert all(str(record["session_id"]).startswith("video-") for record in first[:12])
-    assert all(str(record["session_id"]).startswith("mp3-") for record in first[12:])
+    assert all(str(record["session"]).startswith("video-") for record in first[:12])
+    assert all(str(record["session"]).startswith("mp3-") for record in first[12:])
     assert {record["language"] for record in first} == {"en", "ja"}
-    assert {record["duration"] for record in first} == {4.0, 12.0, 24.0}
-    assert max(Counter(str(record["session_id"]) for record in first).values()) <= 2
-    assert all(set(record) == {"clip_path", "session_id", "language", "duration"} for record in first)
+    assert {record["duration_s"] for record in first} == {4.0, 12.0, 24.0}
+    assert max(Counter(str(record["session"]) for record in first).values()) <= 2
+    assert all(set(record) == {"clip", "session", "language", "duration_s", "source"} for record in first)
+    assert is_realdata_manifest(tmp_path / "pilot-a.jsonl")
 
 
 def test_anchor_sheet_has_empty_transcript_column_and_lf_endings(tmp_path: Path) -> None:

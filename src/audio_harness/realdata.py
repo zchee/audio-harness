@@ -11,6 +11,7 @@ from collections import defaultdict
 from collections.abc import Iterable, Sequence
 import csv
 from dataclasses import dataclass
+import os
 from pathlib import Path
 import random
 import re
@@ -497,7 +498,7 @@ def select_pilot(
         ValueError: If ``n`` is negative.
     """
     selected = _select_candidates(n, seed=seed, clips_path=clips_path, join_path=join_path)
-    records = [_selection_json(candidate) for candidate in selected]
+    records = [_selection_json(candidate, output_path.parent) for candidate in selected]
     _write_jsonl(output_path, records)
     return records
 
@@ -531,7 +532,7 @@ def select_label_candidates(
         ValueError: If ``n`` is negative.
     """
     selected = _select_candidates(n, seed=seed, clips_path=clips_path, join_path=join_path)
-    records = [_selection_json(candidate) for candidate in selected]
+    records = [_selection_json(candidate, output_dir) for candidate in selected]
     output_dir.mkdir(parents=True, exist_ok=True)
     sheet_path = output_dir / "anchor-review-sheet.csv"
     with sheet_path.open("w", encoding="utf-8", newline="") as sheet:
@@ -949,12 +950,16 @@ def _duration_bucket(duration: float) -> str:
     return "long"
 
 
-def _selection_json(candidate: _Candidate) -> _JsonObject:
+def _selection_json(candidate: _Candidate, base_dir: Path) -> _JsonObject:
+    # The pilot manifest is consumed by the reference-free dataset loader,
+    # which resolves relative clip paths against the manifest's directory.
+    clip = os.path.relpath(Path(candidate.clip_path).resolve(), base_dir.resolve())
     return {
-        "clip_path": candidate.clip_path,
-        "session_id": candidate.session_id,
+        "clip": Path(clip).as_posix(),
+        "session": candidate.session_id,
         "language": candidate.language,
-        "duration": candidate.duration,
+        "duration_s": candidate.duration,
+        "source": candidate.source,
     }
 
 
