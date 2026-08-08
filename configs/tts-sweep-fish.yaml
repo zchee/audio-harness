@@ -1,0 +1,30 @@
+# Fish Audio s1 / s2-pro / s2.1-pro through OpenRouter (S2.g revived — no
+# direct Fish account needed). English pass; judges mirror tts-en.yaml.
+#
+#   uv run audio-harness tts configs/tts-sweep-fish.yaml
+
+tts:
+  - name: or-fish-s1
+    modes: [batch]
+  - name: or-fish-s2-pro
+    modes: [batch]
+  - name: or-fish-s21-pro
+    modes: [batch]
+
+dataset:
+  prompts: data/prompts-en.txt
+  language: en-US
+  limit: null
+
+roundtrip_stt:
+  - name: deepgram-nova3
+    options:
+      smart_format: false
+  - name: whisper-local
+
+run:
+  repeats: 3
+  warmup: 1
+  provider_concurrency: 3
+  timeout_s: 300
+  output_dir: results

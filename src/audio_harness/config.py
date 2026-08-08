@@ -216,6 +216,19 @@ TTS_PRICING: dict[str, TtsPricing] = {
         per_million_chars=20.0,
         note="OpenRouter-hosted; hosted-proxy latency is not direct-vendor comparable; pricing verified 2026-08-08",
     ),
+    "or-fish-s1": TtsPricing(
+        per_million_chars=15.0,
+        note="OpenRouter-hosted (no direct Fish Audio account); hosted-proxy "
+        "latency is not direct-vendor comparable; pricing verified 2026-08-08",
+    ),
+    "or-fish-s2-pro": TtsPricing(
+        per_million_chars=15.0,
+        note="OpenRouter-hosted; hosted-proxy latency is not direct-vendor comparable; pricing verified 2026-08-08",
+    ),
+    "or-fish-s21-pro": TtsPricing(
+        per_million_chars=15.0,
+        note="OpenRouter-hosted; hosted-proxy latency is not direct-vendor comparable; pricing verified 2026-08-08",
+    ),
     "or-minimax-hd": TtsPricing(
         per_million_chars=100.0,
         note="OpenRouter-hosted; hosted-proxy latency is not direct-vendor comparable; pricing verified 2026-08-07",

@@ -45,17 +45,18 @@ class OpenRouterTts(TtsProvider):
         """Synthesize MP3 audio, then decode it to native-rate mono PCM."""
         result = self._result(prompt, Mode.BATCH)
         result.raw["hosted_proxy"] = True
+        body: dict[str, str] = {
+            "model": self.model,
+            "input": prompt.text,
+            "response_format": "mp3",
+        }
+        # An empty default means the model picks its own voice (Fish Audio
+        # publishes no supported_voices and accepts voiceless requests);
+        # models with a fixed enum always get one.
+        if voice := self._voice():
+            body["voice"] = voice
         started = time.perf_counter()
-        response = await self.http.post(
-            SPEECH_URL,
-            headers=self._auth(),
-            json={
-                "model": self.model,
-                "input": prompt.text,
-                "voice": self._voice(),
-                "response_format": "mp3",
-            },
-        )
+        response = await self.http.post(SPEECH_URL, headers=self._auth(), json=body)
         raise_for_status(response, self.key)
         result.total_s = time.perf_counter() - started
         result.ttfb_s = None
@@ -147,3 +148,34 @@ class OpenRouterQwenTtsPlus(OpenRouterTts):
     key = "or-qwen-tts-plus"
     model = "qwen/qwen-audio-3.0-tts-plus"
     default_voice = "longanlingxin"
+
+
+@register
+class OpenRouterFishS1(OpenRouterTts):
+    """OpenRouter-hosted Fish Audio S1.
+
+    Fish publishes no voice enum and accepts voiceless requests (verified
+    live 2026-08-08), so these lanes default to the model's own voice.
+    """
+
+    key = "or-fish-s1"
+    model = "fish-audio/s1"
+    default_voice = ""
+
+
+@register
+class OpenRouterFishS2Pro(OpenRouterTts):
+    """OpenRouter-hosted Fish Audio S2 Pro."""
+
+    key = "or-fish-s2-pro"
+    model = "fish-audio/s2-pro"
+    default_voice = ""
+
+
+@register
+class OpenRouterFishS21Pro(OpenRouterTts):
+    """OpenRouter-hosted Fish Audio S2.1 Pro."""
+
+    key = "or-fish-s21-pro"
+    model = "fish-audio/s2.1-pro"
+    default_voice = ""

@@ -28,6 +28,9 @@ LANES = [
     ("or-minimax-hd", "minimax/speech-2.8-hd", "English_expressive_narrator"),
     ("or-qwen-tts-flash", "qwen/qwen-audio-3.0-tts-flash", "loongjohn"),
     ("or-qwen-tts-plus", "qwen/qwen-audio-3.0-tts-plus", "longanlingxin"),
+    ("or-fish-s1", "fish-audio/s1", ""),
+    ("or-fish-s2-pro", "fish-audio/s2-pro", ""),
+    ("or-fish-s21-pro", "fish-audio/s2.1-pro", ""),
 ]
 
 
@@ -113,7 +116,10 @@ class TestBatchProtocol:
 
         body = orjson.loads(requests[0].content)
         assert body["model"] == model
-        assert body["voice"] == voice
+        if voice:
+            assert body["voice"] == voice
+        else:
+            assert "voice" not in body
         assert body["response_format"] == "mp3"
 
     @pytest.mark.parametrize("key", [lane[0] for lane in LANES])
