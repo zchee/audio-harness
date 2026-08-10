@@ -953,12 +953,15 @@ def realdata_command(
 
     manifests = realdata.list_manifests(video_dir, video_prefix, dry_run=dry_run)
     realdata.build_join(manifests, output_path=join_path)
-    objects = realdata.dedupe_sessions(realdata.list_video_objects(video_dir, video_prefix, dry_run=dry_run))
+    listed = realdata.list_video_objects(video_dir, video_prefix, dry_run=dry_run)
+    objects = realdata.dedupe_sessions(listed)
     all_sessions = sorted({item.session_id for item in objects})
     chosen = sorted(random.Random(seed).sample(all_sessions, k=min(sessions, len(all_sessions))))
     console.print(f"{len(all_sessions)} sessions listed, staging {len(chosen)}")
 
-    videos = realdata.ingest_video(video_dir, video_prefix, chosen, dry_run=dry_run)
+    videos = realdata.ingest_video(
+        video_dir, video_prefix, chosen, manifest_paths=manifests, objects=listed, dry_run=dry_run
+    )
     session_by_name = {item.filename: item.session_id for item in objects}
 
     clips_path.unlink(missing_ok=True)

@@ -29,6 +29,9 @@ CLIPS_PATH = REALDATA_DIR / "clips.jsonl"
 PILOT_PATH = REALDATA_DIR / "pilot-30.jsonl"
 ANCHOR_DIR = Path("data/anchors/realdata")
 DEFAULT_WHISPER_MODEL = "mlx-community/whisper-large-v3-mlx"
+_SESSION_UUID_PREFIX = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?=_|$)"
+)
 
 SourceTrack = Literal["user", "agent", "merged", "video"]
 _JsonObject = dict[str, object]
@@ -79,19 +82,23 @@ class _Candidate:
 
 
 def ingest(dest: Path, bucket_prefix: str, *, dry_run: bool = False) -> list[_JsonObject]:
-    """Mirror MP3 recordings, inventory local files, and write JSON Lines.
+    """Download MP3 recordings, inventory local files, and write JSON Lines.
+
+    The remote copy matches only ``*.mp3`` objects, avoiding directory
+    placeholders. A prefix with no matching MP3 objects fails fast when
+    ``gcloud storage cp`` exits non-zero.
 
     Args:
         dest: Local directory containing or receiving MP3 objects.
         bucket_prefix: Google Cloud Storage prefix passed to ``gcloud``.
-        dry_run: Skip the network sync and inventory MP3s already under ``dest``.
+        dry_run: Skip the network copy and inventory MP3s already under ``dest``.
 
     Returns:
         Inventory records in deterministic path order.
     """
     dest.mkdir(parents=True, exist_ok=True)
     if not dry_run:
-        _run_command(["gcloud", "storage", "rsync", bucket_prefix, str(dest)])
+        _run_command(["gcloud", "storage", "cp", f"{bucket_prefix.rstrip('/')}/*.mp3", str(dest)])
 
     records = [_probe_audio(path) for path in sorted(dest.rglob("*.mp3"))]
     _write_jsonl(INVENTORY_PATH, records)
@@ -119,11 +126,12 @@ def list_manifests(dest: Path, bucket_prefix: str, *, dry_run: bool = False) -> 
         capture_output=True,
     )
     uris = sorted(line.strip() for line in listing.stdout.splitlines() if line.strip().endswith(".json"))
-    paths: list[Path] = []
-    for uri in uris:
-        local_path = manifest_dir / uri.rsplit("/", 1)[-1]
-        _run_command(["gcloud", "storage", "cp", uri, str(local_path)])
-        paths.append(local_path)
+    paths = sorted(manifest_dir / uri.rsplit("/", 1)[-1] for uri in uris)
+    if uris:
+        _run_command(
+            ["gcloud", "storage", "cp", "-I", str(manifest_dir)],
+            input_text="\n".join(uris),
+        )
     return paths
 
 
@@ -222,6 +230,8 @@ def ingest_video(
     bucket_prefix: str,
     session_ids: Iterable[str] | None = None,
     *,
+    manifest_paths: Sequence[Path] | None = None,
+    objects: Sequence[VideoObject] | None = None,
     full_mirror: bool = False,
     dry_run: bool = False,
 ) -> list[Path]:
@@ -232,27 +242,33 @@ def ingest_video(
     copies one deduplicated MP4 per requested session; with no session filter it
     copies one per available session. ``full_mirror`` explicitly opts into a
     complete prefix mirror. ``dry_run`` performs the same local join and
-    selection over files already in ``dest`` without subprocess calls.
+    selection over files already in ``dest`` without subprocess calls. Callers
+    may supply precomputed manifest paths or video objects to skip the
+    corresponding remote listing work.
 
     Args:
         dest: Local video-ingest directory.
         bucket_prefix: Google Cloud Storage video prefix.
         session_ids: Optional session identifiers to retain.
+        manifest_paths: Optional prelisted local manifests to parse directly.
+        objects: Optional prelisted video objects to select directly.
         full_mirror: Download the complete prefix instead of selected objects.
         dry_run: Select from local files without invoking subprocesses.
 
     Returns:
         Local paths corresponding to selected MP4 objects.
     """
-    manifest_paths = list_manifests(dest, bucket_prefix, dry_run=dry_run)
-    build_join(manifest_paths)
-    objects = list_video_objects(dest, bucket_prefix, dry_run=dry_run)
+    resolved_manifest_paths = (
+        list_manifests(dest, bucket_prefix, dry_run=dry_run) if manifest_paths is None else manifest_paths
+    )
+    build_join(resolved_manifest_paths)
+    available_objects = list_video_objects(dest, bucket_prefix, dry_run=dry_run) if objects is None else objects
 
     requested = None if session_ids is None else set(session_ids)
     if full_mirror:
-        selected = objects
+        selected = available_objects
     else:
-        selected = dedupe_sessions(objects)
+        selected = dedupe_sessions(available_objects)
         if requested is not None:
             selected = [item for item in selected if item.session_id in requested]
 
@@ -553,8 +569,13 @@ def select_label_candidates(
     return records
 
 
-def _run_command(arguments: Sequence[str], *, capture_output: bool = False) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(arguments, check=True, capture_output=capture_output, text=True)
+def _run_command(
+    arguments: Sequence[str],
+    *,
+    capture_output: bool = False,
+    input_text: str | None = None,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(arguments, check=True, capture_output=capture_output, input=input_text, text=True)
 
 
 def _probe_audio(path: Path) -> _JsonObject:
@@ -671,7 +692,9 @@ def _append_jsonl(path: Path, records: Iterable[_JsonObject]) -> None:
 
 
 def _session_id(filename: str) -> str:
-    return Path(filename).stem.removesuffix("_merged")
+    stem = Path(filename).stem.removesuffix("_merged")
+    match = _SESSION_UUID_PREFIX.match(stem)
+    return match.group(0) if match is not None else stem
 
 
 def _parse_video_listing(output: str) -> list[VideoObject]:
