@@ -173,6 +173,10 @@ TTS_PRICING: dict[str, TtsPricing] = {
         "input text tokens. Preview models may change before becoming stable "
         "and have more restrictive rate limits; verified 2026-08-08",
     ),
+    "soniox-tts-rt-v2": TtsPricing(
+        per_audio_minute=0.7 / 60,
+        note="$0.70 per generated audio hour ($4.00/M input text tokens at ~0.3 tokens/char); verified 2026-08-12",
+    ),
     "xai-grok-tts": TtsPricing(
         per_million_chars=15.0,
         note="$15.00/M input characters; verified 2026-08-08",

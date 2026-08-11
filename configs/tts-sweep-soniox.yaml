@@ -1,0 +1,26 @@
+# Soniox tts-rt-v2 English sweep: REST batch plus WebSocket streaming —
+# the streaming TTFB/TTFA is the headline number for this lane.
+#
+#   uv run audio-harness tts configs/tts-sweep-soniox.yaml
+
+tts:
+  - name: soniox-tts-rt-v2
+    modes: [batch, stream]
+
+dataset:
+  prompts: data/prompts-en.txt
+  language: en-US
+  limit: null
+
+roundtrip_stt:
+  - name: deepgram-nova3
+    options:
+      smart_format: false
+  - name: whisper-local
+
+run:
+  repeats: 3
+  warmup: 1
+  provider_concurrency: 2
+  timeout_s: 300
+  output_dir: results
