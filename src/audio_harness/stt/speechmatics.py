@@ -8,9 +8,11 @@ one API key.
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from typing import Any
 
+import httpx
 import orjson
 from websockets.asyncio.client import ClientConnection
 
@@ -26,6 +28,8 @@ BATCH_URL = "https://asr.api.speechmatics.com/v2/jobs"
 STREAM_URL = "wss://eu2.rt.speechmatics.com/v2"
 POLL_INTERVAL_S = 1.0
 
+_LOGGER = logging.getLogger(__name__)
+
 
 class _SpeechmaticsBase(SttProvider):
     """Shared transport for both Speechmatics operating points.
@@ -39,6 +43,10 @@ class _SpeechmaticsBase(SttProvider):
             disables) after which the server emits an ``EndOfUtterance``
             message. Keep it below ``max_delay``. Off by default, so plain
             accuracy lanes are unaffected.
+        delete_after: When true, delete the batch job from Speechmatics'
+            storage once its transcript has been fetched. Deletion failures
+            are logged and recorded, never raised. Off by default. The
+            realtime path stores nothing, so it needs no equivalent.
     """
 
     vendor = "speechmatics"
@@ -78,7 +86,32 @@ class _SpeechmaticsBase(SttProvider):
         result.total_s = time.perf_counter() - started
         result.text = text
         result.raw["job_id"] = job_id
+        if self.options.get("delete_after"):
+            result.raw["deleted"] = await self._delete_job(job_id)
         return result
+
+    async def _delete_job(self, job_id: str) -> bool:
+        """Delete a finished batch job, reporting success rather than raising.
+
+        Retention hygiene must never cost the transcription that already
+        succeeded, so any failure — transport or HTTP status — is logged as a
+        warning and surfaces as ``False`` in ``result.raw["deleted"]``.
+        """
+        try:
+            response = await self.http.delete(f"{BATCH_URL}/{job_id}", headers=self._auth())
+        except httpx.HTTPError as exc:
+            _LOGGER.warning("%s: failed to delete job %s: %s", self.key, job_id, exc)
+            return False
+        if response.is_success:
+            return True
+        _LOGGER.warning(
+            "%s: failed to delete job %s: HTTP %d: %s",
+            self.key,
+            job_id,
+            response.status_code,
+            response.text.strip()[:500],
+        )
+        return False
 
     async def _poll(self, job_id: str) -> str:
         """Wait for a job to finish and return its plain-text transcript."""

@@ -1,7 +1,12 @@
-"""Protocol tests for Deepgram Flux's v2 turn-based streaming socket."""
+"""Protocol tests for Deepgram Flux's v2 turn-based streaming socket.
+
+Also holds the cross-adapter Deepgram privacy invariant: every request —
+Nova-3 batch, Nova-3 stream, and Flux stream — carries ``mip_opt_out=true``.
+"""
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from dataclasses import replace
 import logging
 import os
@@ -10,6 +15,7 @@ import re
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
+import httpx
 import orjson
 import polars as pl
 import pytest
@@ -152,6 +158,7 @@ class TestHandshake:
             "model": ["flux-general-en"],
             "encoding": ["linear16"],
             "sample_rate": ["16000"],
+            "mip_opt_out": ["true"],
         }
 
     async def test_options_and_repeatable_multi_language_hints(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -186,6 +193,68 @@ class TestHandshake:
         assert handler.authorization == "Token test-key"
         assert bytes(handler.received_audio) == make_clip().pcm
         assert all(isinstance(frame, bytes) for frame in handler.received_frames[:-1])
+
+
+class _Body(httpx.AsyncByteStream):
+    """A lazily-read response body, so httpx stamps ``Response.elapsed``."""
+
+    def __init__(self, payload: bytes) -> None:
+        self._payload = payload
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        yield self._payload
+
+
+NOVA3_RESULTS_EVENTS: list[dict[str, Any]] = [
+    {
+        "type": "Results",
+        "is_final": True,
+        "speech_final": True,
+        "channel": {"alternatives": [{"transcript": "hello world"}]},
+    },
+    {"type": "Metadata"},
+]
+
+
+class TestMipOptOut:
+    """Every Deepgram request opts out of the Model Improvement Program."""
+
+    async def test_nova3_batch_url_always_opts_out(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("DEEPGRAM_API_KEY", "test-key")
+        captured: list[httpx.Request] = []
+
+        def respond(request: httpx.Request) -> httpx.Response:
+            captured.append(request)
+            payload = {"results": {"channels": [{"alternatives": [{"transcript": "hello world"}]}]}}
+            return httpx.Response(
+                200,
+                headers={"Content-Type": "application/json"},
+                stream=_Body(orjson.dumps(payload)),
+            )
+
+        adapter = deepgram.DeepgramNova3()
+        adapter._http = httpx.AsyncClient(transport=httpx.MockTransport(respond))
+        try:
+            result = await adapter.transcribe_batch(make_clip())
+        finally:
+            await adapter.aclose()
+        assert result.text == "hello world"
+        assert parse_qs(captured[0].url.query.decode())["mip_opt_out"] == ["true"]
+
+    async def test_nova3_stream_url_always_opts_out(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("DEEPGRAM_API_KEY", "test-key")
+        handler = FakeDeepgramFluxWs(NOVA3_RESULTS_EVENTS)
+        async with serve(handler, "127.0.0.1", 0) as running:
+            port = running.sockets[0].getsockname()[1]
+            monkeypatch.setattr(deepgram, "STREAM_URL", f"ws://127.0.0.1:{port}/v1/listen")
+            adapter = deepgram.DeepgramNova3()
+            result = await adapter.transcribe_stream(make_clip(), chunk_ms=20, realtime=False)
+        assert result.text == "hello world"
+        assert parse_qs(urlsplit(handler.path).query)["mip_opt_out"] == ["true"]
+
+    async def test_flux_stream_url_always_opts_out(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _, handler = await run_adapter(TWO_TURN_EVENTS, monkeypatch)
+        assert parse_qs(urlsplit(handler.path).query)["mip_opt_out"] == ["true"]
 
 
 class TestEventMapping:

@@ -55,10 +55,14 @@ class DeepgramNova3(SttProvider):
     async def transcribe_batch(self, clip: AudioClip) -> SttResult:
         """Post the clip as a WAV file to the pre-recorded endpoint."""
         result = self._result(clip, Mode.BATCH)
+        # mip_opt_out is unconditional on every Deepgram request: benchmark
+        # and production audio must never enter the Model Improvement
+        # Program, so it is not exposed as an option.
         params = {
             "model": self._model(),
             "language": self._language(clip),
             "smart_format": str(self.options.get("smart_format", True)).lower(),
+            "mip_opt_out": "true",
         }
         response = await self.http.post(
             f"{BATCH_URL}?{urlencode(params)}",
@@ -84,6 +88,7 @@ class DeepgramNova3(SttProvider):
             "channels": "1",
             "interim_results": "true",
             "smart_format": str(self.options.get("smart_format", True)).lower(),
+            "mip_opt_out": "true",
         }
         endpointing = self.options.get("endpointing")
         utterance_end_ms = self.options.get("utterance_end_ms")
@@ -201,6 +206,7 @@ class DeepgramFlux(SttProvider):
             "model": model,
             "encoding": "linear16",
             "sample_rate": str(clip.sample_rate),
+            "mip_opt_out": "true",
         }
         if model == "flux-general-multi" and language_hints:
             params["language_hint"] = language_hints

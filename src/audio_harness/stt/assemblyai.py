@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from typing import Any
 from urllib.parse import urlencode
 
+import httpx
 import orjson
 from websockets.asyncio.client import ClientConnection
 
@@ -21,6 +23,8 @@ from .ws import StreamProtocolError, run_stream
 API_BASE = "https://api.assemblyai.com/v2"
 STREAM_URL = "wss://streaming.assemblyai.com/v3/ws"
 POLL_INTERVAL_S = 0.5
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @register
@@ -38,6 +42,10 @@ class AssemblyAIUniversal35Pro(SttProvider):
         max_turn_silence: Silence in ms that forces a turn to end regardless
             of confidence (server default 1280).
         vad_threshold: VAD sensitivity (server default 0.4).
+        delete_after: When true, delete the batch transcript from
+            AssemblyAI's storage once it has been fetched. Deletion failures
+            are logged and recorded, never raised. Off by default. The
+            streaming path stores nothing, so it needs no equivalent.
 
     The v3 socket accepts (as of 2026-08): en, es, de, fr, it, pt, tr, nl,
     sv, no, da, fi, hi, vi, ar, he, ja, ur, zh, ru, ko, multi. Anything else
@@ -98,9 +106,35 @@ class AssemblyAIUniversal35Pro(SttProvider):
         result.total_s = time.perf_counter() - started
         result.text = str(payload.get("text") or "")
         result.raw["response"] = payload
+        result.raw["transcript_id"] = transcript_id
         if payload.get("status") == "error":
             result.error = str(payload.get("error", "transcription failed"))
+        if self.options.get("delete_after"):
+            result.raw["deleted"] = await self._delete_transcript(transcript_id)
         return result
+
+    async def _delete_transcript(self, transcript_id: str) -> bool:
+        """Delete a stored batch transcript, reporting success rather than raising.
+
+        Retention hygiene must never cost the transcription that already
+        succeeded, so any failure — transport or HTTP status — is logged as a
+        warning and surfaces as ``False`` in ``result.raw["deleted"]``.
+        """
+        try:
+            response = await self.http.delete(f"{API_BASE}/transcript/{transcript_id}", headers=self._auth())
+        except httpx.HTTPError as exc:
+            _LOGGER.warning("%s: failed to delete transcript %s: %s", self.key, transcript_id, exc)
+            return False
+        if response.is_success:
+            return True
+        _LOGGER.warning(
+            "%s: failed to delete transcript %s: HTTP %d: %s",
+            self.key,
+            transcript_id,
+            response.status_code,
+            response.text.strip()[:500],
+        )
+        return False
 
     async def _poll(self, transcript_id: str) -> dict[str, Any]:
         """Poll a transcript until it reaches a terminal status."""
