@@ -9,7 +9,7 @@
 stt:
   - name: openai-gpt-transcribe
     modes: [batch]
-  - name: openai-gpt-live-transcribe
+  - name: openai-live-transcribe
     modes: [stream]
   - name: or-fish-transcribe
     modes: [batch]
