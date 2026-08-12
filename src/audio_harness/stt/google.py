@@ -23,6 +23,19 @@ from audio_harness.types import AudioClip, EventKind, Mode, SttResult
 from .base import StreamTimeline, SttProvider, register
 
 
+_REGIONAL_DEFAULTS = {"en": "en-US", "ja": "ja-JP"}
+
+
+def _bcp47(language: str) -> str:
+    """Expand a bare primary subtag to the regional code Chirp 3 requires.
+
+    The real-data manifests carry bare ``en``/``ja`` tags, but Speech v2
+    rejects them with 400 "language not supported by the model"; already
+    regional tags pass through unchanged.
+    """
+    return _REGIONAL_DEFAULTS.get(language, language)
+
+
 @register
 class GoogleChirp3(SttProvider):
     """Google Cloud STT v2 with the Chirp 3 model.
@@ -78,7 +91,7 @@ class GoogleChirp3(SttProvider):
                 sample_rate_hertz=clip.sample_rate,
                 audio_channel_count=1,
             ),
-            language_codes=[clip.language],
+            language_codes=[_bcp47(clip.language)],
             model=str(self.options.get("model", "chirp_3")),
         )
 

@@ -480,6 +480,12 @@ def _stt_record(result: SttResult) -> bytes:
             "ws_rtt_s": result.raw.get("ws_rtt_s"),
             "eou_source": result.raw.get("eou_source"),
             "endpoint_config": result.raw.get("endpoint_config"),
+            # Deletion evidence for vendor-stored batch assets: the run report
+            # proves cleanup from these fields, so they must survive into the
+            # canonical JSONL even though most lanes leave them null.
+            "transcript_id": result.raw.get("transcript_id"),
+            "job_id": result.raw.get("job_id"),
+            "deleted": result.raw.get("deleted"),
             "error": result.error,
             "partials": [
                 {

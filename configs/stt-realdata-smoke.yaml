@@ -19,7 +19,11 @@ stt:
   - name: google-chirp3
     modes: [batch, stream]
     options:
-      location: asia-northeast1
+      # chirp_3 is not served from asia-northeast1 (smoke 2026-08-12: 400
+      # "language not supported in the location"); us is the documented
+      # fallback — Google Cloud DPA/no-training still applies, Tokyo data
+      # residency does not.
+      location: us
   - name: assemblyai-universal35pro
     modes: [batch, stream]
     options:

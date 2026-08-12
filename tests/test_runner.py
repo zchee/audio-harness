@@ -388,6 +388,9 @@ def _legacy_stt_file(results: list[SttResult]) -> bytes:
                 "ws_rtt_s": result.raw.get("ws_rtt_s"),
                 "eou_source": result.raw.get("eou_source"),
                 "endpoint_config": result.raw.get("endpoint_config"),
+                "transcript_id": result.raw.get("transcript_id"),
+                "job_id": result.raw.get("job_id"),
+                "deleted": result.raw.get("deleted"),
                 "error": result.error,
                 "partials": [
                     {"t_s": p.t_s, "text": p.text, "is_final": p.is_final, "kind": p.kind} for p in result.partials
