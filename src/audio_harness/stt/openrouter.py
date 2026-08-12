@@ -82,6 +82,19 @@ class OpenRouterParakeet(OpenRouterStt):
 
 
 @register
+class OpenRouterMaiTranscribe(OpenRouterStt):
+    """OpenRouter-hosted Microsoft MAI transcribe 1.5.
+
+    Probe-verified 2026-08-12 ($0.0001/s in the usage payload). Hosted-proxy
+    caveats apply; synthetic corpora only — OpenRouter is not on the
+    real-data vendor allowlist.
+    """
+
+    key = "or-mai-transcribe"
+    model = "microsoft/mai-transcribe-1.5"
+
+
+@register
 class OpenRouterFishTranscribe(OpenRouterStt):
     """OpenRouter-hosted Fish Audio transcribe-1.
 

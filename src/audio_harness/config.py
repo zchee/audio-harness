@@ -112,6 +112,11 @@ STT_PRICING: dict[str, SttPricing] = {
         note="$0.0015/audio-second through OpenRouter; hosted-proxy latency is "
         "not direct-vendor comparable; pricing verified 2026-08-07",
     ),
+    "or-mai-transcribe": SttPricing(
+        batch_per_hour=0.36,
+        note="$0.0001/audio-second observed in the endpoint's usage payload "
+        "2026-08-12; hosted-proxy latency is not direct-vendor comparable",
+    ),
     "or-fish-transcribe": SttPricing(
         batch_per_hour=0.36,
         note="$0.0001/audio-second observed in the endpoint's usage payload "

@@ -154,6 +154,15 @@ class TestRegistration:
         assert adapter.supports_stream is False
         assert stt.family_of("or-parakeet") == "openrouter"
 
+    def test_mai_transcribe_lane(self) -> None:
+        adapter = stt.create("or-mai-transcribe")
+
+        assert isinstance(adapter, openrouter.OpenRouterMaiTranscribe)
+        assert adapter.model == "microsoft/mai-transcribe-1.5"
+        assert adapter.supports_batch is True
+        assert adapter.supports_stream is False
+        assert stt.family_of("or-mai-transcribe") == "openrouter"
+
     def test_fish_transcribe_lane(self) -> None:
         adapter = stt.create("or-fish-transcribe")
 

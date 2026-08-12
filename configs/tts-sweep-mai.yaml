@@ -1,0 +1,28 @@
+# Microsoft MAI Voice 2 / 2 Flash (OpenRouter) English sweep, mirroring the
+# fish/qwen OR sweeps: batch-only hosted-proxy lanes, canonical en judges.
+#
+#   uv run audio-harness tts configs/tts-sweep-mai.yaml
+
+tts:
+  - name: or-mai-voice-2
+    modes: [batch]
+  - name: or-mai-voice-2-flash
+    modes: [batch]
+
+dataset:
+  prompts: data/prompts-en.txt
+  language: en-US
+  limit: null
+
+roundtrip_stt:
+  - name: deepgram-nova3
+    options:
+      smart_format: false
+  - name: whisper-local
+
+run:
+  repeats: 3
+  warmup: 1
+  provider_concurrency: 2
+  timeout_s: 300
+  output_dir: results

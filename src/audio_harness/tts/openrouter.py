@@ -179,3 +179,27 @@ class OpenRouterFishS21Pro(OpenRouterTts):
     key = "or-fish-s21-pro"
     model = "fish-audio/s2.1-pro"
     default_voice = ""
+
+
+@register
+class OpenRouterMaiVoice2(OpenRouterTts):
+    """OpenRouter-hosted Microsoft MAI Voice 2.
+
+    An explicit voice is mandatory (400 without one; verified live
+    2026-08-12) and the accepted identifiers are Azure-style neural voice
+    names — en-US-AvaNeural and ja-JP-NanamiNeural both probe 200. Japanese
+    configs must override ``voice`` accordingly.
+    """
+
+    key = "or-mai-voice-2"
+    model = "microsoft/mai-voice-2"
+    default_voice = "en-US-AvaNeural"
+
+
+@register
+class OpenRouterMaiVoice2Flash(OpenRouterTts):
+    """OpenRouter-hosted Microsoft MAI Voice 2 Flash."""
+
+    key = "or-mai-voice-2-flash"
+    model = "microsoft/mai-voice-2-flash"
+    default_voice = "en-US-AvaNeural"

@@ -31,6 +31,8 @@ LANES = [
     ("or-fish-s1", "fish-audio/s1", ""),
     ("or-fish-s2-pro", "fish-audio/s2-pro", ""),
     ("or-fish-s21-pro", "fish-audio/s2.1-pro", ""),
+    ("or-mai-voice-2", "microsoft/mai-voice-2", "en-US-AvaNeural"),
+    ("or-mai-voice-2-flash", "microsoft/mai-voice-2-flash", "en-US-AvaNeural"),
 ]
 
 
