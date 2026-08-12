@@ -154,6 +154,15 @@ class TestRegistration:
         assert adapter.supports_stream is False
         assert stt.family_of("or-parakeet") == "openrouter"
 
+    def test_fish_transcribe_lane(self) -> None:
+        adapter = stt.create("or-fish-transcribe")
+
+        assert isinstance(adapter, openrouter.OpenRouterFishTranscribe)
+        assert adapter.model == "fish-audio/transcribe-1"
+        assert adapter.supports_batch is True
+        assert adapter.supports_stream is False
+        assert stt.family_of("or-fish-transcribe") == "openrouter"
+
 
 LIVE_FLAG = "AUDIO_HARNESS_TEST_OPENROUTER_LIVE"
 

@@ -805,6 +805,14 @@ def gemini_llm(model: str, usage: LlmUsage | None = None) -> LlmFn:
     client = genai.Client(api_key=require_env("GEMINI_API_KEY", "sim-interview"))
     usage = usage if usage is not None else LlmUsage()
 
+    # Gemini 2.x accepts thinking_budget=0 to disable thinking; 3.x models
+    # reject that form. On 3.x the lane runs thinking ON (dynamic budget,
+    # user directive 2026-08-12) with a raised output cap so thought tokens
+    # cannot starve the answer text.
+    gemini3 = model.startswith(("gemini-3", "models/gemini-3"))
+    thinking = genai_types.ThinkingConfig(thinking_budget=-1 if gemini3 else 0)
+    max_output_tokens = 1024 if gemini3 else 256
+
     async def call(system: str, prompt: str, temperature: float) -> str:
         response = None
         for attempt in range(3):
@@ -815,8 +823,8 @@ def gemini_llm(model: str, usage: LlmUsage | None = None) -> LlmFn:
                     config=genai_types.GenerateContentConfig(
                         system_instruction=system,
                         temperature=temperature,
-                        max_output_tokens=256,
-                        thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
+                        max_output_tokens=max_output_tokens,
+                        thinking_config=thinking,
                     ),
                 )
                 break

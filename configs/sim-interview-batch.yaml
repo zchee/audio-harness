@@ -10,37 +10,45 @@
 # batch-capable adapters, run as modes: [batch] only — the parent keeps the
 # streaming numbers.
 #
-# CAVEAT — read before running: the parent pins no seed, so a fresh sim run
-# generates NEW personas and NEW audio. A batch run from this file is a
-# self-consistent batch ranking, but it is not turn-for-turn comparable with
-# an already-executed streaming run unless `sim.seed` is set to that run's
-# seed first. The Gemini dialogue spend also repeats in full — the same
-# estimate gate and hard_cap_usd apply.
+# Both modes run in ONE seeded generation pass: the same synthesized audio
+# feeds stream and batch, so the stream-vs-batch comparison is self-contained
+# in this run. sim.seed reuses the 2026-08-06 run's recorded seed
+# (results/20260806-152814/sim-gate.json), which reproduces the same
+# personas, slot truths and question structure; LLM wording can still vary
+# between runs, so cross-run comparisons stay distribution-level while
+# within-run mode comparisons are exact. Gemini/Google spend is out of
+# budget scope per user directive (2026-08-12); the estimate gate still
+# runs as a sanity check.
 
 sim:
-  # Identical to sim-interview.yaml.
+  # Identical to sim-interview.yaml except the pinned seed.
   scenarios: data/sim/scenarios-en.yaml
   personas_per_scenario: 8      # 3 scenarios x 8 personas x 8 slots = 192 turns
-  model: gemini-2.5-flash       # pinned interviewer + persona LLM
+  # v2 generator (user directive 2026-08-12): latest flash, verified via
+  # models.list; no dated snapshot published for it yet, so the alias is
+  # pinned. Cross-run comparison to the 2026-08-06 run is distribution-level
+  # only (same seed = same personas/slots; different generator wording);
+  # the stream-vs-batch comparison stays exact within this run.
+  model: gemini-3.6-flash       # pinned interviewer + persona LLM
   voices: [af_heart, am_michael, bf_emma, bm_george]   # pinned Kokoro roster
   degradation: tel8k            # pinned telephony round-trip (snr.py machinery)
   est_answer_s: 12.0            # expected seconds per answer, for the estimate
   hard_cap_usd: 50.0            # HARD cap: abort if the estimate exceeds this
-  # seed: null                  # set to a past run's seed for a paired batch rerun
+  seed: 117738195               # the 2026-08-06 approved run's recorded seed
 
 stt:
   - name: deepgram-nova3
-    modes: [batch]
+    modes: [batch, stream]
   - name: elevenlabs-scribe2
-    modes: [batch]
+    modes: [batch, stream]
   - name: assemblyai-universal35pro
-    modes: [batch]
+    modes: [batch, stream]
   - name: soniox-rt-v5
-    modes: [batch]
+    modes: [batch, stream]
   - name: speechmatics-enhanced
-    modes: [batch]
+    modes: [batch, stream]
   - name: google-chirp3
-    modes: [batch]
+    modes: [batch, stream]
 
 run:
   # Identical to sim-interview.yaml. chunk_ms/realtime only govern streaming

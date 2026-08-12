@@ -79,3 +79,17 @@ class OpenRouterParakeet(OpenRouterStt):
 
     key = "or-parakeet"
     model = "nvidia/parakeet-tdt-0.6b-v3"
+
+
+@register
+class OpenRouterFishTranscribe(OpenRouterStt):
+    """OpenRouter-hosted Fish Audio transcribe-1.
+
+    Probe-verified 2026-08-12 (200 on the transcription endpoint; usage
+    bills per second at $0.0001/s). Hosted-proxy caveats apply as with
+    every OpenRouter lane; synthetic corpora only — OpenRouter is not on
+    the real-data vendor allowlist.
+    """
+
+    key = "or-fish-transcribe"
+    model = "fish-audio/transcribe-1"

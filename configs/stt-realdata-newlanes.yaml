@@ -1,0 +1,28 @@
+# Real-data supplement for the new OpenAI transcription generation.
+# OpenAI is on the vendor allowlist (30-day abuse-retention caveat recorded);
+# OpenRouter lanes are deliberately absent — not allowlisted for production
+# audio (double-hop processing).
+#
+# 本番 PII 音声 — 実行は lead のみ、W0 検証済みプライバシー制御必須。
+#
+#   uv run audio-harness stt configs/stt-realdata-newlanes.yaml
+
+stt:
+  - name: openai-gpt-transcribe
+    modes: [batch]
+  - name: openai-gpt-live-transcribe
+    modes: [stream]
+
+dataset:
+  manifest: data/realdata/pilot-150.jsonl
+  language: en-US
+  limit: null
+
+run:
+  repeats: 1
+  warmup: 1
+  chunk_ms: 20
+  realtime: true
+  provider_concurrency: 2
+  timeout_s: 600
+  output_dir: results

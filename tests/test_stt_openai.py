@@ -216,6 +216,15 @@ class TestBatchProtocol:
         assert openai.OpenAiGptLiveTranscribe.supports_batch is False
         assert openai.OpenAiGptLiveTranscribe.supports_stream is True
 
+    def test_gpt_transcribe_lane_is_batch_only_with_successor_model(self) -> None:
+        adapter = stt.create("openai-gpt-transcribe")
+
+        assert isinstance(adapter, openai.OpenAiGptTranscribe)
+        assert adapter._model() == "gpt-transcribe"
+        assert adapter.supports_batch is True
+        assert adapter.supports_stream is False
+        assert stt.family_of("openai-gpt-transcribe") == "openai"
+
 
 class TestDiarizeBatchProtocol:
     """OpenAI's documented ``diarized_json`` response contract."""

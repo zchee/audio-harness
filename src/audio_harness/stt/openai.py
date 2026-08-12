@@ -181,6 +181,25 @@ class OpenAiGpt4oTranscribe(SttProvider):
 
 
 @register
+class OpenAiGptTranscribe(OpenAiGpt4oTranscribe):
+    """Batch lane for ``gpt-transcribe``, the GPT-4o transcription successor.
+
+    Same REST wire contract as the parent; only the default model differs.
+    Streaming coverage for this generation belongs to the purpose-built
+    :class:`OpenAiGptLiveTranscribe` lane, so this one is batch-only.
+    """
+
+    key = "openai-gpt-transcribe"
+    vendor = "openai"
+    family = "openai"
+    supports_batch = True
+    supports_stream = False
+
+    def _model(self) -> str:
+        return str(self.options.get("model", "gpt-transcribe"))
+
+
+@register
 class OpenAiGpt4oTranscribeDiarize(OpenAiGpt4oTranscribe):
     """Batch-only GPT-4o transcription with speaker-labelled segments.
 

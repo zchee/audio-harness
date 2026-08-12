@@ -1,0 +1,33 @@
+# New-lane additions to the canonical English table (2026-08-12):
+# gpt-transcribe (GPT-4o transcription successor, batch), gpt-live-transcribe
+# (the purpose-built live streaming model, so this OpenAI generation gets both
+# modes), and OpenRouter's fish-audio/transcribe-1 (hosted-proxy, batch).
+# Same pipecat parquet, seed and limit as the canonical English table.
+#
+#   uv run audio-harness stt configs/stt-en-new-lanes.yaml
+
+stt:
+  - name: openai-gpt-transcribe
+    modes: [batch]
+  - name: openai-gpt-live-transcribe
+    modes: [stream]
+  - name: or-fish-transcribe
+    modes: [batch]
+
+dataset:
+  parquet: data/hf/stt-benchmark-data/data/train-00000-of-00001.parquet
+  id_column: sample_id
+  audio_column: audio
+  text_column: transcription
+  language: en-US
+  limit: 30
+  sample_seed: 20260805
+
+run:
+  repeats: 3
+  warmup: 1
+  chunk_ms: 20
+  realtime: true
+  provider_concurrency: 2
+  timeout_s: 300
+  output_dir: results
