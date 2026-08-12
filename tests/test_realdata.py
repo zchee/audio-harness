@@ -547,6 +547,71 @@ def test_select_pilot_is_seeded_stratified_video_first_and_session_capped(tmp_pa
     assert is_realdata_manifest(tmp_path / "pilot-a.jsonl")
 
 
+def test_select_pilot_pii_trim_session_cap_and_language_quotas(tmp_path: Path) -> None:
+    records: list[dict[str, object]] = []
+    for language, sessions in (("en", 4), ("ja", 2)):
+        for session_index in range(sessions):
+            session = f"video-{language}-{session_index}"
+            for clip_index, start_offset in enumerate((5.0, 65.0, 130.0, 200.0, 260.0)):
+                records.append({
+                    "clip_path": f"data/realdata/clips/{session}/{clip_index:04d}.wav",
+                    "session_id": session,
+                    "language": language,
+                    "duration": 4.0 + 5.0 * clip_index,
+                    "source": "video",
+                    "start_offset": start_offset,
+                })
+    clips_path = tmp_path / "clips.jsonl"
+    clips_path.write_bytes(b"".join(orjson.dumps(record, option=orjson.OPT_APPEND_NEWLINE) for record in records))
+
+    selected = realdata.select_pilot(
+        10,
+        seed=20260812,
+        clips_path=clips_path,
+        join_path=tmp_path / "missing-join.jsonl",
+        output_path=tmp_path / "pilot-150.jsonl",
+        min_start_offset=60.0,
+        session_cap=3,
+        language_quotas={"en": 6, "ja": 3},
+    )
+    repeated = realdata.select_pilot(
+        10,
+        seed=20260812,
+        clips_path=clips_path,
+        join_path=tmp_path / "missing-join.jsonl",
+        output_path=tmp_path / "pilot-150-b.jsonl",
+        min_start_offset=60.0,
+        session_cap=3,
+        language_quotas={"en": 6, "ja": 3},
+    )
+
+    assert selected == repeated
+    assert len(selected) == 9
+    assert Counter(str(record["language"]) for record in selected) == {"en": 6, "ja": 3}
+    assert max(Counter(str(record["session"]) for record in selected).values()) <= 3
+    assert all(not str(record["clip"]).endswith("0000.wav") for record in selected)
+
+    unquota = realdata.select_pilot(
+        10,
+        seed=20260812,
+        clips_path=clips_path,
+        join_path=tmp_path / "missing-join.jsonl",
+        output_path=tmp_path / "pilot-open.jsonl",
+        session_cap=1,
+    )
+    assert len(unquota) == 6
+    assert max(Counter(str(record["session"]) for record in unquota).values()) == 1
+
+    with pytest.raises(ValueError, match="session cap"):
+        realdata.select_pilot(
+            5,
+            clips_path=clips_path,
+            join_path=tmp_path / "missing-join.jsonl",
+            output_path=tmp_path / "pilot-bad.jsonl",
+            session_cap=0,
+        )
+
+
 def test_anchor_sheet_has_empty_transcript_column_and_lf_endings(tmp_path: Path) -> None:
     clips_path = tmp_path / "clips.jsonl"
     output_dir = tmp_path / "anchors"

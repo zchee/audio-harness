@@ -8,7 +8,7 @@ identification, and prepares transcript-free human-review selections.
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 import csv
 from dataclasses import dataclass
 import os
@@ -79,6 +79,7 @@ class _Candidate:
     language: Literal["en", "ja"]
     duration: float
     source: SourceTrack
+    start_offset: float = 0.0
 
 
 def ingest(dest: Path, bucket_prefix: str, *, dry_run: bool = False) -> list[_JsonObject]:
@@ -491,14 +492,17 @@ def select_pilot(
     clips_path: Path = CLIPS_PATH,
     join_path: Path = JOIN_PATH,
     output_path: Path = PILOT_PATH,
+    min_start_offset: float = 0.0,
+    session_cap: int = 2,
+    language_quotas: Mapping[str, int] | None = None,
 ) -> list[_JsonObject]:
     """Write a deterministic, stratified pilot selection without transcripts.
 
     Eligible clips are stratified over English/Japanese and short ``[2, 8)``,
     medium ``[8, 18)``, and long ``[18, 30]`` second buckets. Sampling cycles
-    through all six strata and permits at most two clips per session. Video
-    sessions are sampled first because their egress join metadata is richer;
-    MP3 sessions fill any remaining slots.
+    through all six strata and permits at most ``session_cap`` clips per
+    session. Video sessions are sampled first because their egress join
+    metadata is richer; MP3 sessions fill any remaining slots.
 
     Args:
         n: Maximum number of clips to select.
@@ -506,14 +510,30 @@ def select_pilot(
         clips_path: Input clip metadata JSON Lines file.
         join_path: Video egress join used to recognize video sessions.
         output_path: Pilot JSON Lines destination.
+        min_start_offset: Exclude clips that begin earlier than this many
+            seconds into their session. Interview openings concentrate
+            self-introductions, so a positive value trims the most
+            PII-dense clips before any vendor transmission.
+        session_cap: Maximum clips drawn from one session.
+        language_quotas: Optional per-language selection targets (for
+            example ``{"en": 100, "ja": 50}``). Languages absent from the
+            mapping are not selected.
 
     Returns:
         Selected manifest records in sampling order.
 
     Raises:
-        ValueError: If ``n`` is negative.
+        ValueError: If ``n`` is negative or ``session_cap`` is not positive.
     """
-    selected = _select_candidates(n, seed=seed, clips_path=clips_path, join_path=join_path)
+    selected = _select_candidates(
+        n,
+        seed=seed,
+        clips_path=clips_path,
+        join_path=join_path,
+        min_start_offset=min_start_offset,
+        session_cap=session_cap,
+        language_quotas=language_quotas,
+    )
     records = [_selection_json(candidate, output_path.parent) for candidate in selected]
     _write_jsonl(output_path, records)
     return records
@@ -872,9 +892,18 @@ def _load_candidates(clips_path: Path) -> list[_Candidate]:
                 language=cast("Literal['en', 'ja']", language),
                 duration=duration,
                 source=cast("SourceTrack", source),
+                start_offset=_candidate_start_offset(record),
             )
         )
     return candidates
+
+
+def _candidate_start_offset(record: _JsonObject) -> float:
+    value = record.get("start_offset")
+    try:
+        return float(cast("str | int | float", value))
+    except TypeError, ValueError:
+        return 0.0
 
 
 def _candidate_duration(record: _JsonObject, path: Path, line_number: int) -> float:
@@ -908,17 +937,38 @@ def _video_sessions(join_path: Path) -> set[str]:
     return sessions
 
 
-def _select_candidates(n: int, *, seed: int, clips_path: Path, join_path: Path) -> list[_Candidate]:
+def _select_candidates(
+    n: int,
+    *,
+    seed: int,
+    clips_path: Path,
+    join_path: Path,
+    min_start_offset: float = 0.0,
+    session_cap: int = 2,
+    language_quotas: Mapping[str, int] | None = None,
+) -> list[_Candidate]:
     if n < 0:
         msg = "selection size must be non-negative"
         raise ValueError(msg)
-    candidates = _load_candidates(clips_path)
+    if session_cap < 1:
+        msg = "session cap must be positive"
+        raise ValueError(msg)
+    candidates = [item for item in _load_candidates(clips_path) if item.start_offset >= min_start_offset]
     video_sessions = _video_sessions(join_path)
     video = [item for item in candidates if item.source == "video" or item.session_id in video_sessions]
     mp3 = [item for item in candidates if item not in video]
     rng = random.Random(seed)
     session_counts: dict[str, int] = defaultdict(int)
-    selected = _stratified_take(video, n, rng=rng, session_counts=session_counts)
+    language_counts: dict[str, int] = defaultdict(int)
+    selected = _stratified_take(
+        video,
+        n,
+        rng=rng,
+        session_counts=session_counts,
+        session_cap=session_cap,
+        language_counts=language_counts,
+        language_quotas=language_quotas,
+    )
     if len(selected) < n:
         selected.extend(
             _stratified_take(
@@ -926,6 +976,9 @@ def _select_candidates(n: int, *, seed: int, clips_path: Path, join_path: Path) 
                 n - len(selected),
                 rng=rng,
                 session_counts=session_counts,
+                session_cap=session_cap,
+                language_counts=language_counts,
+                language_quotas=language_quotas,
             )
         )
     return selected
@@ -937,6 +990,9 @@ def _stratified_take(
     *,
     rng: random.Random,
     session_counts: dict[str, int],
+    session_cap: int = 2,
+    language_counts: dict[str, int] | None = None,
+    language_quotas: Mapping[str, int] | None = None,
 ) -> list[_Candidate]:
     strata: dict[tuple[str, str], list[_Candidate]] = defaultdict(list)
     for candidate in sorted(candidates, key=lambda item: (item.session_id, item.clip_path)):
@@ -944,18 +1000,23 @@ def _stratified_take(
     for bucket in strata.values():
         rng.shuffle(bucket)
 
+    taken_by_language = language_counts if language_counts is not None else defaultdict(int)
     order = [(language, bucket) for bucket in ("short", "medium", "long") for language in ("en", "ja")]
     selected: list[_Candidate] = []
     while len(selected) < limit:
         progress = False
         for key in order:
+            language = key[0]
+            if language_quotas is not None and taken_by_language[language] >= language_quotas.get(language, 0):
+                continue
             bucket = strata[key]
             while bucket:
                 candidate = bucket.pop()
-                if session_counts[candidate.session_id] >= 2:
+                if session_counts[candidate.session_id] >= session_cap:
                     continue
                 selected.append(candidate)
                 session_counts[candidate.session_id] += 1
+                taken_by_language[language] += 1
                 progress = True
                 break
             if len(selected) == limit:
