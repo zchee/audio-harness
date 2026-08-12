@@ -1,0 +1,68 @@
+# Multilingual TTS intelligibility guardrail — Hungarian lane.
+#
+#   uv run audio-harness tts configs/tts-guardrail-multilang-hu.yaml
+#
+# Round-trip errors are an intelligibility guardrail — NOT ranked. The
+# whisper-local judge answers one question per lane: does this engine's
+# Hungarian come back as the prompt text, or as noise? Rates are read
+# as pass/fail evidence, never as a leaderboard — one local judge cannot
+# fairly rank twelve engines across twelve languages.
+#
+# Lanes: every multilingual-capable TTS engine in the harness. The en-only
+# OSS lanes (or-kokoro, or-orpheus, or-csm, or-zonos) are excluded.
+#
+# Prompts: data/prompts-multilang/hu.txt — 10 FLEURS test sentences
+# (raw_transcription, CC-BY-4.0, seed 20260812; locale hu_hu, see
+# data/prompts-multilang/README.md).
+# dataset.prompts is one file with one language tag, so the twelve
+# tts-guardrail-multilang-*.yaml files are one logical run split by language.
+
+tts:
+  - name: soniox-tts-rt-v2
+    modes: [batch]
+  - name: elevenlabs-v3
+    modes: [batch]
+    options:
+      # "Sarah" (premade, multilingual). Same pin as tts-sweep-ja.yaml so
+      # every run of this file scores the same voice.
+      voice_id: EXAVITQu4vr4xnSDxMaL
+  - name: elevenlabs-flash25
+    modes: [batch]
+    options:
+      voice_id: EXAVITQu4vr4xnSDxMaL
+  - name: cartesia-sonic3
+    modes: [batch]
+  - name: cartesia-sonic35
+    modes: [batch]
+  - name: inworld-tts2
+    modes: [batch]
+  - name: gemini-tts
+    modes: [batch]
+  - name: gemini-tts-31
+    modes: [batch]
+  - name: deepgram-aura2
+    modes: [batch]
+  - name: xai-grok-tts
+    modes: [batch]
+  - name: or-qwen-tts-flash
+    modes: [batch]
+  - name: or-fish-s1
+    modes: [batch]
+
+dataset:
+  prompts: data/prompts-multilang/hu.txt
+  language: hu-HU
+  limit: null
+
+# whisper-local ONLY, mirroring tts-ja.yaml: a cloud judge with weak coverage
+# of any one of these languages would poison the guardrail it is meant to
+# hold. Needs the optional dependency group: uv sync --extra judge-whisper.
+roundtrip_stt:
+  - name: whisper-local
+
+run:
+  repeats: 1                 # intelligibility, not latency — one pass suffices
+  warmup: 1
+  provider_concurrency: 4
+  timeout_s: 300
+  output_dir: results
