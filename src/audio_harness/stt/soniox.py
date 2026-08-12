@@ -78,6 +78,11 @@ class SonioxRealtimeV5(SttProvider):
         started = time.perf_counter()
         timeout_s = float(self.options.get("poll_timeout_s", 300.0))
         hints = self.options.get("language_hints") or [clip.language.split("-")[0]]
+        # The batch path runs the async lineage, not the realtime model this
+        # adapter is named after — record what was actually used so reports
+        # can label the numbers honestly.
+        batch_model = str(self.options.get("batch_model", "stt-async-v5"))
+        result.raw["model"] = batch_model
         file_id: str | None = None
         transcription_id: str | None = None
 
@@ -95,7 +100,7 @@ class SonioxRealtimeV5(SttProvider):
                     f"{API_BASE}/transcriptions",
                     headers={**self._auth(), "Content-Type": "application/json"},
                     json={
-                        "model": str(self.options.get("batch_model", "stt-async-v5")),
+                        "model": batch_model,
                         "file_id": file_id,
                         "language_hints": list(hints),
                     },
@@ -163,6 +168,8 @@ class SonioxRealtimeV5(SttProvider):
     async def transcribe_stream(self, clip: AudioClip, *, chunk_ms: int, realtime: bool) -> SttResult:
         """Stream PCM and reassemble the token stream into a transcript."""
         result = self._result(clip, Mode.STREAM)
+        model = str(self.options.get("model", "stt-rt-v5"))
+        result.raw["model"] = model
         timeline = StreamTimeline()
         hints = self.options.get("language_hints") or [clip.language.split("-")[0]]
         knobs = {
@@ -180,7 +187,7 @@ class SonioxRealtimeV5(SttProvider):
             await socket.send(
                 orjson.dumps({
                     "api_key": require_env("SONIOX_API_KEY", self.key),
-                    "model": str(self.options.get("model", "stt-rt-v5")),
+                    "model": model,
                     "audio_format": "pcm_s16le",
                     "sample_rate": clip.sample_rate,
                     "num_channels": 1,

@@ -14,6 +14,7 @@ from typing import Any
 import httpx
 import orjson
 import pytest
+from websockets.asyncio.server import ServerConnection, serve
 
 from audio_harness.stt import soniox
 from audio_harness.stt.base import ProviderHttpError
@@ -103,6 +104,7 @@ class TestBatchHappyPath:
         assert result.text == "hello from soniox async"
         assert result.error is None
         assert result.total_s > 0
+        assert result.raw["model"] == "stt-async-v5", "batch runs the async lineage and must say so"
         assert result.raw["transcription_id"] == "t1"
         assert result.raw["deleted"] == {"transcription": True, "file": True}
         assert transport.poll_count == 2
@@ -143,13 +145,14 @@ class TestBatchHappyPath:
             options={"language_hints": ["ja", "en"], "batch_model": "stt-async-v4"},
         )
         try:
-            await adapter.transcribe_batch(make_clip(language="ja-JP"))
+            result = await adapter.transcribe_batch(make_clip(language="ja-JP"))
         finally:
             await adapter.aclose()
 
         body = orjson.loads(transport.requests[1].content)
         assert body["model"] == "stt-async-v4"
         assert body["language_hints"] == ["ja", "en"]
+        assert result.raw["model"] == "stt-async-v4", "the recorded model must track the batch_model option"
 
     async def test_clip_language_seeds_default_hint(self, monkeypatch: pytest.MonkeyPatch) -> None:
         transport = SonioxBatchTransport()
@@ -160,6 +163,56 @@ class TestBatchHappyPath:
             await adapter.aclose()
 
         assert orjson.loads(transport.requests[1].content)["language_hints"] == ["hu"]
+
+
+class FakeSonioxWs:
+    """Accept config and PCM frames, then replay canned token events."""
+
+    def __init__(self, events: list[dict[str, Any]]) -> None:
+        self.events = events
+        self.config: dict[str, Any] = {}
+
+    async def __call__(self, socket: ServerConnection) -> None:
+        async for frame in socket:
+            if isinstance(frame, str) and frame:
+                self.config = orjson.loads(frame)
+            if frame == "":
+                break
+        for event in self.events:
+            await socket.send(orjson.dumps(event).decode())
+
+
+async def run_stream_adapter(
+    events: list[dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+    options: dict[str, Any] | None = None,
+) -> tuple[Any, FakeSonioxWs]:
+    """Drive the realtime adapter against the local token-protocol server."""
+    monkeypatch.setenv("SONIOX_API_KEY", "test-key")
+    handler = FakeSonioxWs(events)
+    async with serve(handler, "127.0.0.1", 0) as running:
+        port = running.sockets[0].getsockname()[1]
+        monkeypatch.setattr(soniox, "STREAM_URL", f"ws://127.0.0.1:{port}")
+        adapter = soniox.SonioxRealtimeV5(options)
+        result = await adapter.transcribe_stream(make_clip(), chunk_ms=20, realtime=False)
+    return result, handler
+
+
+class TestStreamModelLabel:
+    """The streaming path records the realtime model it actually configured."""
+
+    async def test_default_model_is_recorded_and_sent(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        events = [{"tokens": [{"text": "hi", "is_final": True}], "finished": True}]
+        result, handler = await run_stream_adapter(events, monkeypatch)
+        assert result.text == "hi"
+        assert result.raw["model"] == "stt-rt-v5"
+        assert handler.config["model"] == "stt-rt-v5", "the recorded model must match the wire"
+
+    async def test_model_option_is_recorded_and_sent(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        events = [{"tokens": [], "finished": True}]
+        result, handler = await run_stream_adapter(events, monkeypatch, options={"model": "stt-rt-v4"})
+        assert result.raw["model"] == "stt-rt-v4"
+        assert handler.config["model"] == "stt-rt-v4", "the recorded model must match the wire"
 
 
 class TestBatchTerminalError:

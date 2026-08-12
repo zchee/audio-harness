@@ -1,0 +1,35 @@
+# Batch-mode additions to the English STT benchmark (configs/stt-en.yaml).
+#
+#   uv run audio-harness stt configs/stt-en-batch-additions.yaml
+#
+# Derived config: dataset and run parameters are copied verbatim from
+# stt-en.yaml so these lanes score against the exact same clips as the
+# parent run and the numbers merge into the same en WER table.
+#
+# HONEST LABELING — the lane keys below name the realtime adapters, but
+# batch mode actually runs each vendor's batch lineage: soniox-rt-v5
+# [batch] runs stt-async-v5 and cartesia-ink2 [batch] runs ink-whisper
+# (each adapter records the real model in raw["model"]). The en WER table
+# must list the real model names, never the realtime lane keys.
+
+stt:
+  - name: soniox-rt-v5
+    modes: [batch]           # actually stt-async-v5 (batch_model default)
+  - name: cartesia-ink2
+    modes: [batch]           # actually ink-whisper (batch_model default)
+
+dataset:
+  # Identical to stt-en.yaml.
+  manifest: data/manifests/en.jsonl
+  language: en-US
+  limit: null                # null runs the whole manifest
+
+run:
+  # Identical to stt-en.yaml.
+  repeats: 3                 # 3 samples per clip so p50/p95 mean something
+  warmup: 1                  # discard the first run: TLS and cold start
+  chunk_ms: 20               # matches WebRTC / telephony framing
+  realtime: true             # NEVER set false when reporting latency
+  provider_concurrency: 4
+  timeout_s: 300
+  output_dir: results

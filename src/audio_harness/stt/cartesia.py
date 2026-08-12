@@ -79,12 +79,17 @@ class CartesiaInk2(SttProvider):
         """Post a whole WAV to Cartesia's batch endpoint and parse the transcript."""
         result = self._result(clip, Mode.BATCH)
         started = time.perf_counter()
+        # POST /stt runs ink-whisper, not the Ink-2 model this adapter is
+        # named after — record what was actually used so reports can label
+        # the numbers honestly.
+        batch_model = str(self.options.get("batch_model", "ink-whisper"))
+        result.raw["model"] = batch_model
 
         response = await self.http.post(
             BATCH_URL,
             headers=self._batch_headers(),
             data={
-                "model": str(self.options.get("batch_model", "ink-whisper")),
+                "model": batch_model,
                 "language": clip.language.split("-")[0].lower(),
             },
             files={"file": ("audio.wav", wrap_wav(clip.pcm, clip.sample_rate), "audio/wav")},
@@ -139,6 +144,7 @@ class CartesiaInk2(SttProvider):
         knobs = self._endpoint_options()
         keyterms = self._keyterms()
         result = self._result(clip, Mode.STREAM)
+        result.raw["model"] = "ink-2"
         timeline = StreamTimeline()
         handler = _TurnHandler()
         params: dict[str, str | list[str]] = {

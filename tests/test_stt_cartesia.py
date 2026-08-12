@@ -166,6 +166,7 @@ class TestEventMapping:
         ]
         result, _ = await run_adapter(events, monkeypatch)
         assert result.text == "Hello world. Next turn."
+        assert result.raw["model"] == "ink-2", "streaming runs Ink-2 and must say so"
         assert [(partial.text, partial.is_final, partial.kind) for partial in result.partials] == [
             ("Hello", False, EventKind.INTERIM),
             ("Hello world.", True, EventKind.EOU),
@@ -339,11 +340,12 @@ class TestBatchRequestShape:
         transport = BatchTransport()
         adapter = make_batch_adapter(monkeypatch, transport, options={"batch_model": "ink-whisper-preview"})
         try:
-            await adapter.transcribe_batch(make_clip())
+            result = await adapter.transcribe_batch(make_clip())
         finally:
             await adapter.aclose()
 
         assert b"ink-whisper-preview" in transport.requests[0].content
+        assert result.raw["model"] == "ink-whisper-preview", "the recorded model must track the batch_model option"
 
     async def test_non_english_clip_is_accepted_by_batch(self, monkeypatch: pytest.MonkeyPatch) -> None:
         transport = BatchTransport()
@@ -373,6 +375,7 @@ class TestBatchResponseParsing:
         assert result.text == "hello from ink whisper"
         assert result.error is None
         assert result.total_s > 0
+        assert result.raw["model"] == "ink-whisper", "batch runs ink-whisper and must say so"
         assert result.raw["response"] == transport.payload
 
     async def test_missing_text_field_yields_empty_transcript(self, monkeypatch: pytest.MonkeyPatch) -> None:
