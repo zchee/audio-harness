@@ -233,7 +233,7 @@ TTS_PRICING: dict[str, TtsPricing] = {
     "or-fish-s1": TtsPricing(
         per_million_chars=15.0,
         note="OpenRouter-hosted (no direct Fish Audio account); hosted-proxy "
-        "latency is not direct-vendor comparable; pricing verified 2026-08-08",
+        "medians are direct-comparable (+~0.1s, 2026-08-12 paired run), tails are not; pricing verified 2026-08-08",
     ),
     "or-fish-s2-pro": TtsPricing(
         per_million_chars=15.0,
