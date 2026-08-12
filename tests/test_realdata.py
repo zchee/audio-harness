@@ -543,7 +543,8 @@ def test_select_pilot_is_seeded_stratified_video_first_and_session_capped(tmp_pa
     assert {record["language"] for record in first} == {"en", "ja"}
     assert {record["duration_s"] for record in first} == {4.0, 12.0, 24.0}
     assert max(Counter(str(record["session"]) for record in first).values()) <= 2
-    assert all(set(record) == {"clip", "session", "language", "duration_s", "source"} for record in first)
+    assert all(set(record) == {"id", "clip", "session", "language", "duration_s", "source"} for record in first)
+    assert len({record["id"] for record in first}) == len(first), "ids must be unique across sessions"
     assert is_realdata_manifest(tmp_path / "pilot-a.jsonl")
 
 

@@ -1037,8 +1037,12 @@ def _duration_bucket(duration: float) -> str:
 def _selection_json(candidate: _Candidate, base_dir: Path) -> _JsonObject:
     # The pilot manifest is consumed by the reference-free dataset loader,
     # which resolves relative clip paths against the manifest's directory.
+    # The id must be unique across sessions: bare clip stems (0007.wav)
+    # repeat in every session, and colliding clip_ids silently corrupt the
+    # cross-lane agreement pairing downstream.
     clip = os.path.relpath(Path(candidate.clip_path).resolve(), base_dir.resolve())
     return {
+        "id": f"{candidate.session_id}-{Path(candidate.clip_path).stem}",
         "clip": Path(clip).as_posix(),
         "session": candidate.session_id,
         "language": candidate.language,
