@@ -109,18 +109,18 @@ STT_PRICING: dict[str, SttPricing] = {
     ),
     "or-parakeet": SttPricing(
         batch_per_hour=5.40,
-        note="$0.0015/audio-second through OpenRouter; hosted-proxy latency is "
-        "not direct-vendor comparable; pricing verified 2026-08-07",
+        note="$0.0015/audio-second through OpenRouter; hosted-proxy medians are "
+        "direct-comparable (+~0.1s, 2026-08-12 paired run); tails are not; pricing verified 2026-08-07",
     ),
     "or-mai-transcribe": SttPricing(
         batch_per_hour=0.36,
         note="$0.0001/audio-second observed in the endpoint's usage payload "
-        "2026-08-12; hosted-proxy latency is not direct-vendor comparable",
+        "2026-08-12; hosted-proxy medians are direct-comparable (+~0.1s, 2026-08-12 paired run); tails are not",
     ),
     "or-fish-transcribe": SttPricing(
         batch_per_hour=0.36,
         note="$0.0001/audio-second observed in the endpoint's usage payload "
-        "2026-08-12; hosted-proxy latency is not direct-vendor comparable",
+        "2026-08-12; hosted-proxy medians are direct-comparable (+~0.1s, 2026-08-12 paired run); tails are not",
     ),
     "mistral-voxtral-realtime": SttPricing(
         stream_per_hour=0.36,
@@ -202,33 +202,33 @@ TTS_PRICING: dict[str, TtsPricing] = {
     ),
     "or-kokoro": TtsPricing(
         per_million_chars=0.62,
-        note="OpenRouter-hosted; hosted-proxy latency is not direct-vendor comparable; pricing verified 2026-08-07",
+        note="OpenRouter-hosted; hosted-proxy medians are direct-comparable (+~0.1s, 2026-08-12 paired run); tails are not; pricing verified 2026-08-07",
     ),
     "or-orpheus": TtsPricing(
         per_million_chars=7.0,
-        note="OpenRouter-hosted; hosted-proxy latency is not direct-vendor comparable; pricing verified 2026-08-07",
+        note="OpenRouter-hosted; hosted-proxy medians are direct-comparable (+~0.1s, 2026-08-12 paired run); tails are not; pricing verified 2026-08-07",
     ),
     "or-csm": TtsPricing(
         per_million_chars=7.0,
-        note="OpenRouter-hosted; hosted-proxy latency is not direct-vendor comparable; pricing verified 2026-08-07",
+        note="OpenRouter-hosted; hosted-proxy medians are direct-comparable (+~0.1s, 2026-08-12 paired run); tails are not; pricing verified 2026-08-07",
     ),
     "or-zonos": TtsPricing(
         per_million_chars=7.0,
-        note="OpenRouter-hosted; hosted-proxy latency is not direct-vendor comparable; pricing verified 2026-08-07",
+        note="OpenRouter-hosted; hosted-proxy medians are direct-comparable (+~0.1s, 2026-08-12 paired run); tails are not; pricing verified 2026-08-07",
     ),
     "or-minimax-turbo": TtsPricing(
         per_million_chars=60.0,
-        note="OpenRouter-hosted; hosted-proxy latency is not direct-vendor comparable; pricing verified 2026-08-07",
+        note="OpenRouter-hosted; hosted-proxy medians are direct-comparable (+~0.1s, 2026-08-12 paired run); tails are not; pricing verified 2026-08-07",
     ),
     "or-qwen-tts-flash": TtsPricing(
         per_million_chars=15.0,
         note="OpenRouter-hosted (direct DashScope lane blocked on an account "
-        "model grant); hosted-proxy latency is not direct-vendor comparable; "
+        "model grant); hosted-proxy medians are direct-comparable (+~0.1s, 2026-08-12 paired run); tails are not; "
         "pricing verified 2026-08-08",
     ),
     "or-qwen-tts-plus": TtsPricing(
         per_million_chars=20.0,
-        note="OpenRouter-hosted; hosted-proxy latency is not direct-vendor comparable; pricing verified 2026-08-08",
+        note="OpenRouter-hosted; hosted-proxy medians are direct-comparable (+~0.1s, 2026-08-12 paired run); tails are not; pricing verified 2026-08-08",
     ),
     "or-fish-s1": TtsPricing(
         per_million_chars=15.0,
@@ -237,15 +237,15 @@ TTS_PRICING: dict[str, TtsPricing] = {
     ),
     "or-fish-s2-pro": TtsPricing(
         per_million_chars=15.0,
-        note="OpenRouter-hosted; hosted-proxy latency is not direct-vendor comparable; pricing verified 2026-08-08",
+        note="OpenRouter-hosted; hosted-proxy medians are direct-comparable (+~0.1s, 2026-08-12 paired run); tails are not; pricing verified 2026-08-08",
     ),
     "or-fish-s21-pro": TtsPricing(
         per_million_chars=15.0,
-        note="OpenRouter-hosted; hosted-proxy latency is not direct-vendor comparable; pricing verified 2026-08-08",
+        note="OpenRouter-hosted; hosted-proxy medians are direct-comparable (+~0.1s, 2026-08-12 paired run); tails are not; pricing verified 2026-08-08",
     ),
     "or-minimax-hd": TtsPricing(
         per_million_chars=100.0,
-        note="OpenRouter-hosted; hosted-proxy latency is not direct-vendor comparable; pricing verified 2026-08-07",
+        note="OpenRouter-hosted; hosted-proxy medians are direct-comparable (+~0.1s, 2026-08-12 paired run); tails are not; pricing verified 2026-08-07",
     ),
     "azure-neural-tts": TtsPricing(
         per_million_chars=15.0,

@@ -637,9 +637,13 @@ LEGEND = """
   include that overhead and are not directly comparable to the
   WebSocket-native adapters' numbers.
 - **Hosted-proxy adapters** — Every OpenRouter result carries
-  `raw["hosted_proxy"] = True`: OpenRouter adds routing latency on top of the
-  hosted model, so its latency figures are not directly comparable to lanes
-  that call the model vendor directly.
+  `raw["hosted_proxy"] = True`. Same-model paired measurement (2026-08-12,
+  n=10 alternating, gpt-transcribe direct-vs-proxied and
+  gemini-3.1-flash-tts-preview direct-vs-proxied) put the median proxy
+  overhead at roughly +0.1s — within run-to-run noise once model inference
+  dominates — so OpenRouter *medians* are comparable to direct-vendor lanes.
+  Tail latency is not: the proxied STT p90 ran about 1.1s worse than direct,
+  so treat p90+ figures from OpenRouter lanes with caution.
 - **Local-compute adapters** — Every apple-speech-stt result carries
   `raw["local_compute"] = True`: latency reflects this machine's silicon
   (Apple Neural Engine / CPU), not a hosted vendor service, so its figures are
