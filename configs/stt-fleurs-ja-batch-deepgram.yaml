@@ -1,0 +1,29 @@
+# Deepgram-only backfill for the FLEURS ja batch supplement.
+#
+# The rotated Deepgram project has no access to nova-3-multilingual
+# (403 INSUFFICIENT_PERMISSIONS, 2026-08-12), and nova-3 monolingual now
+# serves ja directly — the real-data run sent model=nova-3&language=ja and
+# its cross-vendor agreement (8-14% vs other clouds) validates the output.
+# Same dataset stanza as configs/stt-fleurs-ja-batch.yaml.
+#
+#   uv run audio-harness stt configs/stt-fleurs-ja-batch-deepgram.yaml
+
+stt:
+  - name: deepgram-nova3
+    modes: [batch]
+
+dataset:
+  parquet: data/hf/fleurs/ja_jp/test/0000.parquet
+  id_column: id
+  audio_column: audio
+  text_column: transcription
+  language: ja-JP
+  limit: 30
+  sample_seed: 20260805
+
+run:
+  repeats: 1
+  warmup: 1
+  provider_concurrency: 2
+  timeout_s: 300
+  output_dir: results
