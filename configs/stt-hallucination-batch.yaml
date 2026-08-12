@@ -1,0 +1,69 @@
+# Batch-mode supplement to configs/stt-hallucination.yaml (hallucination and
+# silence lane: what does each recognizer invent when there is nothing — or
+# almost nothing — to hear?).
+#
+#   uv run tools/fetch_musan.py                      # noise material (once)
+#   uv run audio-harness stt configs/stt-hallucination-batch.yaml
+#
+# Derived config: dataset and run parameters are copied verbatim from
+# stt-hallucination.yaml — every clip is generated deterministically from the
+# same seeds, so the batch condition sets are bit-identical to the streaming
+# ones. Lanes are the parent's providers restricted to batch-capable
+# adapters, run as modes: [batch] only — the parent keeps the streaming
+# numbers. Fabrication with the whole clip in hand versus fabrication under
+# real-time endpointing pressure is exactly the comparison this pair exists
+# to make; phantom-final and endpointing-driven metrics are stream-only and
+# will not appear for this run.
+#
+# Noise attribution: MUSAN — D. Snyder, G. Chen, D. Povey, "MUSAN: A Music,
+# Speech, and Noise Corpus", arXiv:1510.08484. Licensed CC BY 4.0.
+
+stt:
+  - name: deepgram-nova3
+    modes: [batch]
+  - name: assemblyai-universal35pro
+    modes: [batch]
+  - name: speechmatics-enhanced
+    modes: [batch]
+  - name: speechmatics-standard
+    modes: [batch]
+  - name: elevenlabs-scribe2
+    modes: [batch]
+  - name: soniox-rt-v5
+    modes: [batch]           # batch adapter landed with the W1 work
+
+dataset:
+  # Identical to stt-hallucination.yaml.
+  language: en-US
+  sources:
+    - synthetic: silence
+      limit: 20
+      duration_s: 8.0
+    - synthetic: noise
+      limit: 20
+      duration_s: 8.0
+      noise_dir: data/musan/noise
+      sample_seed: 20260806
+    - synthetic: trailing_silence
+      limit: 50
+      trailing_silence_s: 6.0
+      parquet: data/hf/stt-benchmark-data/data/train-00000-of-00001.parquet
+      sample_seed: 20260806
+    - synthetic: low_snr
+      limit: 50
+      snr_db: -10.0
+      noise_dir: data/musan/noise
+      parquet: data/hf/stt-benchmark-data/data/train-00000-of-00001.parquet
+      sample_seed: 20260806
+
+run:
+  # Identical to stt-hallucination.yaml. chunk_ms/realtime only govern
+  # streaming lanes and are inert here, kept for parity.
+  repeats: 1                 # 140 clips per provider; behaviour, not latency
+  warmup: 1
+  chunk_ms: 20
+  realtime: true
+  provider_concurrency: 6
+  vendor_concurrency: 1      # Speechmatics Standard and Enhanced share a plan
+  timeout_s: 180
+  output_dir: results

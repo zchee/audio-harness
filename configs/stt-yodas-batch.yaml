@@ -1,0 +1,63 @@
+# Batch-mode supplement to configs/stt-yodas.yaml (commercial-safe
+# multilingual lane: YODAS2 CC BY 3.0 + Granary CC BY 4.0).
+#
+#   uv run python tools/curate_yodas.py --out data/curated   # refresh manifests
+#   uv run audio-harness stt configs/stt-yodas-batch.yaml
+#
+# Derived config: dataset and run parameters are copied verbatim from
+# stt-yodas.yaml so batch rates land on exactly the same curated manifests.
+# Lanes are the parent's providers restricted to batch-capable adapters, run
+# as modes: [batch] only — the parent keeps the streaming numbers.
+#
+# GOLD RULE carried over: manifest rows carry gold_status, and unverified-gold
+# references are excluded from ranked accuracy automatically. Audio caches
+# under data/cache/curated/ exactly as in the parent, so a tree already primed
+# by the streaming run stays offline here.
+
+stt:
+  - name: deepgram-nova3
+    modes: [batch]
+    options: { model: nova-3-multilingual, language: multi }
+  - name: elevenlabs-scribe2
+    modes: [batch]
+  - name: assemblyai-universal35pro
+    modes: [batch]
+  - name: soniox-rt-v5
+    modes: [batch]
+  - name: speechmatics-enhanced
+    modes: [batch]
+  - name: google-chirp3
+    modes: [batch]
+
+dataset:
+  # Identical to stt-yodas.yaml.
+  sources:
+    - { manifest: "data/curated/yodas2-ar-SA.jsonl", language: ar-SA }
+    - { manifest: "data/curated/yodas2-de-DE.jsonl", language: de-DE }
+    - { manifest: "data/curated/yodas2-es-ES.jsonl", language: es-ES }
+    - { manifest: "data/curated/yodas2-fr-FR.jsonl", language: fr-FR }
+    - { manifest: "data/curated/yodas2-hu-HU.jsonl", language: hu-HU }
+    - { manifest: "data/curated/yodas2-ko-KR.jsonl", language: ko-KR }
+    - { manifest: "data/curated/yodas2-nl-NL.jsonl", language: nl-NL }
+    - { manifest: "data/curated/yodas2-pl-PL.jsonl", language: pl-PL }
+    - { manifest: "data/curated/yodas2-pt-PT.jsonl", language: pt-PT }
+    - { manifest: "data/curated/yodas2-ru-RU.jsonl", language: ru-RU }
+    - { manifest: "data/curated/yodas2-tr-TR.jsonl", language: tr-TR }
+    - { manifest: "data/curated/yodas2-vi-VN.jsonl", language: vi-VN }
+    - { manifest: "data/curated/granary-de-DE.jsonl", language: de-DE }
+    - { manifest: "data/curated/granary-es-ES.jsonl", language: es-ES }
+    - { manifest: "data/curated/granary-fr-FR.jsonl", language: fr-FR }
+    - { manifest: "data/curated/granary-hu-HU.jsonl", language: hu-HU }
+    - { manifest: "data/curated/granary-nl-NL.jsonl", language: nl-NL }
+    - { manifest: "data/curated/granary-pl-PL.jsonl", language: pl-PL }
+    - { manifest: "data/curated/granary-pt-PT.jsonl", language: pt-PT }
+    - { manifest: "data/curated/granary-ru-RU.jsonl", language: ru-RU }
+
+run:
+  # Identical to stt-yodas.yaml.
+  repeats: 1
+  warmup: 1
+  provider_concurrency: 5
+  vendor_concurrency: 1
+  timeout_s: 300
+  output_dir: results

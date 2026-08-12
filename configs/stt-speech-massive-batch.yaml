@@ -1,0 +1,73 @@
+# INTERNAL REGRESSION ONLY — batch-mode supplement to
+# configs/stt-speech-massive-internal.yaml (12 Speech-MASSIVE languages).
+#
+#   hf download FBK-MT/Speech-MASSIVE --repo-type dataset \
+#     --local-dir data/hf/speech-massive
+#   uv run audio-harness stt configs/stt-speech-massive-batch.yaml
+#
+# Derived config: dataset and run parameters are copied verbatim from
+# stt-speech-massive-internal.yaml so batch rates land on exactly the same
+# clip sample. Lanes are the parent's providers restricted to batch-capable
+# adapters, run as modes: [batch] only — the parent keeps the streaming
+# numbers. The parent deferred batch to halve lane count; this file is that
+# deferred half, run separately so the supplement is opt-in.
+#
+# LICENSE: CC-BY-NC-SA-4.0 (non-commercial) — same demotion as the parent:
+# nothing published externally may rest on it.
+#
+# Deepgram multilingual note carried over: model=nova-3 with language=multi
+# covers en, es, fr, de, hi, ru, pt, ja, it, nl; the other languages
+# degrading on Deepgram is a coverage finding, not a harness error.
+
+stt:
+  - name: deepgram-nova3
+    modes: [batch]
+    options:
+      model: nova-3
+      language: multi
+  - name: assemblyai-universal35pro
+    modes: [batch]
+  - name: speechmatics-enhanced
+    modes: [batch]
+  - name: elevenlabs-scribe2
+    modes: [batch]
+  - name: soniox-rt-v5
+    modes: [batch]
+  - name: google-chirp3
+    modes: [batch]
+    options:
+      location: us
+
+dataset:
+  # Identical to stt-speech-massive-internal.yaml — same columns, same
+  # per-language subsetting, same seed, so the clip sample matches.
+  id_column: id
+  audio_column: audio
+  text_column: utt
+  limit: 30
+  sample_seed: 20260805
+  sources:
+    - { parquet: "data/hf/speech-massive/ar-SA/validation-*.parquet", language: ar-SA }
+    - { parquet: "data/hf/speech-massive/de-DE/validation-*.parquet", language: de-DE }
+    - { parquet: "data/hf/speech-massive/es-ES/validation-*.parquet", language: es-ES }
+    - { parquet: "data/hf/speech-massive/fr-FR/validation-*.parquet", language: fr-FR }
+    - { parquet: "data/hf/speech-massive/hu-HU/validation-*.parquet", language: hu-HU }
+    - { parquet: "data/hf/speech-massive/ko-KR/validation-*.parquet", language: ko-KR }
+    - { parquet: "data/hf/speech-massive/nl-NL/validation-*.parquet", language: nl-NL }
+    - { parquet: "data/hf/speech-massive/pl-PL/validation-*.parquet", language: pl-PL }
+    - { parquet: "data/hf/speech-massive/pt-PT/validation-*.parquet", language: pt-PT }
+    - { parquet: "data/hf/speech-massive/ru-RU/validation-*.parquet", language: ru-RU }
+    - { parquet: "data/hf/speech-massive/tr-TR/validation-*.parquet", language: tr-TR }
+    - { parquet: "data/hf/speech-massive/vi-VN/validation-*.parquet", language: vi-VN }
+
+run:
+  # Identical to stt-speech-massive-internal.yaml. chunk_ms/realtime only
+  # govern streaming lanes and are inert here, kept for parity.
+  repeats: 1
+  warmup: 1
+  chunk_ms: 20
+  realtime: true
+  provider_concurrency: 6
+  vendor_concurrency: 1
+  timeout_s: 180
+  output_dir: results

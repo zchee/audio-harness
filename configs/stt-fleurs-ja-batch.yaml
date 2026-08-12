@@ -1,0 +1,56 @@
+# Batch-mode supplement to configs/stt-fleurs-ja.yaml (Japanese FLEURS,
+# scored as CER).
+#
+#   hf download google/fleurs --repo-type dataset --include 'ja_jp/test/*' \
+#     --local-dir data/hf/fleurs
+#   uv run audio-harness stt configs/stt-fleurs-ja-batch.yaml
+#
+# Derived config: dataset and run parameters are copied verbatim from
+# stt-fleurs-ja.yaml so batch rates land on exactly the same 30-clip sample
+# (same seed). Lanes are the parent's providers restricted to batch-capable
+# adapters, run as modes: [batch] only — the parent keeps the streaming
+# numbers. The parent's caveat stands: FLEURS is clean read speech, the
+# multilingual floor, not a substitute for production audio.
+
+stt:
+  - name: deepgram-nova3
+    modes: [batch]
+    options:
+      model: nova-3-multilingual   # nova-3 monolingual is English-only
+      language: multi
+  - name: assemblyai-universal35pro
+    modes: [batch]
+  - name: speechmatics-enhanced
+    modes: [batch]
+  - name: elevenlabs-scribe2
+    modes: [batch]
+  - name: soniox-rt-v5
+    modes: [batch]
+    options:
+      language_hints: [ja]
+  - name: google-chirp3
+    modes: [batch]
+    options:
+      location: us
+
+dataset:
+  # Identical to stt-fleurs-ja.yaml.
+  parquet: data/hf/fleurs/ja_jp/test/0000.parquet
+  id_column: id
+  audio_column: audio
+  text_column: transcription
+  language: ja-JP            # drives CER instead of WER, and NFKC folding
+  limit: 30
+  sample_seed: 20260805
+
+run:
+  # Identical to stt-fleurs-ja.yaml. chunk_ms/realtime only govern streaming
+  # lanes and are inert here, kept for parity.
+  repeats: 1
+  warmup: 1
+  chunk_ms: 20
+  realtime: true
+  provider_concurrency: 6
+  vendor_concurrency: 1
+  timeout_s: 180
+  output_dir: results

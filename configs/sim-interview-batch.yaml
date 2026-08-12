@@ -1,0 +1,64 @@
+# Batch-mode supplement to configs/sim-interview.yaml (simulated-interview
+# E2E lane; the parent is plan P4 step 18, lane E3).
+#
+#   uv sync --extra sim-kokoro
+#   uv run audio-harness sim configs/sim-interview-batch.yaml --estimate-only
+#   uv run audio-harness sim configs/sim-interview-batch.yaml
+#
+# Derived config: sim, run and gate parameters are copied verbatim from
+# sim-interview.yaml. Lanes are the parent's providers restricted to
+# batch-capable adapters, run as modes: [batch] only — the parent keeps the
+# streaming numbers.
+#
+# CAVEAT — read before running: the parent pins no seed, so a fresh sim run
+# generates NEW personas and NEW audio. A batch run from this file is a
+# self-consistent batch ranking, but it is not turn-for-turn comparable with
+# an already-executed streaming run unless `sim.seed` is set to that run's
+# seed first. The Gemini dialogue spend also repeats in full — the same
+# estimate gate and hard_cap_usd apply.
+
+sim:
+  # Identical to sim-interview.yaml.
+  scenarios: data/sim/scenarios-en.yaml
+  personas_per_scenario: 8      # 3 scenarios x 8 personas x 8 slots = 192 turns
+  model: gemini-2.5-flash       # pinned interviewer + persona LLM
+  voices: [af_heart, am_michael, bf_emma, bm_george]   # pinned Kokoro roster
+  degradation: tel8k            # pinned telephony round-trip (snr.py machinery)
+  est_answer_s: 12.0            # expected seconds per answer, for the estimate
+  hard_cap_usd: 50.0            # HARD cap: abort if the estimate exceeds this
+  # seed: null                  # set to a past run's seed for a paired batch rerun
+
+stt:
+  - name: deepgram-nova3
+    modes: [batch]
+  - name: elevenlabs-scribe2
+    modes: [batch]
+  - name: assemblyai-universal35pro
+    modes: [batch]
+  - name: soniox-rt-v5
+    modes: [batch]
+  - name: speechmatics-enhanced
+    modes: [batch]
+  - name: google-chirp3
+    modes: [batch]
+
+run:
+  # Identical to sim-interview.yaml. chunk_ms/realtime only govern streaming
+  # lanes and are inert here, kept for parity.
+  repeats: 1
+  warmup: 1
+  chunk_ms: 20
+  realtime: true
+  provider_concurrency: 6
+  vendor_concurrency: 1
+  timeout_s: 300
+  output_dir: results
+
+gate:
+  # Identical to sim-interview.yaml.
+  rho_threshold: 0.8
+  canonical:                    # supersede order: later files replace lanes
+    - results/20260806-002303/stt-results-annotated.jsonl
+    - results/20260806-005430/stt-results.jsonl
+    - results/20260806-012949/stt-results.jsonl
+    - results/20260806-030801/stt-results.jsonl

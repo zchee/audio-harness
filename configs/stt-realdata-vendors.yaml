@@ -1,0 +1,54 @@
+# W3: seven cloud vendor lanes + three on-device anchors over the 150-clip
+# real-interview corpus (W2 output). Reference-free corpus - accuracy columns
+# render as em dashes; latency, stability and RTF are the scored axes, and
+# the single multi-lane run directory feeds the cross-vendor agreement
+# matrix, exactly as the Stage 3 pilot did.
+#
+# 本番 PII 音声 — 実行は lead のみ、W0 検証済みプライバシー制御必須。
+# (AssemblyAI/Speechmatics delete_after, Google asia-northeast1 リージョン,
+# Deepgram mip_opt_out は W0 で検証済み。)
+#
+#   uv run audio-harness stt configs/stt-realdata-vendors.yaml
+
+stt:
+  - name: soniox-rt-v5
+    modes: [batch, stream]
+  - name: speechmatics-enhanced
+    modes: [batch, stream]
+    options:
+      delete_after: true
+  - name: google-chirp3
+    modes: [batch, stream]
+    options:
+      location: asia-northeast1
+  - name: assemblyai-universal35pro
+    modes: [batch, stream]
+    options:
+      delete_after: true
+  - name: cartesia-ink2
+    modes: [batch, stream]
+  - name: deepgram-nova3
+    modes: [batch, stream]
+  - name: openai-gpt4o-transcribe
+    modes: [batch, stream]
+  # On-device anchors from the Stage 3 pilot; audio never leaves this machine.
+  - name: whisper-local
+    modes: [batch]
+  - name: parakeet-ane
+    modes: [batch]
+  - name: apple-speech-stt
+    modes: [stream]
+
+dataset:
+  manifest: data/realdata/pilot-150.jsonl
+  language: en-US
+  limit: null
+
+run:
+  repeats: 1
+  warmup: 1
+  chunk_ms: 20
+  realtime: true
+  provider_concurrency: 4
+  timeout_s: 600
+  output_dir: results

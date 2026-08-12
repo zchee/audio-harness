@@ -1,0 +1,78 @@
+# Batch-mode supplement to configs/stt-snr.yaml (SNR robustness matrix:
+# {+20, +10, +5, 0, -5} dB active-speech SNR plus an 8 kHz telephony
+# round-trip).
+#
+#   uv run tools/fetch_musan.py                # noise material (once)
+#   uv run audio-harness stt configs/stt-snr-batch.yaml
+#
+# Derived config: dataset and run parameters are copied verbatim from
+# stt-snr.yaml — same seeds, same noise draws, so every batch clip is
+# bit-identical to its streaming twin and WER deltas are the mode's doing.
+# Lanes are the parent's providers restricted to batch-capable adapters, run
+# as modes: [batch] only — the parent keeps the streaming numbers.
+#
+# COST — GET APPROVAL BEFORE THE FULL RUN, same as the parent: the matrix is
+# 780 clips ~= 1.1 h of audio PER VENDOR. Batch is billed per audio-hour like
+# pre-recorded transcription; recompute with snr.estimated_matrix_cost before
+# launching. Streaming-only latency metrics (finalize-p50 degradation) do not
+# exist in batch mode — this lane contributes the accuracy-vs-SNR curves only.
+
+stt:
+  - name: deepgram-nova3
+    modes: [batch]
+  - name: assemblyai-universal35pro
+    modes: [batch]
+  - name: soniox-rt-v5
+    modes: [batch]
+  - name: speechmatics-enhanced
+    modes: [batch]
+
+dataset:
+  # Identical to stt-snr.yaml — the shared seeds keep the noise draw per base
+  # clip identical to the streaming run.
+  sources:
+    # English: pipecat interview corpus (human transcripts, trusted refs).
+    - synthetic: snr
+      parquet: "data/hf/stt-benchmark-data/data/train-00000-of-00001.parquet"
+      language: en-US
+      limit: 50
+      sample_seed: 20260806
+      noise_dir: "data/musan/noise"
+    - synthetic: telephony
+      parquet: "data/hf/stt-benchmark-data/data/train-00000-of-00001.parquet"
+      language: en-US
+      limit: 50
+      sample_seed: 20260806
+    # Multilingual: curated YODAS manifests (commercial-safe, audio fetched
+    # and cached by the curated loader before mixing).
+    - synthetic: snr
+      manifest: "data/curated/yodas2-de-DE.jsonl"
+      language: de-DE
+      limit: 40
+      sample_seed: 20260806
+      noise_dir: "data/musan/noise"
+    - synthetic: telephony
+      manifest: "data/curated/yodas2-de-DE.jsonl"
+      language: de-DE
+      limit: 40
+      sample_seed: 20260806
+    - synthetic: snr
+      manifest: "data/curated/yodas2-fr-FR.jsonl"
+      language: fr-FR
+      limit: 40
+      sample_seed: 20260806
+      noise_dir: "data/musan/noise"
+    - synthetic: telephony
+      manifest: "data/curated/yodas2-fr-FR.jsonl"
+      language: fr-FR
+      limit: 40
+      sample_seed: 20260806
+
+run:
+  # Identical to stt-snr.yaml.
+  repeats: 1
+  warmup: 1
+  provider_concurrency: 4
+  vendor_concurrency: 1
+  timeout_s: 300
+  output_dir: results
