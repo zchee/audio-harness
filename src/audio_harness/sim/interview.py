@@ -44,6 +44,7 @@ import soxr
 import yaml
 
 from audio_harness import runner, synthetic
+from audio_harness.audio import wrap_wav
 from audio_harness.autotag import autotag_reference
 from audio_harness.config import STT_PRICING, BenchmarkConfig, ConfigError, require_env
 from audio_harness.entities import ENTITY_CLASSES
@@ -1550,6 +1551,7 @@ class SimOutcome:
     spend: dict[str, float]
     language: str
     pins: dict[str, str]
+    clips: list[AudioClip] = field(default_factory=list)
 
 
 async def run_sim(
@@ -1644,6 +1646,7 @@ async def run_sim(
             "voices": ",".join(sim.voices),
             "degradation": sim.degradation,
         },
+        clips=clips,
     )
 
 
@@ -1676,6 +1679,15 @@ def write_sim_outputs(outcome: SimOutcome, gate: GateVerdict | None, results_pat
         for record in outcome.records:
             handle.write(orjson.dumps(record))
             handle.write(b"\n")
+
+    # Persist the generated turn audio locally (never to GCS — user directive
+    # 2026-08-12) so a later batch supplement can re-transcribe this exact
+    # material instead of re-generating a different interview.
+    if outcome.clips:
+        audio_dir = directory / "sim-audio"
+        audio_dir.mkdir(parents=True, exist_ok=True)
+        for clip in outcome.clips:
+            (audio_dir / f"{clip.clip_id}.wav").write_bytes(wrap_wav(clip.pcm, clip.sample_rate))
 
     gate_path = directory / "sim-gate.json"
     payload: dict[str, Any] = {

@@ -529,6 +529,10 @@ class TestPipelineDryRun:
         assert all(r["vendors"] for r in records)
         assert orjson.loads(gate_path.read_bytes())["gate"] is None
         assert "Task success" in report_path.read_text(encoding="utf-8")
+        audio_dir = tmp_path / "sim-audio"
+        saved = sorted(audio_dir.glob("*.wav"))
+        assert len(saved) == len(outcome.clips) > 0, "generated turn audio persists locally for reruns"
+        assert saved[0].read_bytes()[:4] == b"RIFF"
 
     async def test_unverified_turns_are_not_voiced(self) -> None:
         async def hopeless_llm(system: str, prompt: str, temperature: float) -> str:  # ruff: ignore[unused-async] -- awaited through the LLM callable contract
