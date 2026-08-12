@@ -1,8 +1,8 @@
 # Batch-mode supplement to configs/stt-fleurs-ja.yaml (Japanese FLEURS,
 # scored as CER).
 #
-#   hf download google/fleurs --repo-type dataset --include 'ja_jp/test/*' \
-#     --local-dir data/hf/fleurs
+#   hf download google/fleurs --repo-type dataset --revision refs/convert/parquet \
+#     --include 'ja_jp/test/*' --local-dir data/hf/fleurs
 #   uv run audio-harness stt configs/stt-fleurs-ja-batch.yaml
 #
 # Derived config: dataset and run parameters are copied verbatim from

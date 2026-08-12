@@ -1,7 +1,7 @@
 # Japanese STT benchmark over FLEURS (Google), scored as CER.
 #
-#   hf download google/fleurs --repo-type dataset --include 'ja_jp/test/*' \
-#     --local-dir data/hf/fleurs
+#   hf download google/fleurs --repo-type dataset --revision refs/convert/parquet \
+#     --include 'ja_jp/test/*' --local-dir data/hf/fleurs
 #   uv run audio-harness stt configs/stt-fleurs-ja.yaml
 #
 # 650 test clips, ~10-14s, 16 kHz, human transcripts, CC-BY-4.0.
