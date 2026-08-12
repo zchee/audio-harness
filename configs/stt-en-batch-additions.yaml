@@ -19,10 +19,16 @@ stt:
     modes: [batch]           # actually ink-whisper (batch_model default)
 
 dataset:
-  # Identical to stt-en.yaml.
-  manifest: data/manifests/en.jsonl
+  # Identical to stt-pipecat.yaml — the parquet corpus, seed and limit the
+  # canonical English table is built on. (stt-en.yaml's manifest path was a
+  # legacy local artifact that no longer exists.)
+  parquet: data/hf/stt-benchmark-data/data/train-00000-of-00001.parquet
+  id_column: sample_id
+  audio_column: audio
+  text_column: transcription
   language: en-US
-  limit: null                # null runs the whole manifest
+  limit: 30
+  sample_seed: 20260805
 
 run:
   # Identical to stt-en.yaml.
