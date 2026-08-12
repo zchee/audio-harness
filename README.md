@@ -8,6 +8,79 @@ Built for choosing a speech stack for a **realtime voice agent**, so the
 headline metric is not word error rate — it is how long the user waits after
 they stop talking.
 
+## Architecture
+
+```mermaid
+flowchart TB
+    subgraph ENTRY["Entry / configuration"]
+        CLI["cli.py<br/>stt / tts / sim / agree / report /<br/>realdata / arena-gate / doctor"]
+        CFG["config.py<br/>BenchmarkConfig + dated pricing tables"]
+        YAML[("configs/*.yaml<br/>experiment definitions<br/>(corpus x lanes x modes)")]
+    end
+
+    subgraph DATAIN["Dataset supply"]
+        DS["dataset.py<br/>parquet / manifest / prompt loaders"]
+        CUR["curated.py + curate.py<br/>YODAS / Granary (IDs only, no audio redistribution)"]
+        RDM["realdata_manifest.py<br/>reference-free real-recording loader"]
+        RD["realdata.py<br/>GCS ingest, clip cutting, language ID,<br/>PII-trimmed stratified selection"]
+        SNR["snr.py / synthetic.py<br/>degradation conditions"]
+    end
+
+    subgraph CORE["Execution core"]
+        RUN["runner.py<br/>lanes concurrent, clips sequential,<br/>per-vendor session locks, crash-safe persistence"]
+        AUD["audio.py<br/>PCM/WAV, realtime pacing, speech-end detection"]
+    end
+
+    subgraph ADAPT["Vendor adapters (registry)"]
+        STT["stt/ - 19 adapters<br/>direct WS/HTTP wire protocols;<br/>privacy controls built in<br/>(mip_opt_out, delete_after + evidence, region)"]
+        TTS["tts/ - 13 adapters"]
+        WS["stt/ws.py<br/>shared streaming base"]
+    end
+
+    subgraph SCORE["Scoring and reporting"]
+        NORM["normalize / entities / autotag<br/>per-language normalization, entity scoring"]
+        MET["metrics.py<br/>WER/CER, latency percentiles, churn"]
+        AGR["agreement.py<br/>cross-lane agreement (reference-free)"]
+        REP["report.py<br/>lane-keyed supersede merge -> canonical;<br/>quantified comparability caveats"]
+    end
+
+    subgraph GATED["Gated experimental lanes (never ranked until their validity gate passes)"]
+        SIM["sim/interview.py - E3<br/>LLM-generated interviews, task-success,<br/>gate rho >= 0.8; audio persisted locally"]
+        ARENA["judge/tts_arena.py - E2<br/>pairwise Bradley-Terry + cross-family judge gate"]
+        SEM["judge/semantic.py - E1<br/>semantic-fidelity judge"]
+    end
+
+    VENDORS(("cloud vendor APIs"))
+    LOCAL(("on-device inference<br/>ANE / MLX / SFSpeech / Kokoro"))
+    OUT[("results/<br/>per-run jsonl + reports + audio;<br/>canonical merges")]
+
+    CLI --> CFG --> RUN
+    YAML --> CFG
+    CLI --> DS --> RUN
+    CUR --> DS
+    RD --> RDM --> DS
+    SNR --> DS
+    RUN --> STT & TTS
+    STT --> WS
+    RUN --> AUD
+    STT --> VENDORS
+    TTS --> VENDORS
+    STT --> LOCAL
+    TTS -.-> LOCAL
+    RUN --> OUT
+    OUT --> REP
+    REP --> MET --> NORM
+    OUT --> AGR
+    SIM --> RUN
+    ARENA --> OUT
+    SEM --> OUT
+```
+
+Principles that cut across every layer: no same-family judging, lane-keyed
+supersede (never mixing corpora in one canonical row), quantified
+comparability caveats (hosted-proxy, SDK-buffered, local-compute), gated
+isolation for judge-based lanes, and pricing treated as dated data that rots.
+
 ## Providers
 
 | Kind | Key | Model | Batch | Stream |
