@@ -1,20 +1,23 @@
-"""Cartesia Ink-2 speech-to-text adapter."""
+"""Cartesia Ink speech-to-text adapter."""
 
 from __future__ import annotations
 
+import time
 from typing import Any
 from urllib.parse import urlencode
 
 import orjson
 from websockets.asyncio.client import ClientConnection
 
+from audio_harness.audio import wrap_wav
 from audio_harness.config import require_env
 from audio_harness.types import AudioClip, EventKind, Mode, SttResult
 
-from .base import StreamTimeline, SttProvider, register
+from .base import StreamTimeline, SttProvider, raise_for_status, register
 from .ws import StreamProtocolError, run_stream
 
 
+BATCH_URL = "https://api.cartesia.ai/stt"
 STREAM_URL = "wss://api.cartesia.ai/stt/turns/websocket"
 DEFAULT_VERSION = "2026-03-01"
 
@@ -40,19 +43,59 @@ class CartesiaInk2(SttProvider):
             server default is 5600 ms.
         keyterm: A list of terms to bias. Each item is sent as a separate
             repeatable ``keyterm`` query parameter.
+        batch_model: Model identifier for the batch path; defaults to
+            ``ink-whisper``, the only value ``POST /stt`` accepts — Ink-2 is
+            a streaming-only model, so the two paths cannot share ``model``.
 
     End of input is the text JSON command ``{"type":"close"}``. Cartesia
     processes buffered audio into normal turn events and acknowledges the
     command by completing the WebSocket close handshake; it does not emit a
     separate ``done`` event on this API surface (verified 2026-08-07).
+
+    The batch path posts a whole WAV to ``POST /stt`` in one multipart
+    request and gets the transcript back in the response body — no upload,
+    polling, or cleanup steps. Its REST surface authenticates with a Bearer
+    token plus a ``Cartesia-Version`` header (per the published OpenAPI spec
+    and official client), unlike the WebSocket's ``X-API-Key`` handshake.
+    Ink-whisper is multilingual, so the streaming path's English-only guard
+    does not apply here; the clip's primary subtag is sent as ``language``.
     """
 
     key = "cartesia-ink2"
     vendor = "cartesia"
+    supports_batch = True
     supports_stream = True
 
     def _auth(self) -> dict[str, str]:
         return {"X-API-Key": require_env("CARTESIA_API_KEY", self.key)}
+
+    def _batch_headers(self) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {require_env('CARTESIA_API_KEY', self.key)}",
+            "Cartesia-Version": DEFAULT_VERSION,
+        }
+
+    async def transcribe_batch(self, clip: AudioClip) -> SttResult:
+        """Post a whole WAV to Cartesia's batch endpoint and parse the transcript."""
+        result = self._result(clip, Mode.BATCH)
+        started = time.perf_counter()
+
+        response = await self.http.post(
+            BATCH_URL,
+            headers=self._batch_headers(),
+            data={
+                "model": str(self.options.get("batch_model", "ink-whisper")),
+                "language": clip.language.split("-")[0].lower(),
+            },
+            files={"file": ("audio.wav", wrap_wav(clip.pcm, clip.sample_rate), "audio/wav")},
+        )
+        raise_for_status(response, self.key)
+        payload: dict[str, Any] = response.json()
+
+        result.total_s = time.perf_counter() - started
+        result.text = str(payload.get("text") or "")
+        result.raw["response"] = payload
+        return result
 
     def _endpoint_options(self) -> dict[str, float | int]:
         ranges: dict[str, tuple[float, float]] = {

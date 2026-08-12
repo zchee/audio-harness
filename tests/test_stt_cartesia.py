@@ -10,6 +10,7 @@ import re
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
+import httpx
 import orjson
 import polars as pl
 import pytest
@@ -17,6 +18,7 @@ from websockets.asyncio.server import ServerConnection, serve
 
 from audio_harness.audio import load_clip_bytes
 from audio_harness.stt import cartesia
+from audio_harness.stt.base import ProviderHttpError
 from audio_harness.stt.ws import StreamProtocolError
 from audio_harness.types import AudioClip, EventKind
 
@@ -268,3 +270,130 @@ class TestLiveSmoke:
         assert result.error is None
         assert result.text
         assert evidence["eou_events"] >= 1
+
+
+class BatchTransport:
+    """Mock Cartesia's one-shot ``POST /stt`` batch surface."""
+
+    def __init__(
+        self,
+        *,
+        status_code: int = 200,
+        payload: dict[str, Any] | None = None,
+        text: str | None = None,
+    ) -> None:
+        self.requests: list[httpx.Request] = []
+        self.status_code = status_code
+        self.payload = payload or {
+            "type": "transcript",
+            "request_id": "r1",
+            "text": "hello from ink whisper",
+            "language": "en",
+            "duration": 0.1,
+        }
+        self.text = text
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        if self.text is not None:
+            return httpx.Response(self.status_code, text=self.text)
+        return httpx.Response(self.status_code, json=self.payload)
+
+
+def make_batch_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+    transport: BatchTransport,
+    options: dict[str, Any] | None = None,
+) -> cartesia.CartesiaInk2:
+    """Build an Ink adapter whose HTTP client hits the mocked batch surface."""
+    monkeypatch.setenv("CARTESIA_API_KEY", "test-key")
+    adapter = cartesia.CartesiaInk2(options)
+    adapter._http = httpx.AsyncClient(transport=httpx.MockTransport(transport))
+    return adapter
+
+
+class TestBatchRequestShape:
+    """The multipart ``POST /stt`` request matches the published contract."""
+
+    async def test_url_auth_and_multipart_fields(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        transport = BatchTransport()
+        adapter = make_batch_adapter(monkeypatch, transport)
+        try:
+            await adapter.transcribe_batch(make_clip())
+        finally:
+            await adapter.aclose()
+
+        [request] = transport.requests
+        assert request.method == "POST"
+        assert request.url == httpx.URL("https://api.cartesia.ai/stt")
+        assert request.headers["Authorization"] == "Bearer test-key"
+        assert request.headers["Cartesia-Version"] == "2026-03-01"
+        assert b'name="model"' in request.content
+        assert b"ink-whisper" in request.content
+        assert b'name="language"' in request.content
+        assert b'name="file"' in request.content
+        assert b'filename="audio.wav"' in request.content
+        assert b"RIFF" in request.content
+
+    async def test_batch_model_option_overrides_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        transport = BatchTransport()
+        adapter = make_batch_adapter(monkeypatch, transport, options={"batch_model": "ink-whisper-preview"})
+        try:
+            await adapter.transcribe_batch(make_clip())
+        finally:
+            await adapter.aclose()
+
+        assert b"ink-whisper-preview" in transport.requests[0].content
+
+    async def test_non_english_clip_is_accepted_by_batch(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        transport = BatchTransport()
+        adapter = make_batch_adapter(monkeypatch, transport)
+        try:
+            result = await adapter.transcribe_batch(make_clip(language="ja-JP"))
+        finally:
+            await adapter.aclose()
+
+        assert result.error is None
+        content = transport.requests[0].content
+        assert b'name="language"' in content
+        assert b"\r\n\r\nja\r\n" in content, "primary subtag of ja-JP must be sent as the language field"
+
+
+class TestBatchResponseParsing:
+    """The response body becomes ``result.text`` and is retained raw."""
+
+    async def test_transcript_and_metadata_are_recorded(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        transport = BatchTransport()
+        adapter = make_batch_adapter(monkeypatch, transport)
+        try:
+            result = await adapter.transcribe_batch(make_clip())
+        finally:
+            await adapter.aclose()
+
+        assert result.text == "hello from ink whisper"
+        assert result.error is None
+        assert result.total_s > 0
+        assert result.raw["response"] == transport.payload
+
+    async def test_missing_text_field_yields_empty_transcript(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        transport = BatchTransport(payload={"type": "transcript", "request_id": "r1"})
+        adapter = make_batch_adapter(monkeypatch, transport)
+        try:
+            result = await adapter.transcribe_batch(make_clip())
+        finally:
+            await adapter.aclose()
+
+        assert result.text == ""
+
+
+class TestBatchHttpError:
+    """A rejected batch request surfaces the vendor's error body."""
+
+    async def test_http_error_includes_vendor_body(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        transport = BatchTransport(status_code=400, text="unsupported model requested")
+        adapter = make_batch_adapter(monkeypatch, transport)
+        try:
+            with pytest.raises(ProviderHttpError, match="unsupported model requested"):
+                await adapter.transcribe_batch(make_clip())
+        finally:
+            await adapter.aclose()
