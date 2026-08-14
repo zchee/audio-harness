@@ -13,7 +13,7 @@ they stop talking.
 ```mermaid
 flowchart TB
     subgraph ENTRY["Entry / configuration"]
-        CLI["cli.py<br/>stt / tts / sim / agree / report /<br/>realdata / arena-gate / doctor"]
+        CLI["cli.py<br/>stt / tts / sim / agree / report /<br/>semantic-wer / realdata / arena-gate / doctor"]
         CFG["config.py<br/>BenchmarkConfig + dated pricing tables"]
         YAML[("configs/*.yaml<br/>experiment definitions<br/>(corpus x lanes x modes)")]
     end
@@ -48,6 +48,7 @@ flowchart TB
         SIM["sim/interview.py - E3<br/>LLM-generated interviews, task-success,<br/>gate rho >= 0.8; audio persisted locally"]
         ARENA["judge/tts_arena.py - E2<br/>pairwise Bradley-Terry + cross-family judge gate"]
         SEM["judge/semantic.py - E1<br/>semantic-fidelity judge"]
+        SWER["judge/semantic_wer.py<br/>pipecat semantic WER judge (en = upstream rubric,<br/>other languages = harness rubric, CER units)"]
     end
 
     VENDORS(("cloud vendor APIs"))
@@ -74,6 +75,7 @@ flowchart TB
     SIM --> RUN
     ARENA --> OUT
     SEM --> OUT
+    SWER --> OUT
 ```
 
 Principles that cut across every layer: no same-family judging, lane-keyed
@@ -245,6 +247,7 @@ actually predicts behaviour.
 | Churn | Share of interim hypotheses that rewrote already-displayed text |
 | TTFB | Time to first audio byte (TTS) |
 | Round-trip err | Synthesized audio re-transcribed and scored against the prompt |
+| Semantic WER | `semantic-wer`: a Claude judge (ported from pipecat) counts only errors an LLM agent would act on, beside the deterministic rate on the same clips — experimental, never ranked |
 
 **Finalize is the number to optimize.** TTFT tells you when a UI can show that
 it is listening; finalize sets how long the user waits before the agent can
