@@ -1,0 +1,26 @@
+# Deepgram Flux TTS (OpenRouter :free variant) English sweep. Free tier —
+# rate limits may throttle; hosted-proxy caveats per the quantified note.
+#
+#   uv run audio-harness tts configs/tts-sweep-flux.yaml
+
+tts:
+  - name: or-flux-tts
+    modes: [batch]
+
+dataset:
+  prompts: data/prompts-en.txt
+  language: en-US
+  limit: null
+
+roundtrip_stt:
+  - name: deepgram-nova3
+    options:
+      smart_format: false
+  - name: whisper-local
+
+run:
+  repeats: 3
+  warmup: 1
+  provider_concurrency: 1
+  timeout_s: 300
+  output_dir: results

@@ -182,6 +182,21 @@ class OpenRouterFishS21Pro(OpenRouterTts):
 
 
 @register
+class OpenRouterFluxTts(OpenRouterTts):
+    """OpenRouter-hosted Deepgram Flux TTS, free variant.
+
+    The ``:free`` slug bills nothing through OpenRouter. A voice is
+    mandatory and the published roster is entirely ``flux-*-en`` English
+    voices (verified live 2026-08-14); Japanese text is accepted but only
+    through an English voice, so ja figures are guardrail material.
+    """
+
+    key = "or-flux-tts"
+    model = "deepgram/flux-tts:free"
+    default_voice = "flux-hannah-en"
+
+
+@register
 class OpenRouterMaiVoice2(OpenRouterTts):
     """OpenRouter-hosted Microsoft MAI Voice 2.
 

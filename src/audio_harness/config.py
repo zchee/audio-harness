@@ -230,6 +230,11 @@ TTS_PRICING: dict[str, TtsPricing] = {
         per_million_chars=20.0,
         note="OpenRouter-hosted; hosted-proxy medians are direct-comparable (+~0.1s, 2026-08-12 paired run); tails are not; pricing verified 2026-08-08",
     ),
+    "or-flux-tts": TtsPricing(
+        per_million_chars=0.0,
+        note="OpenRouter :free variant bills nothing (verified 2026-08-14); "
+        "free-tier rate limits apply and the voice roster is English-only",
+    ),
     "or-fish-s1": TtsPricing(
         per_million_chars=15.0,
         note="OpenRouter-hosted (no direct Fish Audio account); hosted-proxy "

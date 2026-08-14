@@ -83,25 +83,40 @@ isolation for judge-based lanes, and pricing treated as dated data that rots.
 
 ## Providers
 
-| Kind | Key | Model | Batch | Stream |
-| --- | --- | --- | --- | --- |
-| STT | `deepgram-nova3` | Nova-3 | yes | yes |
-| STT | `elevenlabs-scribe2` | Scribe v2 / v2 realtime | yes | yes |
-| STT | `google-chirp3` | Chirp 3 (STT v2, gRPC) | yes | yes |
-| STT | `xai-grok-stt` | Grok STT | yes | yes |
-| STT | `assemblyai-universal35pro` | Universal-3.5 pro | yes | yes |
-| STT | `speechmatics-enhanced` | Enhanced operating point | yes | yes |
-| STT | `speechmatics-standard` | Standard operating point | yes | yes |
-| STT | `soniox-rt-v5` | stt-rt-v5 | — | yes |
-| TTS | `cartesia-sonic3` | Sonic 3.0 | yes | yes |
-| TTS | `cartesia-sonic35` | Sonic 3.5 | yes | yes |
-| TTS | `deepgram-aura2` | Aura-2 | yes | yes |
-| TTS | `gemini-tts` | Gemini TTS | yes | yes |
+51 registered lanes (24 STT, 27 TTS). Run `uv run audio-harness providers`
+for the authoritative key/mode matrix; the groups below name every lane.
+
+**STT — direct vendors**: `soniox-rt-v5` (batch mode runs the separate
+stt-async-v5 lineage), `deepgram-nova3`, `deepgram-flux` (endpointing-first),
+`speechmatics-enhanced` / `-standard`, `assemblyai-universal35pro`,
+`google-chirp3` (gRPC SDK, caveat-tagged), `openai-gpt-transcribe` /
+`-gpt4o-transcribe` / `-gpt4o-transcribe-diarize` / `-live-transcribe`,
+`elevenlabs-scribe2`, `cartesia-ink2` (batch runs ink-whisper),
+`gladia-solaria1` / `-solaria3`, `mistral-voxtral-realtime`,
+`azure-speech-stt`, `xai-grok-stt`.
+
+**STT — hosted proxy (OpenRouter)**: `or-parakeet`, `or-fish-transcribe`,
+`or-mai-transcribe`.
+
+**STT — on-device ($0)**: `apple-speech-stt`, `parakeet-ane` (Neural
+Engine sidecar), `whisper-local`.
+
+**TTS — direct vendors**: `elevenlabs-v3` / `-flash25`, `cartesia-sonic3` /
+`-sonic35`, `deepgram-aura2`, `gemini-tts` / `-tts-31` (preview),
+`soniox-tts-rt-v2`, `inworld-tts2`, `mistral-voxtral-tts`,
+`openai-gpt4o-mini-tts`, `azure-neural-tts`, `xai-grok-tts`.
+
+**TTS — hosted proxy (OpenRouter)**: `or-qwen-tts-flash` / `-plus`,
+`or-fish-s1` / `-s2-pro` / `-s21-pro`, `or-mai-voice-2` / `-2-flash`,
+`or-flux-tts` (free tier), `or-minimax-turbo` / `-hd`, and the OSS set
+`or-kokoro` / `or-orpheus` / `or-csm` / `or-zonos`.
 
 Adapters talk to raw HTTP and WebSocket endpoints rather than vendor SDKs.
 SDKs buffer and retry on their own schedule, which is exactly the behaviour a
-latency benchmark must not measure. Chirp 3 is the one exception — it is
-gRPC-only — and its numbers carry that caveat.
+latency benchmark must not measure. Chirp 3 (gRPC-only) and Azure are the
+exceptions and their numbers carry an `sdk_buffered` caveat; OpenRouter lanes
+carry `hosted_proxy` (measured: medians comparable within ~0.1s, tails are
+not); on-device lanes carry `local_compute`.
 
 ## Quick start
 

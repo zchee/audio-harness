@@ -1,0 +1,24 @@
+# Deepgram Flux TTS (OpenRouter :free) Japanese sweep. The voice roster is
+# English-only (flux-*-en), so this documents ja behaviour as guardrail
+# material — expect aura2-style collapse rather than a usable ja lane.
+#
+#   uv run audio-harness tts configs/tts-sweep-flux-ja.yaml
+
+tts:
+  - name: or-flux-tts
+    modes: [batch]
+
+dataset:
+  prompts: data/prompts-ja/bench.txt
+  language: ja-JP
+  limit: null
+
+roundtrip_stt:
+  - name: whisper-local
+
+run:
+  repeats: 3
+  warmup: 1
+  provider_concurrency: 1
+  timeout_s: 300
+  output_dir: results
