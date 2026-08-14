@@ -304,3 +304,80 @@ class TestLiveSmoke:
 
         assert result.error is None, result.error
         assert result.total_s > 0
+
+
+class TestBatchLanes:
+    """Protocol tests for the direct La Plateforme batch lanes."""
+
+    @pytest.fixture(autouse=True)
+    def _credentials(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MISTRAL_API_KEY", "test-key")
+
+    async def test_mini_uses_the_transcription_endpoint(self) -> None:
+        import httpx
+
+        requests: list[httpx.Request] = []
+
+        def respond(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(200, json={"model": "voxtral-mini-latest", "text": "hello world", "segments": []})
+
+        adapter = stt.create("mistral-voxtral-mini")
+        adapter._http = httpx.AsyncClient(transport=httpx.MockTransport(respond))
+
+        result = await adapter.transcribe_batch(make_clip())
+
+        assert result.ok, result.error
+        assert result.text == "hello world"
+        assert result.raw["model"] == "voxtral-mini-latest"
+        assert "segments" not in result.raw["response"]
+        [request] = requests
+        assert str(request.url) == voxtral.TRANSCRIPTIONS_URL
+        assert request.headers["Authorization"] == "Bearer test-key"
+        assert b"voxtral-mini-2507" in request.content
+
+    async def test_small_uses_prompted_chat_transcription(self) -> None:
+        import httpx
+
+        requests: list[httpx.Request] = []
+
+        def respond(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(
+                200,
+                json={
+                    "model": "voxtral-small-2507",
+                    "choices": [{"index": 0, "message": {"role": "assistant", "content": "hello world"}}],
+                    "usage": {"prompt_tokens": 17},
+                },
+            )
+
+        adapter = stt.create("mistral-voxtral-small")
+        adapter._http = httpx.AsyncClient(transport=httpx.MockTransport(respond))
+
+        result = await adapter.transcribe_batch(make_clip())
+
+        assert result.ok, result.error
+        assert result.text == "hello world"
+        assert result.raw["prompted_transcription"] is True
+        assert result.raw["model"] == "voxtral-small-2507"
+        [request] = requests
+        assert str(request.url) == voxtral.CHAT_URL
+        body = orjson.loads(request.content)
+        assert body["model"] == "voxtral-small-2507"
+        assert body["temperature"] == 0
+        content = body["messages"][0]["content"]
+        assert content[0]["type"] == "input_audio"
+        assert base64.b64decode(content[0]["input_audio"])[:4] == b"RIFF"
+        assert content[1] == {"type": "text", "text": voxtral.TRANSCRIBE_PROMPT}
+
+    def test_registry_metadata(self) -> None:
+        tests = {
+            "success: mini is batch-only direct mistral": "mistral-voxtral-mini",
+            "success: small is batch-only direct mistral": "mistral-voxtral-small",
+        }
+        for name, key in tests.items():
+            adapter = stt.create(key)
+            assert adapter.vendor == "mistral", name
+            assert adapter.supports_batch is True, name
+            assert adapter.supports_stream is False, name

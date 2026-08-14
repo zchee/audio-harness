@@ -1,0 +1,32 @@
+# Direct La Plateforme Voxtral batch lanes (2026-08-14), the direct-vendor
+# counterparts of or-voxtral-mini/-small: mini through the dedicated
+# transcription endpoint, small 24B through chat completions with a fixed
+# transcription prompt (the transcription endpoint serves no Small variant;
+# probe-verified). Same pipecat parquet, seed and limit as the canonical
+# English table, so all four lanes form a paired direct-vs-proxy comparison.
+#
+#   uv run audio-harness stt configs/stt-en-voxtral-direct.yaml
+
+stt:
+  - name: mistral-voxtral-mini
+    modes: [batch]
+  - name: mistral-voxtral-small
+    modes: [batch]
+
+dataset:
+  parquet: data/hf/stt-benchmark-data/data/train-00000-of-00001.parquet
+  id_column: sample_id
+  audio_column: audio
+  text_column: transcription
+  language: en-US
+  limit: 30
+  sample_seed: 20260805
+
+run:
+  repeats: 3
+  warmup: 1
+  chunk_ms: 20
+  realtime: true
+  provider_concurrency: 2
+  timeout_s: 300
+  output_dir: results

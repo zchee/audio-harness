@@ -85,7 +85,7 @@ isolation for judge-based lanes, and pricing treated as dated data that rots.
 
 ## Providers
 
-56 registered lanes (29 STT, 27 TTS). `uv run audio-harness providers`
+58 registered lanes (31 STT, 27 TTS). `uv run audio-harness providers`
 prints this matrix from the live registry.
 
 ### STT
@@ -108,6 +108,8 @@ prints this matrix from the live registry.
 | `solaria-1` | Solaria-1 | — | yes |
 | `solaria-3` | Solaria-3 | yes | — |
 | `voxtral-mini-transcribe-realtime-2602` | Voxtral realtime | — | yes |
+| `voxtral-mini-2507` | Voxtral Mini transcription (La Plateforme) | yes | — |
+| `voxtral-small-2507` | Voxtral Small 24B (chat-served prompted transcription) | yes | — |
 | `default` | Azure Speech (SDK; per-locale base model) | — | yes |
 | `grok-stt` | Grok STT | yes | yes |
 | `nvidia/parakeet-tdt-0.6b-v3` | Parakeet TDT 0.6B v3 (OpenRouter) | yes | — |

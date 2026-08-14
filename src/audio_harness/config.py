@@ -147,6 +147,19 @@ STT_PRICING: dict[str, SttPricing] = {
         note="$3.33e-6/audio-second observed in the endpoint's usage payload "
         "2026-08-14; hosted-proxy medians are direct-comparable (+~0.1s, 2026-08-12 paired run); tails are not",
     ),
+    "mistral-voxtral-mini": SttPricing(
+        batch_per_hour=0.18,
+        note="$0.003/audio-min on the La Plateforme transcription endpoint "
+        "(voxtral-mini lineage; the endpoint serves no Small variant); "
+        "verified 2026-08-14",
+    ),
+    "mistral-voxtral-small": SttPricing(
+        batch_per_hour=None,
+        note="chat-served prompted transcription; audio bills as chat input "
+        "tokens (125 audio tokens per audio second observed 2026-08-14, "
+        "~450k tokens/audio-hour plus output tokens at voxtral-small-2507 "
+        "chat rates). No published per-hour ASR rate exists for this path",
+    ),
     "mistral-voxtral-realtime": SttPricing(
         stream_per_hour=0.36,
         note="$0.006/audio-min streaming (La Plateforme pay-as-you-go); the "
