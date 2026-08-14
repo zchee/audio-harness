@@ -921,6 +921,136 @@ def judge_semantic_command(
     console.print(f"[dim]report:[/dim]      {report_path}")
 
 
+@app.command("semantic-wer")
+def semantic_wer_command(
+    results: Annotated[
+        list[Path],
+        typer.Argument(help="One or more stt-results.jsonl files to merge and judge."),
+    ],
+    language: Annotated[str, typer.Option(help="Fallback BCP-47 tag for results that recorded none.")] = "en-US",
+    max_clips: Annotated[
+        int | None,
+        typer.Option(help="Cap the run to the first N clips of the cross-lane common set."),
+    ] = None,
+    model: Annotated[str, typer.Option(help="Judge model id (upstream pipecat pin by default).")] = "",
+    cache_file: Annotated[
+        Path | None,
+        typer.Option(help="Verdict cache JSONL; defaults next to the first results file."),
+    ] = None,
+    concurrency: Annotated[int, typer.Option(help="Maximum in-flight judge conversations.")] = 8,
+    dry_run: Annotated[bool, typer.Option(help="Print the judging plan and cost estimate, bill nothing.")] = False,
+    env_file: Annotated[Path, typer.Option(help="Dotenv file.")] = Path(DEFAULT_ENV_FILE),
+) -> None:
+    """Score saved STT transcripts with pipecat's semantic WER judge.
+
+    Ports pipecat-ai/stt-benchmark's Claude-judge Semantic WER: only errors
+    that would change how an LLM agent responds are counted, and the result
+    is published beside the deterministic WER pooled over exactly the same
+    clips. Judge-based, therefore "experimental — not ranked". The rubric
+    prompt is English-only, so non-``en`` items are skipped. Files merge
+    with the same supersede rule as ``report``; verdicts are cached by
+    content, so re-running an already-judged merge bills nothing.
+    """
+    from .judge import semantic, semantic_wer
+
+    load_env_file(env_file)
+    judge_model = model or semantic_wer.JUDGE_MODEL
+
+    by_lane: dict[tuple[str, str], list[SttResult]] = {}
+    for path in results:
+        try:
+            loaded = runner.read_stt_results(path)
+        except (ValueError, OSError) as exc:
+            console.print(f"[red]results error:[/red] {exc}")
+            raise typer.Exit(code=2) from exc
+        lanes: dict[tuple[str, str], list[SttResult]] = {}
+        for item in loaded:
+            lanes.setdefault((item.provider, str(item.mode)), []).append(item)
+        for lane, runs in lanes.items():
+            if lane in by_lane:
+                console.print(f"[yellow]superseded[/yellow] {lane[0]} {lane[1]}")
+            by_lane[lane] = runs
+        console.print(f"[dim]loaded[/dim] {len(loaded):4d} stt runs from {path}")
+
+    merged = [item for runs in by_lane.values() for item in runs]
+    items = semantic.judgeable_items(merged, language)
+    skipped = [i for i in items if i.language.split("-", 1)[0].lower() != "en"]
+    items = [i for i in items if i.language.split("-", 1)[0].lower() == "en"]
+    if skipped:
+        console.print(f"[yellow]skipped[/yellow] {len(skipped)} non-en items (the rubric prompt is English-only)")
+    if not items:
+        console.print("[red]no judgeable en results[/red] (need ok runs with references)")
+        raise typer.Exit(code=2)
+
+    if max_clips is not None:
+        clip_sets: dict[tuple[str, str], set[str]] = {}
+        for item in items:
+            clip_sets.setdefault((item.provider, item.mode), set()).add(item.clip_id)
+        common = sorted(set.intersection(*clip_sets.values()))
+        if not common:
+            console.print("[red]no common clips across lanes[/red] — the merged files cover different corpora")
+            raise typer.Exit(code=2)
+        if len(common) < max_clips:
+            console.print(f"[yellow]common set is only {len(common)} clips[/yellow] (asked for {max_clips})")
+        chosen = set(common[:max_clips])
+        items = [i for i in items if i.clip_id in chosen]
+
+    lane_counts: dict[tuple[str, str], int] = {}
+    for item in items:
+        lane = (item.provider, item.mode)
+        lane_counts[lane] = lane_counts.get(lane, 0) + 1
+    for (provider, mode), count in sorted(lane_counts.items()):
+        console.print(f"[dim]lane[/dim] {provider} {mode}: {count} clips")
+
+    cache_path = cache_file if cache_file is not None else results[0].parent / "semantic-wer-cache.jsonl"
+    cache = semantic_wer.VerdictCache(cache_path)
+    uncached = sum(1 for i in items if cache.get(semantic_wer.verdict_key(judge_model, i.reference, i.hypothesis)) is None)
+    est_usd = uncached * 0.02
+    console.print(
+        f"Judging {len(items)} items with [cyan]{judge_model}[/cyan] "
+        f"({uncached} live, {len(items) - uncached} cached, est ~${est_usd:.2f})"
+    )
+    if dry_run:
+        return
+
+    try:
+        api_key = semantic_wer.anthropic_api_key()
+    except ConfigError as exc:
+        console.print(f"[red]credential error:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+
+    verdicts, stats = asyncio.run(
+        semantic_wer.judge_items(
+            items,
+            cache,
+            api_key=api_key,
+            model=judge_model,
+            concurrency=concurrency,
+            progress=lambda line: console.print(f"[dim]{line}[/dim]"),
+        )
+    )
+    if not verdicts:
+        console.print("[red]every judge conversation failed[/red]")
+        raise typer.Exit(code=1)
+
+    summaries = semantic_wer.summarize(verdicts)
+    markdown = semantic_wer.render_markdown(summaries, judge_model)
+    out_path = semantic_wer.write_results(verdicts, summaries, stats, results[0].parent / "semantic-wer.json", judge_model)
+    report_path = results[0].parent / "semantic-wer-report.md"
+    report_path.write_text(f"# Semantic WER (pipecat judge, experimental)\n\n{markdown}\n", encoding="utf-8")
+    console.print()
+    console.print(markdown)
+    console.print()
+    console.print(
+        f"[dim]judge spend:[/dim] {stats.live_calls} live conversations "
+        f"({stats.cached_verdicts} cached, {stats.failures} failed), "
+        f"{stats.input_tokens} in / {stats.output_tokens} out / "
+        f"{stats.cache_read_tokens} cache-read tokens, est ${stats.estimated_usd:.4f}"
+    )
+    console.print(f"[dim]raw results:[/dim] {out_path}")
+    console.print(f"[dim]report:[/dim]      {report_path}")
+
+
 @app.command("agree")
 def agree_command(
     runs: Annotated[list[Path], typer.Argument(help="Two or more completed STT run directories.")],
