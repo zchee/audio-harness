@@ -88,64 +88,64 @@ prints this matrix from the live registry.
 
 ### STT
 
-| Key | Model | Batch | Stream |
+| Key | Model ID | Batch | Stream |
 | --- | --- | --- | --- |
-| `soniox-rt-v5` | stt-rt-v5 (batch runs stt-async-v5) | yes | yes |
-| `deepgram-nova3` | Nova-3 | yes | yes |
-| `deepgram-flux` | Flux (endpointing-first) | — | yes |
-| `speechmatics-enhanced` | Enhanced operating point | yes | yes |
-| `speechmatics-standard` | Standard operating point | yes | yes |
-| `assemblyai-universal35pro` | Universal-3.5 pro | yes | yes |
-| `google-chirp3` | Chirp 3 (STT v2, gRPC SDK) | yes | yes |
-| `openai-gpt-transcribe` | gpt-transcribe | yes | — |
-| `openai-gpt4o-transcribe` | gpt-4o-transcribe | yes | yes |
-| `openai-gpt4o-transcribe-diarize` | gpt-4o-transcribe-diarize | yes | — |
-| `openai-live-transcribe` | gpt-live-transcribe | — | yes |
-| `elevenlabs-scribe2` | Scribe v2 / v2 realtime | yes | yes |
-| `cartesia-ink2` | Ink-2 (batch runs ink-whisper) | yes | yes |
-| `gladia-solaria1` | Solaria-1 | — | yes |
-| `gladia-solaria3` | Solaria-3 | yes | — |
-| `mistral-voxtral-realtime` | Voxtral realtime | — | yes |
-| `azure-speech-stt` | Azure Speech (SDK) | — | yes |
-| `xai-grok-stt` | Grok STT | yes | yes |
-| `or-parakeet` | Parakeet TDT 0.6B v3 (OpenRouter) | yes | — |
-| `or-fish-transcribe` | Fish transcribe-1 (OpenRouter) | yes | — |
-| `or-mai-transcribe` | MAI transcribe 1.5 (OpenRouter) | yes | — |
+| `soniox-rt-v5` | `stt-rt-v5` (batch: `stt-async-v5`) | yes | yes |
+| `deepgram-nova3` | `nova-3` | yes | yes |
+| `deepgram-flux` | `flux-general-en` | — | yes |
+| `speechmatics-enhanced` | operating point `enhanced` | yes | yes |
+| `speechmatics-standard` | operating point `standard` | yes | yes |
+| `assemblyai-universal35pro` | `universal-3-5-pro` | yes | yes |
+| `google-chirp3` | `chirp_3` (STT v2, gRPC SDK) | yes | yes |
+| `openai-gpt-transcribe` | `gpt-transcribe` | yes | — |
+| `openai-gpt4o-transcribe` | `gpt-4o-transcribe` | yes | yes |
+| `openai-gpt4o-transcribe-diarize` | `gpt-4o-transcribe-diarize` | yes | — |
+| `openai-live-transcribe` | `gpt-live-transcribe` | — | yes |
+| `elevenlabs-scribe2` | `scribe_v2` / `scribe_v2_realtime` | yes | yes |
+| `cartesia-ink2` | `ink-2` (batch: `ink-whisper`) | yes | yes |
+| `gladia-solaria1` | `solaria-1` | — | yes |
+| `gladia-solaria3` | `solaria-3` | yes | — |
+| `mistral-voxtral-realtime` | `voxtral-mini-transcribe-realtime-2602` | — | yes |
+| `azure-speech-stt` | Azure Speech SDK (no pinned model id) | — | yes |
+| `xai-grok-stt` | `grok-stt` | yes | yes |
+| `or-parakeet` | `nvidia/parakeet-tdt-0.6b-v3` (OpenRouter) | yes | — |
+| `or-fish-transcribe` | `fish-audio/transcribe-1` (OpenRouter) | yes | — |
+| `or-mai-transcribe` | `microsoft/mai-transcribe-1.5` (OpenRouter) | yes | — |
 | `apple-speech-stt` | SFSpeechRecognizer (on-device, $0) | — | yes |
-| `parakeet-ane` | Parakeet v3 on Neural Engine ($0) | yes | — |
-| `whisper-local` | whisper-large-v3 MLX ($0) | yes | — |
+| `parakeet-ane` | `parakeet-tdt-0.6b-v3` on Neural Engine ($0) | yes | — |
+| `whisper-local` | `mlx-community/whisper-large-v3-mlx` ($0) | yes | — |
 
 ### TTS
 
-| Key | Model | Batch | Stream |
+| Key | Model ID | Batch | Stream |
 | --- | --- | --- | --- |
-| `elevenlabs-v3` | Eleven v3 | yes | yes |
-| `elevenlabs-flash25` | Flash v2.5 | yes | yes |
-| `cartesia-sonic3` | Sonic 3.0 | yes | yes |
-| `cartesia-sonic35` | Sonic 3.5 | yes | yes |
-| `deepgram-aura2` | Aura-2 | yes | yes |
-| `gemini-tts` | Gemini TTS | yes | yes |
-| `gemini-tts-31` | Gemini 3.1 TTS (preview) | yes | yes |
-| `soniox-tts-rt-v2` | tts-rt-v2 | yes | yes |
-| `inworld-tts2` | Inworld TTS 2 | yes | yes |
-| `mistral-voxtral-tts` | Voxtral TTS | yes | yes |
-| `openai-gpt4o-mini-tts` | gpt-4o-mini-tts | yes | yes |
-| `azure-neural-tts` | Azure Neural (SDK) | — | yes |
-| `xai-grok-tts` | Grok TTS | yes | yes |
-| `or-qwen-tts-flash` | Qwen audio-3.0 TTS flash (OpenRouter) | yes | — |
-| `or-qwen-tts-plus` | Qwen audio-3.0 TTS plus (OpenRouter) | yes | — |
-| `or-fish-s1` | Fish S1 (OpenRouter) | yes | — |
-| `or-fish-s2-pro` | Fish S2 Pro (OpenRouter) | yes | — |
-| `or-fish-s21-pro` | Fish S2.1 Pro (OpenRouter) | yes | — |
-| `or-mai-voice-2` | MAI Voice 2 (OpenRouter) | yes | — |
-| `or-mai-voice-2-flash` | MAI Voice 2 Flash (OpenRouter) | yes | — |
-| `or-flux-tts` | Deepgram Flux TTS :free (OpenRouter) | yes | — |
-| `or-minimax-turbo` | MiniMax speech-2.8 turbo (OpenRouter) | yes | — |
-| `or-minimax-hd` | MiniMax speech-2.8 HD (OpenRouter) | yes | — |
-| `or-kokoro` | Kokoro 82M (OpenRouter OSS) | yes | — |
-| `or-orpheus` | Orpheus 3B (OpenRouter OSS) | yes | — |
-| `or-csm` | Sesame CSM-1B (OpenRouter OSS) | yes | — |
-| `or-zonos` | Zonos v0.1 (OpenRouter OSS) | yes | — |
+| `elevenlabs-v3` | `eleven_v3` | yes | yes |
+| `elevenlabs-flash25` | `eleven_flash_v2_5` | yes | yes |
+| `cartesia-sonic3` | `sonic-3` | yes | yes |
+| `cartesia-sonic35` | `sonic-3.5` | yes | yes |
+| `deepgram-aura2` | `aura-2-<voice>-en` (default `aura-2-thalia-en`) | yes | yes |
+| `gemini-tts` | `gemini-2.5-flash-preview-tts` | yes | yes |
+| `gemini-tts-31` | `gemini-3.1-flash-tts-preview` | yes | yes |
+| `soniox-tts-rt-v2` | `tts-rt-v2` | yes | yes |
+| `inworld-tts2` | `inworld-tts-2` | yes | yes |
+| `mistral-voxtral-tts` | `voxtral-mini-tts-2603` | yes | yes |
+| `openai-gpt4o-mini-tts` | `gpt-4o-mini-tts-2025-12-15` | yes | yes |
+| `azure-neural-tts` | Azure Neural SDK (no pinned model id) | — | yes |
+| `xai-grok-tts` | vendor default (request carries no model id) | yes | yes |
+| `or-qwen-tts-flash` | `qwen/qwen-audio-3.0-tts-flash` (OpenRouter) | yes | — |
+| `or-qwen-tts-plus` | `qwen/qwen-audio-3.0-tts-plus` (OpenRouter) | yes | — |
+| `or-fish-s1` | `fish-audio/s1` (OpenRouter) | yes | — |
+| `or-fish-s2-pro` | `fish-audio/s2-pro` (OpenRouter) | yes | — |
+| `or-fish-s21-pro` | `fish-audio/s2.1-pro` (OpenRouter) | yes | — |
+| `or-mai-voice-2` | `microsoft/mai-voice-2` (OpenRouter) | yes | — |
+| `or-mai-voice-2-flash` | `microsoft/mai-voice-2-flash` (OpenRouter) | yes | — |
+| `or-flux-tts` | `deepgram/flux-tts:free` (OpenRouter) | yes | — |
+| `or-minimax-turbo` | `minimax/speech-2.8-turbo` (OpenRouter) | yes | — |
+| `or-minimax-hd` | `minimax/speech-2.8-hd` (OpenRouter) | yes | — |
+| `or-kokoro` | `hexgrad/kokoro-82m` (OpenRouter OSS) | yes | — |
+| `or-orpheus` | `canopylabs/orpheus-3b-0.1-ft` (OpenRouter OSS) | yes | — |
+| `or-csm` | `sesame/csm-1b` (OpenRouter OSS) | yes | — |
+| `or-zonos` | `zyphra/zonos-v0.1-hybrid` (OpenRouter OSS) | yes | — |
 
 Adapters talk to raw HTTP and WebSocket endpoints rather than vendor SDKs.
 SDKs buffer and retry on their own schedule, which is exactly the behaviour a
