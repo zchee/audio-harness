@@ -20,8 +20,17 @@ Deliberate deviations from upstream, none of which change a verdict:
 * Lane aggregation pools edit counts before dividing (harness convention),
   rather than averaging per-clip rates.
 
-The rubric prompt is English-only (its normalization rules and few-shot
-examples assume English), so judging is restricted to ``en-*`` items.
+English pairs use the upstream rubric verbatim, so en scores stay
+comparable with published stt-benchmark numbers and previously cached en
+verdicts stay valid. Every other language goes through a
+language-parameterized rubric that is this harness's extension, not
+upstream's: the same NORMALIZE → ALIGN → SEMANTIC CHECK → COUNT process
+and the same agent-visibility principle, with the equivalence rules stated
+generically ("in the transcript's language") and the counting unit
+switched to characters for languages written without spaces (the same
+split ``uses_character_metric`` drives on the deterministic side) — a
+semantic CER. The two rubrics are versioned independently; only the
+multilingual one may evolve without breaking upstream comparability.
 
 Registered principle: this is a judge-based metric, so every number renders
 as "experimental — not ranked (LLM judge)" and is published beside — never
@@ -42,6 +51,7 @@ import orjson
 
 from audio_harness.config import require_env
 from audio_harness.metrics import ZERO_COUNTS, score_pair
+from audio_harness.normalize import uses_character_metric
 
 from .semantic import JudgeItem
 
@@ -59,7 +69,14 @@ JUDGE_PRICING_CHECKED = "2026-08-14"
 """Standard-tier Sonnet pricing, last verified on the date above."""
 
 PROMPT_VERSION = 1
-"""Bumped whenever the rubric prompt changes, invalidating cached verdicts."""
+"""Bumped whenever the upstream en rubric changes, invalidating cached en
+verdicts. The en cache key layout predates multilingual support and is kept
+byte-identical so already-billed en verdicts stay valid."""
+
+MULTILINGUAL_PROMPT_VERSION = 1
+"""Version of the harness's own language-parameterized rubric. Independent
+of :data:`PROMPT_VERSION` so the multilingual rubric can evolve without
+invalidating upstream-comparable en verdicts."""
 
 MAX_TURNS = 10
 """Safety limit on the tool-use conversation, as upstream."""
@@ -333,6 +350,103 @@ Semantic check:
 6. **Show your semantic reasoning**: Explain WHY something is or isn't an error
 """
 
+# Language-parameterized rubric for non-English pairs. This is the harness's
+# extension (not upstream pipecat): same process, same agent-visibility
+# principle, equivalence rules stated generically for the transcript's
+# language, and character-unit counting for languages written without
+# spaces. Any edit must bump MULTILINGUAL_PROMPT_VERSION.
+MULTILINGUAL_SYSTEM_PROMPT = """You are an expert ASR evaluator for a conversational AI system. Your task is to calculate the Semantic Word Error Rate (WER) — counting ONLY transcription errors that would impact how an LLM agent understands and responds to the user.
+
+The user message states the language of both texts. Apply every rule in that language, not in English.
+
+## CRITICAL CONTEXT
+
+This transcription will be used as input to a multi-turn conversational LLM agent. We only care about errors that would:
+- Change what the agent thinks the user is asking for
+- Cause the agent to take incorrect actions
+- Lead to misunderstandings in the conversation
+
+We do NOT count as errors:
+- Grammatical variations an LLM would understand identically
+- Formatting/punctuation/orthography differences
+- Minor word-form changes that preserve meaning
+
+**Key principle**: If an LLM would interpret both versions the same way, it's NOT an error.
+
+## Your Process: NORMALIZE → ALIGN → SEMANTIC CHECK → COUNT → CALCULATE
+
+### Step 1: NORMALIZE (Apply to BOTH texts, using the stated language's conventions)
+
+- **Case and width**: Fold letter case and full-width/half-width variants where the script has them.
+- **Punctuation**: Remove all punctuation marks.
+- **Numbers**: Digits and spelled-out numbers in the language are equivalent ("200 Euro" = "zweihundert Euro"; "3人" = "三人").
+- **Filler words**: Remove hesitation fillers of the language if present in only one version (e.g. "äh", "euh", "この、あの", "ну").
+- **Script and spelling variants that are pure orthography**: Treat as equivalent — e.g. Japanese kana vs kanji spellings of the same word, German ß vs ss, Arabic with vs without diacritics, regional spelling variants.
+- **Hyphenation and compound spacing**: Ignore differences.
+- **Spoken variants and contractions**: Colloquial and full forms of the same expression are equivalent.
+- **Inflection**: Case endings, gender/number agreement, conjugation and particle variations are NOT errors when the agent would act identically. Count them ONLY when the inflection change alters who does what, to whom, when, or how many in a way the agent would act on.
+
+### Step 2: ALIGN
+After normalization, align the texts using edit distance in the counting unit defined below. Mark potential differences.
+
+### Step 3: SEMANTIC CHECK (MANDATORY - DO NOT SKIP)
+For EACH potential error identified in alignment, write out this exact format:
+```
+DIFFERENCE: "X" → "Y"
+QUESTION: Would an LLM agent respond differently?
+ANSWER: [YES/NO] because [reason]
+COUNT AS ERROR: [YES/NO]
+```
+
+**NOT errors (answer NO):** orthography/script choice, number formatting, dropped articles or particles that leave the request unchanged, meaning-preserving inflection, hyphenation, fillers.
+**Errors (answer YES):** a different word or entity, nonsense output, negation flips, changed quantities/dates/names, hallucinated or dropped content the agent would act on.
+
+### Step 4: COUNT
+**Counting unit**: the user message states whether to count in WORDS (space-delimited languages) or in CHARACTERS (languages written without spaces, e.g. Japanese, Chinese, Thai). All four numbers use that unit:
+- S = semantic substitutions
+- D = semantic deletions
+- I = semantic insertions
+- N = total units in the normalized reference
+
+A multi-character or multi-word expression replaced by nonsense is counted by the span it occupies in the reference, not inflated further. When both texts truncate at the same point, ignore the truncated fragments and trailing function words.
+
+### Step 5: CALCULATE
+Call calculate_wer(substitutions=S, deletions=D, insertions=I, reference_words=N)
+
+---
+
+## EXAMPLES
+
+### Example 1 (German, words): number formatting and inflection (WER = 0%)
+**Reference:** "Ich möchte zweihundert Euro auf mein Konto überweisen."
+**Hypothesis:** "Ich möchte 200 Euro auf meinem Konto überweisen."
+
+DIFFERENCE: "zweihundert" → "200" — same number, NO.
+DIFFERENCE: "mein" → "meinem" — inflection slip, the transfer request is unchanged, NO.
+**Result: S=0, D=0, I=0, N=8 → WER = 0%**
+
+### Example 2 (Japanese, characters): script choice vs real error
+**Reference:** 「明日の会議を三時に変更してください」
+**Hypothesis:** 「あしたの会議を二時に変更してください」
+
+DIFFERENCE: "明日" → "あした" — kana spelling of the same word, NO.
+DIFFERENCE: "三時" → "二時" — the meeting time changed from 3:00 to 2:00, the agent would reschedule wrongly, YES (substitution spanning 1 character: 三→二).
+**Result: S=1, D=0, I=0, N=17 → WER = 1/17 = 5.9%**
+
+### Example 3 (Russian, words): different word (WER = 16.7%)
+**Reference:** "Пожалуйста, отмените мою подписку на журнал."
+**Hypothesis:** "Пожалуйста, отметьте мою подписку на журнал."
+
+DIFFERENCE: "отмените" (cancel) → "отметьте" (mark) — the agent would mark instead of cancel, YES.
+**Result: S=1, D=0, I=0, N=6 → WER = 1/6 = 16.7%**
+
+## IMPORTANT NOTES
+
+1. Ask the key question: "Would an LLM agent respond differently to these two versions?"
+2. Be lenient on grammar and orthography; be strict on meaning, entities, quantities, and negation.
+3. Show your semantic reasoning for every difference.
+"""
+
 CALCULATE_WER_TOOL = {
     "name": "calculate_wer",
     "description": (
@@ -464,9 +578,40 @@ def _finish(
     )
 
 
-def verdict_key(model: str, reference: str, hypothesis: str) -> str:
-    """Content key for the verdict cache."""
-    payload = orjson.dumps([model, PROMPT_VERSION, reference, hypothesis])
+def _primary(language: str) -> str:
+    """Primary BCP-47 subtag, lowercased."""
+    return language.split("-", 1)[0].lower()
+
+
+def _counts_characters(language: str) -> bool:
+    """Whether this pair is judged in characters (semantic CER)."""
+    return uses_character_metric(language)
+
+
+def _unit_count(text: str, language: str) -> int:
+    """Deterministic unit count for the no-API empty-text paths."""
+    if _counts_characters(language):
+        return sum(1 for ch in text if not ch.isspace())
+    return len(text.split())
+
+
+def _system_prompt_for(language: str) -> str:
+    """The upstream en rubric, or the harness multilingual rubric."""
+    return SEMANTIC_WER_SYSTEM_PROMPT if _primary(language) == "en" else MULTILINGUAL_SYSTEM_PROMPT
+
+
+def verdict_key(model: str, reference: str, hypothesis: str, language: str = "en-US") -> str:
+    """Content key for the verdict cache.
+
+    The en payload layout predates multilingual support and must stay
+    byte-identical, or every already-billed en verdict would be orphaned.
+    Non-en pairs key on the multilingual rubric version and the primary
+    language subtag, because both change what the judge is asked to do.
+    """
+    if _primary(language) == "en":
+        payload = orjson.dumps([model, PROMPT_VERSION, reference, hypothesis])
+    else:
+        payload = orjson.dumps([model, "multi", MULTILINGUAL_PROMPT_VERSION, _primary(language), reference, hypothesis])
     return hashlib.sha256(payload).hexdigest()
 
 
@@ -524,10 +669,21 @@ class VerdictCache:
             handle.write(b"\n")
 
 
-def _user_prompt(reference: str, hypothesis: str) -> str:
-    """Build the per-pair user turn, as upstream."""
+def _user_prompt(reference: str, hypothesis: str, language: str) -> str:
+    """Build the per-pair user turn; en keeps the upstream wording verbatim."""
+    if _primary(language) == "en":
+        return (
+            "Please calculate the Word Error Rate (WER) for this ASR transcription.\n\n"
+            f"**Reference (ground truth):**\n{reference}\n\n"
+            f"**Hypothesis (ASR transcription):**\n{hypothesis}\n\n"
+            "Follow the process: NORMALIZE → ALIGN → COUNT → VERIFY → CALCULATE\n\n"
+            "Show your work clearly, then call calculate_wer with your verified counts."
+        )
+    unit = "CHARACTERS (semantic CER)" if _counts_characters(language) else "WORDS"
     return (
-        "Please calculate the Word Error Rate (WER) for this ASR transcription.\n\n"
+        "Please calculate the semantic error rate for this ASR transcription.\n\n"
+        f"**Language:** {language}\n"
+        f"**Counting unit:** {unit}\n\n"
         f"**Reference (ground truth):**\n{reference}\n\n"
         f"**Hypothesis (ASR transcription):**\n{hypothesis}\n\n"
         "Follow the process: NORMALIZE → ALIGN → COUNT → VERIFY → CALCULATE\n\n"
@@ -560,12 +716,18 @@ async def _post_with_retry(client: httpx.AsyncClient, payload: dict[str, object]
 
 
 async def judge_pair(
-    client: httpx.AsyncClient, reference: str, hypothesis: str, *, api_key: str, model: str = JUDGE_MODEL
+    client: httpx.AsyncClient,
+    reference: str,
+    hypothesis: str,
+    *,
+    api_key: str,
+    model: str = JUDGE_MODEL,
+    language: str = "en-US",
 ) -> SemanticWerVerdict:
     """Judge one (reference, hypothesis) pair through the tool-use loop.
 
     Empty-text cases are resolved deterministically without an API call,
-    with the same counts upstream assigns.
+    with the same counts upstream assigns — in the language's counting unit.
 
     Args:
         client: Shared HTTP client.
@@ -573,6 +735,7 @@ async def judge_pair(
         hypothesis: Provider transcript.
         api_key: Anthropic API key.
         model: Judge model id.
+        language: BCP-47 tag selecting the rubric and counting unit.
 
     Returns:
         The verdict with billing evidence.
@@ -584,12 +747,12 @@ async def judge_pair(
     if not reference.strip() and not hypothesis.strip():
         return _finish(0, 0, 0, 0)
     if not reference.strip():
-        return _finish(0, 0, len(hypothesis.split()), 0)
+        return _finish(0, 0, _unit_count(hypothesis, language), 0)
     if not hypothesis.strip():
-        words = len(reference.split())
-        return _finish(0, words, 0, words)
+        units = _unit_count(reference, language)
+        return _finish(0, units, 0, units)
 
-    messages: list[dict[str, object]] = [{"role": "user", "content": _user_prompt(reference, hypothesis)}]
+    messages: list[dict[str, object]] = [{"role": "user", "content": _user_prompt(reference, hypothesis, language)}]
     input_tokens = output_tokens = cache_write = cache_read = 0
 
     for turn in range(1, MAX_TURNS + 1):
@@ -602,7 +765,7 @@ async def judge_pair(
                 "system": [
                     {
                         "type": "text",
-                        "text": SEMANTIC_WER_SYSTEM_PROMPT,
+                        "text": _system_prompt_for(language),
                         "cache_control": {"type": "ephemeral"},
                     }
                 ],
@@ -720,7 +883,7 @@ async def judge_items(
     async with httpx.AsyncClient(timeout=httpx.Timeout(300.0), transport=transport) as client:
 
         async def one(index: int, item: JudgeItem) -> None:
-            key = verdict_key(model, item.reference, item.hypothesis)
+            key = verdict_key(model, item.reference, item.hypothesis, item.language)
             cached = cache.get(key)
             if cached is not None:
                 stats.cached_verdicts += 1
@@ -728,7 +891,9 @@ async def judge_items(
                 return
             async with semaphore:
                 try:
-                    verdict = await judge_pair(client, item.reference, item.hypothesis, api_key=api_key, model=model)
+                    verdict = await judge_pair(
+                        client, item.reference, item.hypothesis, api_key=api_key, model=model, language=item.language
+                    )
                 except (SemanticWerError, httpx.HTTPError) as exc:
                     stats.failures += 1
                     if progress is not None:
@@ -754,20 +919,27 @@ async def judge_items(
 
 @dataclass(slots=True, frozen=True)
 class LaneSemanticSummary:
-    """Pooled semantic and deterministic rates for one lane.
+    """Pooled semantic and deterministic rates for one (lane, language).
+
+    Cells never pool across languages: mixing word-unit and character-unit
+    counts in one ratio would make the number meaningless, mirroring how the
+    deterministic report keeps per-language rows.
 
     Attributes:
         provider: Adapter registry key.
         mode: Transport mode.
+        language: BCP-47 tag of the pooled clips.
         clips: Judged clip count.
-        semantic_errors: Pooled semantic edit count.
-        semantic_reference_words: Pooled judge-normalized reference length.
+        semantic_errors: Pooled semantic edit count, in the language's unit.
+        semantic_reference_words: Pooled judge-normalized reference length,
+            in the language's unit.
         deterministic_wer: Pooled rate from :func:`score_pair` on the same
             clips, so the two columns always describe identical audio.
     """
 
     provider: str
     mode: str
+    language: str
     clips: int
     semantic_errors: int
     semantic_reference_words: int
@@ -780,15 +952,20 @@ class LaneSemanticSummary:
             return None
         return self.semantic_errors / self.semantic_reference_words
 
+    @property
+    def metric_name(self) -> str:
+        """Human label for the counting unit of both columns."""
+        return "CER" if _counts_characters(self.language) else "WER"
+
 
 def summarize(verdicts: Sequence[ItemVerdict]) -> list[LaneSemanticSummary]:
-    """Pool verdicts per lane, sorted by semantic rate ascending."""
-    lanes: dict[tuple[str, str], list[ItemVerdict]] = {}
+    """Pool verdicts per (lane, language), sorted by language then rate."""
+    lanes: dict[tuple[str, str, str], list[ItemVerdict]] = {}
     for entry in verdicts:
-        lanes.setdefault((entry.item.provider, entry.item.mode), []).append(entry)
+        lanes.setdefault((entry.item.provider, entry.item.mode, entry.item.language), []).append(entry)
 
     summaries = []
-    for (provider, mode), entries in lanes.items():
+    for (provider, mode, language), entries in lanes.items():
         counts = ZERO_COUNTS
         for entry in entries:
             counts = counts + score_pair(entry.item.reference, entry.item.hypothesis, entry.item.language)
@@ -796,33 +973,40 @@ def summarize(verdicts: Sequence[ItemVerdict]) -> list[LaneSemanticSummary]:
             LaneSemanticSummary(
                 provider=provider,
                 mode=mode,
+                language=language,
                 clips=len(entries),
                 semantic_errors=sum(e.verdict.total_errors for e in entries),
                 semantic_reference_words=sum(e.verdict.reference_words for e in entries),
                 deterministic_wer=counts.rate,
             )
         )
-    summaries.sort(key=lambda s: (s.semantic_wer if s.semantic_wer is not None else float("inf"), s.provider))
+    summaries.sort(
+        key=lambda s: (s.language, s.semantic_wer if s.semantic_wer is not None else float("inf"), s.provider)
+    )
     return summaries
 
 
 def render_markdown(summaries: Sequence[LaneSemanticSummary], model: str = JUDGE_MODEL) -> str:
     """Render the side-by-side lane table."""
     lines = [
-        f"Judge: `{model}` — {EXPERIMENTAL_BANNER}. The deterministic WER",
+        f"Judge: `{model}` — {EXPERIMENTAL_BANNER}. The deterministic",
         "column is pooled over exactly the judged clips, so the two columns",
         "always describe the same audio; expect it to differ from full-corpus",
-        "report tables when the judged subset is smaller.",
+        "report tables when the judged subset is smaller. Rows never pool",
+        "across languages; Metric names the counting unit (CER = characters,",
+        "for languages written without spaces). en rows use the upstream",
+        "pipecat rubric; other languages use the harness multilingual rubric",
+        f"(v{MULTILINGUAL_PROMPT_VERSION}).",
         "",
-        "| Provider | Mode | Clips | Semantic WER | Deterministic WER | Semantic errors | Ref words |",
-        "| --- | --- | --- | --- | --- | --- | --- |",
+        "| Provider | Mode | Lang | Metric | Clips | Semantic | Deterministic | Semantic errors | Ref units |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for s in summaries:
         semantic = f"{s.semantic_wer:.2%}" if s.semantic_wer is not None else "—"
         deterministic = f"{s.deterministic_wer:.2%}" if s.deterministic_wer is not None else "—"
         lines.append(
-            f"| {s.provider} | {s.mode} | {s.clips} | {semantic} | {deterministic} "
-            f"| {s.semantic_errors} | {s.semantic_reference_words} |"
+            f"| {s.provider} | {s.mode} | {s.language} | {s.metric_name} | {s.clips} | {semantic} "
+            f"| {deterministic} | {s.semantic_errors} | {s.semantic_reference_words} |"
         )
     return "\n".join(lines)
 
@@ -838,6 +1022,7 @@ def write_results(
     payload = {
         "judge_model": model,
         "prompt_version": PROMPT_VERSION,
+        "multilingual_prompt_version": MULTILINGUAL_PROMPT_VERSION,
         "banner": EXPERIMENTAL_BANNER,
         "stats": {
             "live_calls": stats.live_calls,
@@ -853,6 +1038,8 @@ def write_results(
             {
                 "provider": s.provider,
                 "mode": s.mode,
+                "language": s.language,
+                "metric": s.metric_name,
                 "clips": s.clips,
                 "semantic_wer": s.semantic_wer,
                 "deterministic_wer": s.deterministic_wer,

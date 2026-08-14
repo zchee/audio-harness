@@ -945,11 +945,13 @@ def semantic_wer_command(
 
     Ports pipecat-ai/stt-benchmark's Claude-judge Semantic WER: only errors
     that would change how an LLM agent responds are counted, and the result
-    is published beside the deterministic WER pooled over exactly the same
-    clips. Judge-based, therefore "experimental — not ranked". The rubric
-    prompt is English-only, so non-``en`` items are skipped. Files merge
-    with the same supersede rule as ``report``; verdicts are cached by
-    content, so re-running an already-judged merge bills nothing.
+    is published beside the deterministic rate pooled over exactly the same
+    clips. Judge-based, therefore "experimental — not ranked". en pairs use
+    the upstream rubric verbatim; every other language goes through the
+    harness's language-parameterized rubric, counted in characters for
+    languages written without spaces (semantic CER). Files merge with the
+    same supersede rule as ``report``; verdicts are cached by content, so
+    re-running an already-judged merge bills nothing.
     """
     from .judge import semantic, semantic_wer
 
@@ -974,37 +976,49 @@ def semantic_wer_command(
 
     merged = [item for runs in by_lane.values() for item in runs]
     items = semantic.judgeable_items(merged, language)
-    skipped = [i for i in items if i.language.split("-", 1)[0].lower() != "en"]
-    items = [i for i in items if i.language.split("-", 1)[0].lower() == "en"]
-    if skipped:
-        console.print(f"[yellow]skipped[/yellow] {len(skipped)} non-en items (the rubric prompt is English-only)")
     if not items:
-        console.print("[red]no judgeable en results[/red] (need ok runs with references)")
+        console.print("[red]no judgeable results[/red] (need ok runs with references)")
         raise typer.Exit(code=2)
 
     if max_clips is not None:
-        clip_sets: dict[tuple[str, str], set[str]] = {}
+        # The cap works per language: lanes are only comparable over shared
+        # clips, and clip ids are only unique within a language's corpus.
+        clip_sets: dict[str, dict[tuple[str, str], set[str]]] = {}
         for item in items:
-            clip_sets.setdefault((item.provider, item.mode), set()).add(item.clip_id)
-        common = sorted(set.intersection(*clip_sets.values()))
-        if not common:
-            console.print("[red]no common clips across lanes[/red] — the merged files cover different corpora")
+            clip_sets.setdefault(item.language, {}).setdefault((item.provider, item.mode), set()).add(item.clip_id)
+        chosen: set[tuple[str, str]] = set()
+        for lang, lanes_clips in sorted(clip_sets.items()):
+            common = sorted(set.intersection(*lanes_clips.values()))
+            if not common:
+                console.print(f"[yellow]{lang}: no common clips across its lanes — language dropped[/yellow]")
+                continue
+            if len(common) < max_clips:
+                console.print(
+                    f"[yellow]{lang}: common set is only {len(common)} clips[/yellow] (asked for {max_clips})"
+                )
+            chosen.update((lang, clip) for clip in common[:max_clips])
+        if not chosen:
+            console.print("[red]no common clips in any language[/red] — the merged files cover different corpora")
             raise typer.Exit(code=2)
-        if len(common) < max_clips:
-            console.print(f"[yellow]common set is only {len(common)} clips[/yellow] (asked for {max_clips})")
-        chosen = set(common[:max_clips])
-        items = [i for i in items if i.clip_id in chosen]
+        items = [i for i in items if (i.language, i.clip_id) in chosen]
 
     lane_counts: dict[tuple[str, str], int] = {}
+    languages: set[str] = set()
     for item in items:
         lane = (item.provider, item.mode)
         lane_counts[lane] = lane_counts.get(lane, 0) + 1
+        languages.add(item.language)
     for (provider, mode), count in sorted(lane_counts.items()):
         console.print(f"[dim]lane[/dim] {provider} {mode}: {count} clips")
+    console.print(f"[dim]languages[/dim] {', '.join(sorted(languages))}")
 
     cache_path = cache_file if cache_file is not None else results[0].parent / "semantic-wer-cache.jsonl"
     cache = semantic_wer.VerdictCache(cache_path)
-    uncached = sum(1 for i in items if cache.get(semantic_wer.verdict_key(judge_model, i.reference, i.hypothesis)) is None)
+    uncached = sum(
+        1
+        for i in items
+        if cache.get(semantic_wer.verdict_key(judge_model, i.reference, i.hypothesis, i.language)) is None
+    )
     est_usd = uncached * 0.02
     console.print(
         f"Judging {len(items)} items with [cyan]{judge_model}[/cyan] "
@@ -1035,7 +1049,9 @@ def semantic_wer_command(
 
     summaries = semantic_wer.summarize(verdicts)
     markdown = semantic_wer.render_markdown(summaries, judge_model)
-    out_path = semantic_wer.write_results(verdicts, summaries, stats, results[0].parent / "semantic-wer.json", judge_model)
+    out_path = semantic_wer.write_results(
+        verdicts, summaries, stats, results[0].parent / "semantic-wer.json", judge_model
+    )
     report_path = results[0].parent / "semantic-wer-report.md"
     report_path.write_text(f"# Semantic WER (pipecat judge, experimental)\n\n{markdown}\n", encoding="utf-8")
     console.print()
