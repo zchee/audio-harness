@@ -1,6 +1,6 @@
 # MaaS アカウント準備チェックリスト
 
-English version: [ACCOUNTS.en.md](ACCOUNTS.en.md)
+English version: [ACCOUNTS.md](ACCOUNTS.en.md)
 
 ベンチマーク対象モデルに必要なアカウントと API キーの一覧。
 アカウント作成そのものは各自で実施してください（エージェントによる代行不可）。
