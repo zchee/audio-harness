@@ -24,12 +24,12 @@ sim:
   # Identical to sim-interview.yaml except the pinned seed.
   scenarios: data/sim/scenarios-en.yaml
   personas_per_scenario: 8      # 3 scenarios x 8 personas x 8 slots = 192 turns
-  # v2 generator (user directive 2026-08-12): latest flash, verified via
+  # v2 generator (user directive 2026-08-14): latest flash, verified via
   # models.list; no dated snapshot published for it yet, so the alias is
   # pinned. Cross-run comparison to the 2026-08-06 run is distribution-level
   # only (same seed = same personas/slots; different generator wording);
   # the stream-vs-batch comparison stays exact within this run.
-  model: gemini-3.6-flash       # pinned interviewer + persona LLM
+  model: gemini-3.7-flash       # pinned interviewer + persona LLM
   voices: [af_heart, am_michael, bf_emma, bm_george]   # pinned Kokoro roster
   degradation: tel8k            # pinned telephony round-trip (snr.py machinery)
   est_answer_s: 12.0            # expected seconds per answer, for the estimate
