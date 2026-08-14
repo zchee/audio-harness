@@ -4,7 +4,7 @@
 
 Accounts and API keys needed for the benchmarked models. Sign-ups must be
 done by a human (an agent cannot do them for you). Once the keys are in
-\`.env\`, run \`uv run audio-harness doctor\` to verify every credential with a
+`.env`, run `uv run audio-harness doctor` to verify every credential with a
 cheap authenticated request.
 
 ---
@@ -13,18 +13,18 @@ cheap authenticated request.
 
 | Provider | Used for | Required environment variables |
 | --- | --- | --- |
-| Google Cloud | STT: Chirp 3 | \`GOOGLE_APPLICATION_CREDENTIALS\` (SA JSON) or ADC, \`GOOGLE_CLOUD_PROJECT\`, \`GOOGLE_CLOUD_LOCATION\` |
-| Gemini | TTS: Gemini TTS | \`GEMINI_API_KEY\` |
-| xAI | STT: Grok STT | \`XAI_API_KEY\` |
+| Google Cloud | STT: Chirp 3 | `GOOGLE_APPLICATION_CREDENTIALS` (SA JSON) or ADC, `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION` |
+| Gemini | TTS: Gemini TTS | `GEMINI_API_KEY` |
+| xAI | STT: Grok STT | `XAI_API_KEY` |
 
 Google Cloud needs the Speech-to-Text API v2 enabled:
 
-\`\`\`bash
+```bash
 gcloud services enable speech.googleapis.com --project "$GOOGLE_CLOUD_PROJECT"
-\`\`\`
+```
 
-Chirp 3 is served from multi-regions such as \`us\` / \`eu\`, so set
-\`GOOGLE_CLOUD_LOCATION\` to a region, not \`global\`.
+Chirp 3 is served from multi-regions such as `us` / `eu`, so set
+`GOOGLE_CLOUD_LOCATION` to a region, not `global`.
 
 ---
 
@@ -38,8 +38,8 @@ Ordered by "largest free tier, no credit card first".
 - Free tier: **$200 credit, no credit card required** (enough to cover every
   STT run in this benchmark)
 - Key issuance: Console → target project → **API Keys** → *Create a New API Key*
-  - The \`Member\` scope is sufficient
-- Environment variable: \`DEEPGRAM_API_KEY\`
+  - The `Member` scope is sufficient
+- Environment variable: `DEEPGRAM_API_KEY`
 - Note: one account covers both STT and TTS
 
 ### 2. AssemblyAI — STT: Universal-3.5 pro
@@ -47,7 +47,7 @@ Ordered by "largest free tier, no credit card first".
 - Sign up: <https://www.assemblyai.com/dashboard/signup>
 - Free tier: **$50 credit** (one-time, on first registration)
 - Key issuance: the API key is shown on the dashboard front page
-- Environment variable: \`ASSEMBLYAI_API_KEY\`
+- Environment variable: `ASSEMBLYAI_API_KEY`
 
 ### 3. Speechmatics — STT: Enhanced / Standard
 
@@ -56,8 +56,8 @@ Ordered by "largest free tier, no credit card first".
   free for this benchmark
 - Key issuance: Portal → **API Keys** → *Create API Key*
   - The same key works for Batch and Real-time
-- Environment variable: \`SPEECHMATICS_API_KEY\`
-- Note: \`enhanced\` and \`standard\` are an \`operating_point\` switch on the
+- Environment variable: `SPEECHMATICS_API_KEY`
+- Note: `enhanced` and `standard` are an `operating_point` switch on the
   same key, so one account covers both models
 
 ### 4. ElevenLabs — STT: Scribe v2
@@ -66,8 +66,8 @@ Ordered by "largest free tier, no credit card first".
 - Free tier: **10,000 credits/month (roughly 10 minutes)** — not enough for
   the benchmark, so plan on a paid plan (Starter, from $5/month)
 - Key issuance: account menu (bottom right) → **API Keys** → *Create API Key*
-- Environment variable: \`ELEVENLABS_API_KEY\`
-- Note: \`scribe_v2\` (batch) and \`scribe_v2_realtime\` (streaming) both work
+- Environment variable: `ELEVENLABS_API_KEY`
+- Note: `scribe_v2` (batch) and `scribe_v2_realtime` (streaming) both work
   with the same key
 
 ### 5. Cartesia — TTS: Sonic 3.0 / Sonic 3.5
@@ -76,9 +76,9 @@ Ordered by "largest free tier, no credit card first".
 - Free tier: a small trial credit. For sustained use, Pro at $5/month is the
   realistic option
 - Key issuance: Dashboard → **API Keys** → *Create API Key*
-- Environment variable: \`CARTESIA_API_KEY\`
-- Note: \`sonic-3\` and \`sonic-3.5\` are a \`model_id\` switch on the same key.
-  Pick one \`voice_id\` before benchmarking and keep it fixed — changing the
+- Environment variable: `CARTESIA_API_KEY`
+- Note: `sonic-3` and `sonic-3.5` are a `model_id` switch on the same key.
+  Pick one `voice_id` before benchmarking and keep it fixed — changing the
   voice makes round-trip WER incomparable
 
 ### 6. Soniox — STT: stt-rt-v5
@@ -88,7 +88,7 @@ Ordered by "largest free tier, no credit card first".
   discontinued as an anti-abuse measure). Usage-billed, so a payment method
   must be registered up front
 - Key issuance: Console → **API Keys** → *New API Key*
-- Environment variable: \`SONIOX_API_KEY\`
+- Environment variable: `SONIOX_API_KEY`
 - Note: the unit price is the cheapest of the field (about $0.12/hour), so
   the benchmark cost stays tiny even after registering billing
 
@@ -96,13 +96,13 @@ Ordered by "largest free tier, no credit card first".
 
 ## Verify
 
-\`\`\`bash
+```bash
 cp .env.example .env
 # after filling the keys into .env:
 uv run audio-harness doctor
-\`\`\`
+```
 
-\`doctor\` sends each provider one cheap authenticated GET and reports key
+`doctor` sends each provider one cheap authenticated GET and reports key
 validity, balances where visible, and reachability. No audio is sent, so
 essentially nothing is billed.
 
@@ -129,5 +129,5 @@ under $1. In other words, **the whole benchmark completes for a few dollars
 when the free tiers are used**.
 
 Rates are public list prices as of 2026-08-05. Cross-check against
-\`PRICING_CHECKED\` in \`src/audio_harness/config.py\` and re-verify on each
+`PRICING_CHECKED` in `src/audio_harness/config.py` and re-verify on each
 vendor's pricing page if stale.
