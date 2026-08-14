@@ -122,6 +122,31 @@ STT_PRICING: dict[str, SttPricing] = {
         note="$0.0001/audio-second observed in the endpoint's usage payload "
         "2026-08-12; hosted-proxy medians are direct-comparable (+~0.1s, 2026-08-12 paired run); tails are not",
     ),
+    "or-qwen3-asr-06b": SttPricing(
+        batch_per_hour=0.012,
+        note="$3.33e-6/audio-second observed in the endpoint's usage payload "
+        "2026-08-14; hosted-proxy medians are direct-comparable (+~0.1s, 2026-08-12 paired run); tails are not",
+    ),
+    "or-qwen3-asr-17b": SttPricing(
+        batch_per_hour=0.027,
+        note="$7.5e-6/audio-second observed in the endpoint's usage payload "
+        "2026-08-14; hosted-proxy medians are direct-comparable (+~0.1s, 2026-08-12 paired run); tails are not",
+    ),
+    "or-voxtral-mini": SttPricing(
+        batch_per_hour=0.06,
+        note="$1.67e-5/audio-second observed in the endpoint's usage payload "
+        "2026-08-14; hosted-proxy medians are direct-comparable (+~0.1s, 2026-08-12 paired run); tails are not",
+    ),
+    "or-voxtral-small": SttPricing(
+        batch_per_hour=0.18,
+        note="$5e-5/audio-second observed in the endpoint's usage payload "
+        "2026-08-14; hosted-proxy medians are direct-comparable (+~0.1s, 2026-08-12 paired run); tails are not",
+    ),
+    "or-nemotron-asr": SttPricing(
+        batch_per_hour=0.012,
+        note="$3.33e-6/audio-second observed in the endpoint's usage payload "
+        "2026-08-14; hosted-proxy medians are direct-comparable (+~0.1s, 2026-08-12 paired run); tails are not",
+    ),
     "mistral-voxtral-realtime": SttPricing(
         stream_per_hour=0.36,
         note="$0.006/audio-min streaming (La Plateforme pay-as-you-go); the "

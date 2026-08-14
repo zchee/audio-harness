@@ -172,6 +172,25 @@ class TestRegistration:
         assert adapter.supports_stream is False
         assert stt.family_of("or-fish-transcribe") == "openrouter"
 
+    def test_2026_08_14_asr_lanes(self) -> None:
+        tests = {
+            "success: qwen3 asr 0.6b": ("or-qwen3-asr-06b", "qwen/qwen3-asr-0.6b"),
+            "success: qwen3 asr 1.7b": ("or-qwen3-asr-17b", "qwen/qwen3-asr-1.7b"),
+            "success: voxtral mini 3b": ("or-voxtral-mini", "mistralai/voxtral-mini-3b-2507"),
+            "success: voxtral small 24b": ("or-voxtral-small", "mistralai/voxtral-small-24b-2507-stt"),
+            "success: nemotron 3.5 asr": (
+                "or-nemotron-asr",
+                "nvidia/nemotron-3.5-asr-streaming-multilingual-0.6b",
+            ),
+        }
+        for name, (key, model) in tests.items():
+            adapter = stt.create(key)
+            assert isinstance(adapter, openrouter.OpenRouterStt), name
+            assert adapter.model == model, name
+            assert adapter.supports_batch is True, name
+            assert adapter.supports_stream is False, name
+            assert stt.family_of(key) == "openrouter", name
+
 
 LIVE_FLAG = "AUDIO_HARNESS_TEST_OPENROUTER_LIVE"
 

@@ -1,0 +1,38 @@
+# OpenRouter ASR additions to the canonical English table (2026-08-14):
+# Qwen3 ASR 0.6B/1.7B, Mistral Voxtral Mini 3B / Small 24B STT, and NVIDIA
+# Nemotron 3.5 ASR (served batch-only through OpenRouter despite the
+# "streaming" model name). All five probe-verified against the transcription
+# endpoint with per-second usage billing. Same pipecat parquet, seed and
+# limit as the canonical English table.
+#
+#   uv run audio-harness stt configs/stt-en-or-asr.yaml
+
+stt:
+  - name: or-qwen3-asr-06b
+    modes: [batch]
+  - name: or-qwen3-asr-17b
+    modes: [batch]
+  - name: or-voxtral-mini
+    modes: [batch]
+  - name: or-voxtral-small
+    modes: [batch]
+  - name: or-nemotron-asr
+    modes: [batch]
+
+dataset:
+  parquet: data/hf/stt-benchmark-data/data/train-00000-of-00001.parquet
+  id_column: sample_id
+  audio_column: audio
+  text_column: transcription
+  language: en-US
+  limit: 30
+  sample_seed: 20260805
+
+run:
+  repeats: 3
+  warmup: 1
+  chunk_ms: 20
+  realtime: true
+  provider_concurrency: 3
+  timeout_s: 300
+  output_dir: results

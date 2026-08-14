@@ -85,7 +85,7 @@ isolation for judge-based lanes, and pricing treated as dated data that rots.
 
 ## Providers
 
-51 registered lanes (24 STT, 27 TTS). `uv run audio-harness providers`
+56 registered lanes (29 STT, 27 TTS). `uv run audio-harness providers`
 prints this matrix from the live registry.
 
 ### STT
@@ -113,6 +113,11 @@ prints this matrix from the live registry.
 | `nvidia/parakeet-tdt-0.6b-v3` | Parakeet TDT 0.6B v3 (OpenRouter) | yes | — |
 | `fish-audio/transcribe-1` | Fish transcribe-1 (OpenRouter) | yes | — |
 | `microsoft/mai-transcribe-1.5` | MAI transcribe 1.5 (OpenRouter) | yes | — |
+| `qwen/qwen3-asr-0.6b` | Qwen3 ASR 0.6B (OpenRouter) | yes | — |
+| `qwen/qwen3-asr-1.7b` | Qwen3 ASR 1.7B (OpenRouter) | yes | — |
+| `mistralai/voxtral-mini-3b-2507` | Voxtral Mini 3B (OpenRouter) | yes | — |
+| `mistralai/voxtral-small-24b-2507-stt` | Voxtral Small 24B STT (OpenRouter) | yes | — |
+| `nvidia/nemotron-3.5-asr-streaming-multilingual-0.6b` | Nemotron 3.5 ASR 0.6B (OpenRouter; batch-only via OR) | yes | — |
 | `SFSpeechRecognizer` | Apple Speech (on-device, $0) | — | yes |
 | `parakeet-tdt-0.6b-v3` | Parakeet v3 on Neural Engine ($0) | yes | — |
 | `mlx-community/whisper-large-v3-mlx` | whisper-large-v3 MLX ($0) | yes | — |

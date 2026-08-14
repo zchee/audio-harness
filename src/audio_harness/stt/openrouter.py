@@ -95,6 +95,67 @@ class OpenRouterMaiTranscribe(OpenRouterStt):
 
 
 @register
+class OpenRouterQwen3Asr06b(OpenRouterStt):
+    """OpenRouter-hosted Qwen3 ASR 0.6B.
+
+    Probe-verified 2026-08-14 ($3.33e-6/s in the usage payload). Hosted-proxy
+    caveats apply; synthetic corpora only — OpenRouter is not on the
+    real-data vendor allowlist.
+    """
+
+    key = "or-qwen3-asr-06b"
+    model = "qwen/qwen3-asr-0.6b"
+
+
+@register
+class OpenRouterQwen3Asr17b(OpenRouterStt):
+    """OpenRouter-hosted Qwen3 ASR 1.7B.
+
+    Probe-verified 2026-08-14 ($7.5e-6/s in the usage payload).
+    """
+
+    key = "or-qwen3-asr-17b"
+    model = "qwen/qwen3-asr-1.7b"
+
+
+@register
+class OpenRouterVoxtralMini(OpenRouterStt):
+    """OpenRouter-hosted Mistral Voxtral Mini 3B (2507).
+
+    Probe-verified 2026-08-14 ($1.67e-5/s in the usage payload). The same
+    weights family as the direct mistral-voxtral-realtime lane but served
+    batch-only through OpenRouter, so the two lanes are not latency-comparable.
+    """
+
+    key = "or-voxtral-mini"
+    model = "mistralai/voxtral-mini-3b-2507"
+
+
+@register
+class OpenRouterVoxtralSmall(OpenRouterStt):
+    """OpenRouter-hosted Mistral Voxtral Small 24B STT (2507).
+
+    Probe-verified 2026-08-14 ($5e-5/s in the usage payload).
+    """
+
+    key = "or-voxtral-small"
+    model = "mistralai/voxtral-small-24b-2507-stt"
+
+
+@register
+class OpenRouterNemotronAsr(OpenRouterStt):
+    """OpenRouter-hosted NVIDIA Nemotron 3.5 ASR streaming-multilingual 0.6B.
+
+    Probe-verified 2026-08-14 ($3.33e-6/s in the usage payload). Despite the
+    "streaming" in the model name, OpenRouter serves it through the batch
+    transcription endpoint only, so it registers batch-only here.
+    """
+
+    key = "or-nemotron-asr"
+    model = "nvidia/nemotron-3.5-asr-streaming-multilingual-0.6b"
+
+
+@register
 class OpenRouterFishTranscribe(OpenRouterStt):
     """OpenRouter-hosted Fish Audio transcribe-1.
 
