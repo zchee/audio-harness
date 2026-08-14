@@ -106,12 +106,12 @@ prints this matrix from the live registry.
 | `solaria-1` | Solaria-1 | — | yes |
 | `solaria-3` | Solaria-3 | yes | — |
 | `voxtral-mini-transcribe-realtime-2602` | Voxtral realtime | — | yes |
-| — | Azure Speech (SDK) | — | yes |
+| `default` | Azure Speech (SDK; per-locale base model) | — | yes |
 | `grok-stt` | Grok STT | yes | yes |
 | `nvidia/parakeet-tdt-0.6b-v3` | Parakeet TDT 0.6B v3 (OpenRouter) | yes | — |
 | `fish-audio/transcribe-1` | Fish transcribe-1 (OpenRouter) | yes | — |
 | `microsoft/mai-transcribe-1.5` | MAI transcribe 1.5 (OpenRouter) | yes | — |
-| — | SFSpeechRecognizer (on-device, $0) | — | yes |
+| `SFSpeechRecognizer` | Apple Speech (on-device, $0) | — | yes |
 | `parakeet-tdt-0.6b-v3` | Parakeet v3 on Neural Engine ($0) | yes | — |
 | `mlx-community/whisper-large-v3-mlx` | whisper-large-v3 MLX ($0) | yes | — |
 
@@ -130,8 +130,8 @@ prints this matrix from the live registry.
 | `inworld-tts-2` | Inworld TTS 2 | yes | yes |
 | `voxtral-mini-tts-2603` | Voxtral TTS | yes | yes |
 | `gpt-4o-mini-tts-2025-12-15` | gpt-4o-mini-tts | yes | yes |
-| — | Azure Neural (SDK) | — | yes |
-| — | Grok TTS | yes | yes |
+| `en-US-AvaMultilingualNeural` | Azure Neural (SDK; voice selects the model, ja uses `ja-JP-NanamiNeural`) | — | yes |
+| `grok-tts` | Grok TTS (wire request carries no model id) | yes | yes |
 | `qwen/qwen-audio-3.0-tts-flash` | Qwen audio-3.0 TTS flash (OpenRouter) | yes | — |
 | `qwen/qwen-audio-3.0-tts-plus` | Qwen audio-3.0 TTS plus (OpenRouter) | yes | — |
 | `fish-audio/s1` | Fish S1 (OpenRouter) | yes | — |
