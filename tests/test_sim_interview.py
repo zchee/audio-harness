@@ -383,11 +383,18 @@ class TestComposite:
             ),
         ]
 
-        composite = composite_ranking(results, ["fast-sloppy", "slow-exact"])
+        legacy = composite_ranking(results, ["fast-sloppy", "slow-exact"], metrics=("entity-wer", "finalize-p50"))
 
-        # Each vendor wins one cell: mean ranks tie at 1.5.
-        assert composite.mean_rank["fast-sloppy"] == pytest.approx(1.5)
-        assert composite.mean_rank["slow-exact"] == pytest.approx(1.5)
+        # Each vendor wins one cell: legacy composite mean ranks tie at 1.5.
+        assert legacy.mean_rank["fast-sloppy"] == pytest.approx(1.5)
+        assert legacy.mean_rank["slow-exact"] == pytest.approx(1.5)
+
+        # Gate v2 (re-registered 2026-08-14) ranks on accuracy only, so the
+        # exact-but-slow vendor leads outright.
+        v2 = composite_ranking(results, ["fast-sloppy", "slow-exact"])
+        assert v2.mean_rank["slow-exact"] == pytest.approx(1.0)
+        assert v2.mean_rank["fast-sloppy"] == pytest.approx(2.0)
+        assert any("entity-wer" in d and "finalize" not in d for d in v2.decisions)
 
     def test_load_canonical_supersedes_lanes(self, tmp_path: Path) -> None:
         def write(path: Path, provider: str, text: str) -> Path:

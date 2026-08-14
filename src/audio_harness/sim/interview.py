@@ -21,9 +21,11 @@ Three design points keep the score honest:
   three four five six seven", "(555) 123-4567" and "5551234567" all agree.
   No LLM touches the scoring path.
 * **The lane ships gated.** Its vendor ranking is compared against the
-  pre-registered real-corpus composite — mean within-language rank over
-  {entity-WER, finalize p50} on the canonical merge — and rankings are only
-  trusted at Spearman rho ≥ 0.8 (average-rank ties, exact permutation p). A
+  canonical accuracy ranking — mean within-language rank over entity-WER on
+  the canonical merge (gate v2, re-registered 2026-08-14; see
+  :data:`GATE_METRICS_V2` for the history) — and rankings are only trusted
+  at Spearman rho ≥ 0.8 (average-rank ties, exact permutation p). The legacy
+  {entity-WER, finalize p50} composite is still reported for reference. A
   failing gate triggers a written divergence analysis before any verdict.
 """
 
@@ -1238,10 +1240,28 @@ def load_canonical(paths: list[Path]) -> list[SttResult]:
     return [item for runs in lanes.values() for item in runs]
 
 
+GATE_METRICS_V2 = ("entity-wer",)
+"""Gate v2 comparison basis, re-registered 2026-08-14 (user approval).
+
+The original pre-registration compared E3 against a composite of
+{entity-WER, finalize p50}. Three runs across three generator models
+(gemini-2.5/3.6/3.7-flash) failed that gate with the identical structure —
+the latency half rewards the fastest finalizer while E3 measures capture
+accuracy — and the accuracy half alone correlated at rho=+0.971 in the
+first run. The gate therefore re-registers against the accuracy ranking
+only; the legacy composite is still computed and reported for reference.
+Rationale records: results/20260806-152814/sim-divergence.md and
+results/20260812-202742/sim-divergence.md."""
+
+
 def composite_ranking(
-    results: list[SttResult], vendors: list[str], *, fallback_language: str = "en-US"
+    results: list[SttResult],
+    vendors: list[str],
+    *,
+    fallback_language: str = "en-US",
+    metrics: tuple[str, ...] = GATE_METRICS_V2,
 ) -> CompositeRanking:
-    """Compute the pre-registered composite from merged canonical results.
+    """Compute the gate comparison ranking from merged canonical results.
 
     Entity-WER is only comparable when every vendor is scored over the same
     reference spans, but superseding re-run files may lack the annotations
@@ -1255,9 +1275,13 @@ def composite_ranking(
         results: Canonical merged results.
         vendors: The vendor set the gate compares (registry keys).
         fallback_language: Tag for results that recorded none.
+        metrics: Which per-language cells enter the ranking. Defaults to the
+            re-registered gate v2 basis (:data:`GATE_METRICS_V2`); pass
+            ``("entity-wer", "finalize-p50")`` to reproduce the original
+            composite.
 
     Returns:
-        The composite with per-cell ranks and per-vendor mean ranks.
+        The ranking with per-cell ranks and per-vendor mean ranks.
     """
     shared: dict[tuple[str, str], tuple[str, str]] = {}
     for result in results:
@@ -1286,6 +1310,7 @@ def composite_ranking(
         if summary.provider in vendors and summary.mode == "stream"
     ]
     composite = CompositeRanking(vendors=sorted(vendors))
+    composite.decisions.append(f"gate ranking basis: {', '.join(metrics)}")
     composite.decisions.append(
         "streaming lanes only; annotations propagated across lanes by "
         "(language, clip_id) so every vendor is scored over the same entity "
@@ -1314,10 +1339,9 @@ def composite_ranking(
             entity_scores[vendor] = pooled.rate if pooled is not None and pooled.reference_length > 0 else None
             finalize_scores[vendor] = percentile(summary.finalize_s, 50)
 
-        for metric, scores in (
-            ("entity-wer", entity_scores),
-            ("finalize-p50", finalize_scores),
-        ):
+        cell_scores = {"entity-wer": entity_scores, "finalize-p50": finalize_scores}
+        for metric in metrics:
+            scores = cell_scores[metric]
             if all(value is None for value in scores.values()):
                 composite.decisions.append(f"cell dropped (no vendor measured): {language}/{metric}")
                 continue

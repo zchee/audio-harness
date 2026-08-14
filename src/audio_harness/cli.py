@@ -776,11 +776,17 @@ def sim_command(
         except (FileNotFoundError, ValueError) as exc:
             console.print(f"[red]gate error:[/red] {exc}")
             raise typer.Exit(code=2) from exc
-        composite = sim_interview.composite_ranking(merged, [entry.name for entry in bench.stt])
-        gate = sim_interview.evaluate_gate(
+        vendor_keys = [entry.name for entry in bench.stt]
+        threshold = float(gate_raw.get("rho_threshold", 0.8))
+        composite = sim_interview.composite_ranking(merged, vendor_keys)
+        gate = sim_interview.evaluate_gate(outcome.vendor_scores, composite, threshold=threshold)
+        legacy = sim_interview.evaluate_gate(
             outcome.vendor_scores,
-            composite,
-            threshold=float(gate_raw.get("rho_threshold", 0.8)),
+            sim_interview.composite_ranking(merged, vendor_keys, metrics=("entity-wer", "finalize-p50")),
+            threshold=threshold,
+        )
+        gate.decisions.append(
+            f"legacy composite (entity-wer + finalize-p50) rho={legacy.rho:.3f} reported for reference"
         )
 
     sim_path, gate_path, report_path = sim_interview.write_sim_outputs(outcome, gate, results_path)
