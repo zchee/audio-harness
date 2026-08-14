@@ -1,0 +1,45 @@
+# Backfill of the AssemblyAI streaming hu/pl canonical cells. The streaming
+# endpoint rejects explicit 'hu'/'pl' language pins (its allowlist stops at
+# 21 languages), which left both cells missing and cost AAI worst-rank
+# shares in the gate-v2 accuracy ranking. 'multi' (multilingual auto) is the
+# vendor's best supported streaming configuration for this audio, so the
+# cells are measured under it rather than left missing — a measured-bad cell
+# and a missing cell are different claims. INTERNAL ONLY: Speech-MASSIVE is
+# CC BY-NC-SA.
+#
+# Same corpus, seed and limit as stt-sweep-multi.yaml, so clip ids match the
+# canonical merge and entity annotations propagate by (language, clip_id).
+#
+#   uv run audio-harness stt configs/stt-multi-aai-hupl-backfill.yaml
+
+stt:
+  - name: assemblyai-universal35pro
+    modes: [stream]
+    options:
+      # 'multi' requires the multilingual streaming model: the default
+      # universal-3-5-pro pin accepts the connection but never emits turns
+      # (verified 2026-08-14), which wedges the lane until timeout.
+      model: universal-streaming-multilingual
+      language: multi
+
+dataset:
+  id_column: id
+  audio_column: audio
+  text_column: utt
+  limit: 30
+  sample_seed: 20260805
+  sources:
+    - { parquet: "data/hf/speech-massive/hu-HU/validation-*.parquet", language: hu-HU }
+    - { parquet: "data/hf/speech-massive/pl-PL/validation-*.parquet", language: pl-PL }
+
+run:
+  repeats: 1
+  warmup: 0
+  chunk_ms: 20
+  realtime: true
+  provider_concurrency: 6
+  # 90s is 20x the longest clip: anything slower is a hung session, and the
+  # 2026-08-14 backfill showed hung multi sessions are common enough that a
+  # 300s allowance turns the lane into an hour-long run.
+  timeout_s: 90
+  output_dir: results
