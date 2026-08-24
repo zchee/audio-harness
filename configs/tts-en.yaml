@@ -25,6 +25,13 @@ tts:
       # "Sarah" (premade). Pinned in config, not env, so every run of this
       # file scores the same voice.
       voice_id: EXAVITQu4vr4xnSDxMaL
+  - name: elevenlabs-v3
+    modes: [batch, stream]
+    options:
+      # Same "Sarah" pin as elevenlabs-flash25: the two ElevenLabs lanes
+      # must differ only by model, or the comparison measures the voices.
+      # Quality-axis lane — no stream-input WS, so no incremental numbers.
+      voice_id: EXAVITQu4vr4xnSDxMaL
 
 dataset:
   prompts: data/prompts-en.txt
