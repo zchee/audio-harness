@@ -103,20 +103,64 @@ unsafe-fixes = true
 
 [tool.ruff.lint]
 select = [
-    "E", "W", "F", "I", "UP", "B", "C4", "SIM", "RUF", "D", "PIE", "PERF",
-    "PT", "T20", "TID", "PTH", "TRY", "PYI", "ANN", "ARG", "ASYNC", "SLF",
-    "RET", "FURB", "G", "LOG", "N", "unnecessary-paren-on-raise-exception", "SLOT", "blanket-type-ignore", "blanket-noqa", "implicit-namespace-package",
+    "E",
+    "W",
+    "F",
+    "I",
+    "UP",
+    "B",
+    "C4",
+    "SIM",
+    "RUF",
+    "D",
+    "PIE",
+    "PERF",
+    "PT",
+    "T20",
+    "TID",
+    "PTH",
+    "TRY",
+    "PYI",
+    "ANN",
+    "ARG",
+    "ASYNC",
+    "SLF",
+    "RET",
+    "FURB",
+    "G",
+    "LOG",
+    "N",
+    "unnecessary-paren-on-raise-exception",
+    "SLOT",
+    "blanket-type-ignore",
+    "blanket-noqa",
+    "implicit-namespace-package",
 ]
 ignore = [
     # Provider SDK callbacks and API shims use externally-dictated names.
-    "invalid-function-name", "invalid-first-argument-name-for-method",
+    "invalid-function-name",
+    "invalid-first-argument-name-for-method",
     # Formatter-conflict set: ruff format owns whitespace and line length.
-    "tab-indentation", "indentation-with-invalid-multiple", "indentation-with-invalid-multiple-comment", "over-indented", "docstring-tab-indentation", "triple-single-quotes", "line-too-long",
+    "tab-indentation",
+    "indentation-with-invalid-multiple",
+    "indentation-with-invalid-multiple-comment",
+    "over-indented",
+    "docstring-tab-indentation",
+    "triple-single-quotes",
+    "line-too-long",
     # Typer/FastAPI-style call-in-default is intentional; terse exceptions
     # and Any-typed escape hatches are accepted; broad pytest.raises OK.
-    "function-call-in-default-argument", "raise-vanilla-args", "any-type", "pytest-raises-too-broad",
+    "function-call-in-default-argument",
+    "raise-vanilla-args",
+    "any-type",
+    "pytest-raises-too-broad",
     # Complexity thresholds are judged in review, not by the linter.
-    "too-many-return-statements", "too-many-branches", "too-many-arguments", "too-many-locals", "too-many-statements", "complex-structure",
+    "too-many-return-statements",
+    "too-many-branches",
+    "too-many-arguments",
+    "too-many-locals",
+    "too-many-statements",
+    "complex-structure",
 ]
 
 [tool.ruff.lint.per-file-ignores]
