@@ -15,7 +15,7 @@ authenticated request.
 | Provider | Used for | Required environment variables |
 | --- | --- | --- |
 | Google Cloud | STT: Chirp 3 | `GOOGLE_APPLICATION_CREDENTIALS` (SA JSON) or ADC, `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION` |
-| Gemini | TTS: Gemini TTS / 3.1 preview; sim-interview generator | `GEMINI_API_KEY` (optional `GEMINI_TTS_VOICE`) |
+| Gemini | STT: Gemini 3.5 Transcribe (batch) / Transcribe Live; TTS: Gemini TTS / 3.1 preview; sim-interview generator | `GEMINI_API_KEY` (optional `GEMINI_TTS_VOICE`) |
 | xAI | STT: Grok STT / TTS: Grok TTS | `XAI_API_KEY` |
 
 Google Cloud needs the Speech-to-Text API v2 enabled:
@@ -27,6 +27,16 @@ gcloud services enable speech.googleapis.com --project "$GOOGLE_CLOUD_PROJECT"
 Chirp 3 is served from multi-regions such as `us` / `eu`, so set
 `GOOGLE_CLOUD_LOCATION` to a region, not `global`. Note chirp_3 is not
 served from `asia-northeast1` (verified 2026-08-12).
+
+Gemini 3.5 Transcribe (batch and Live) goes through the Gemini Developer API
+with the same `GEMINI_API_KEY`. Real-data allow-list (user-approved
+2026-08-28): use the **paid tier** — inputs are not used for training and
+processing falls under the Google Cloud DPA, with prompts retained up to
+55 days for abuse monitoring. There is **no region control**: processing is
+global, so Tokyo data residency is not satisfied (the same class of caveat
+as Chirp 3's `us` fallback, but with no region choice at all). The free tier
+uses inputs for product improvement, so the key's project must be
+billing-enabled before any real-data run.
 
 ---
 

@@ -1,0 +1,37 @@
+# Real-data supplement for the Gemini 3.5 Transcribe generation: batch
+# Generate Content and the Live API over the 150-clip real-interview corpus.
+# Reference-free corpus - accuracy columns render as em dashes; latency,
+# stability and RTF are the scored axes.
+#
+# Allow-list decision (user-approved 2026-08-28): Gemini Developer API on the
+# PAID tier — inputs are not used for training and processing falls under
+# the Google Cloud DPA; prompts are retained up to 55 days for abuse
+# monitoring. NO region control: processing is global, so Tokyo data
+# residency is not satisfied — the same class of caveat as Chirp 3's `us`
+# fallback, but with no region choice at all. The free tier would use inputs
+# for product improvement, so the key's project must be billing-enabled
+# (confirmed by the user's approval).
+#
+# 本番 PII 音声 — 実行は lead のみ、W0 検証済みプライバシー制御必須。
+#
+#   uv run audio-harness stt configs/stt-realdata-gemini.yaml
+
+stt:
+  - name: gemini-35-transcribe
+    modes: [batch]
+  - name: gemini-35-transcribe-live
+    modes: [stream]
+
+dataset:
+  manifest: data/realdata/pilot-150.jsonl
+  language: en-US
+  limit: null
+
+run:
+  repeats: 1
+  warmup: 1
+  chunk_ms: 20
+  realtime: true
+  provider_concurrency: 2
+  timeout_s: 600
+  output_dir: results

@@ -14,7 +14,7 @@ English version: [ACCOUNTS.md](ACCOUNTS.md)
 | Provider | 用途 | 必要な環境変数 |
 | --- | --- | --- |
 | Google Cloud | STT: Chirp 3 | `GOOGLE_APPLICATION_CREDENTIALS` (SA JSON) または ADC、`GOOGLE_CLOUD_PROJECT`、`GOOGLE_CLOUD_LOCATION` |
-| Gemini | TTS: Gemini TTS / 3.1 preview、sim-interview の生成 | `GEMINI_API_KEY`(任意: `GEMINI_TTS_VOICE`) |
+| Gemini | STT: Gemini 3.5 Transcribe(batch)/ Transcribe Live、TTS: Gemini TTS / 3.1 preview、sim-interview の生成 | `GEMINI_API_KEY`(任意: `GEMINI_TTS_VOICE`) |
 | xAI | STT: Grok STT / TTS: Grok TTS | `XAI_API_KEY` |
 
 Google Cloud は Speech-to-Text API v2 の有効化が必要です:
@@ -26,6 +26,15 @@ gcloud services enable speech.googleapis.com --project "$GOOGLE_CLOUD_PROJECT"
 Chirp 3 は `us` / `eu` などのマルチリージョン提供のため、
 `GOOGLE_CLOUD_LOCATION` は `global` ではなくリージョンを指定してください。
 なお chirp_3 は `asia-northeast1`(東京)では提供されていません(2026-08-12 確認)。
+
+Gemini 3.5 Transcribe(batch / Live)は同じ `GEMINI_API_KEY` で Gemini
+Developer API を使います。実データ許可リスト(2026-08-28 ユーザー承認):
+**有料ティア**を使うこと — 入力は学習に使われず、処理は Google Cloud DPA の
+対象で、不正利用監視のためプロンプトは最長 55 日保持されます。**リージョン
+指定は不可**: 処理はグローバルのため東京データレジデンシーは満たせません
+(Chirp 3 の `us` フォールバックと同種の注意点ですが、こちらはリージョン
+選択自体がありません)。無料ティアは入力を製品改善に利用するため、実データ
+実行の前にキーのプロジェクトが課金有効であることが必須です。
 
 ---
 
