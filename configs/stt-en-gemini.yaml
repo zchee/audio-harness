@@ -1,0 +1,29 @@
+# Gemini 3.5 Transcribe public-preview lanes (2026-08-28): batch Generate
+# Content HTTP and streaming Live API BidiGenerateContent WebSocket.
+# Same pipecat parquet, seed and limit as the canonical English table.
+#
+#   uv run audio-harness stt configs/stt-en-gemini.yaml
+
+stt:
+  - name: gemini-35-transcribe
+    modes: [batch]
+  - name: gemini-35-transcribe-live
+    modes: [stream]
+
+dataset:
+  parquet: data/hf/stt-benchmark-data/data/train-00000-of-00001.parquet
+  id_column: sample_id
+  audio_column: audio
+  text_column: transcription
+  language: en-US
+  limit: 30
+  sample_seed: 20260805
+
+run:
+  repeats: 3
+  warmup: 1
+  chunk_ms: 20
+  realtime: true
+  provider_concurrency: 2
+  timeout_s: 300
+  output_dir: results
