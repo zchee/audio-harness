@@ -14,6 +14,7 @@ from collections.abc import AsyncIterator, Callable
 from io import BytesIO
 import os
 from pathlib import Path
+import time
 from urllib.parse import urlsplit
 import wave
 
@@ -74,7 +75,10 @@ class FakeGeminiWs:
     the ``inputTranscription`` final, ``generationComplete`` and finally
     ``speechState: NON_SPEECH``. By default the segment is flushed only in
     answer to the client's ``audio_stream_end``; ``vad_before_audio_end`` and
-    ``vad_after_quiet_s`` make the server's own VAD flush it earlier.
+    ``vad_after_quiet_s`` make the server's own VAD flush it earlier, and
+    ``silent`` hears no speech at all. Like the live endpoint, the fake never
+    sends anything else after the terminator and never closes on its own, so
+    every test also proves the adapter ends the session by itself.
     """
 
     def __init__(self) -> None:
@@ -86,6 +90,7 @@ class FakeGeminiWs:
         self.audio_stream_end = False
         self.vad_before_audio_end = False
         self.vad_after_quiet_s: float | None = None
+        self.silent = False
         self.fail_with: str | None = None
         self._sent_segment = False
         self._sent_speech_state = False
@@ -103,7 +108,7 @@ class FakeGeminiWs:
                 else:
                     frame = await asyncio.wait_for(socket.recv(), timeout=self.vad_after_quiet_s)
             except TimeoutError:
-                if self.received_audio and not self._sent_segment:
+                if self.received_audio and not self._sent_segment and not self.silent:
                     await self._send_segment(socket)
                 continue
             except websockets.ConnectionClosed:
@@ -130,6 +135,8 @@ class FakeGeminiWs:
                 for media in media_chunks:
                     if isinstance(media, dict) and media.get("data"):
                         self.received_audio.extend(base64.b64decode(media["data"]))
+                if self.silent:
+                    continue
                 if self.received_audio and not self._sent_speech_state:
                     self._sent_speech_state = True
                     await _send_content(socket, {"speechState": "SPEECH"})
@@ -138,12 +145,8 @@ class FakeGeminiWs:
 
             if realtime_input.get("audio_stream_end") is True:
                 self.audio_stream_end = True
-                if not self._sent_segment:
+                if not self._sent_segment and not self.silent:
                     await self._send_segment(socket)
-                # A segment the server already flushed is not re-sent after the
-                # terminator; the live endpoint stays silent, and the fake closes
-                # so the test does not sit out the driver's finalize timeout.
-                return
 
     async def _send_segment(self, socket: ServerConnection) -> None:
         """Emit cumulative interims, the segment final, and the VAD end."""
@@ -173,6 +176,9 @@ async def gemini_ws(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[FakeGemini
 
 
 Respond = Callable[[httpx.Request], httpx.Response]
+
+PROMPT_CLOSE_S = 2.0
+"""Wall-clock bound proving a session ended by itself, not by the driver's 15 s finalize timeout."""
 
 
 def _mocked_batch_adapter(
@@ -321,7 +327,12 @@ class TestLiveProtocol:
         gemini_ws.vad_before_audio_end = True
         adapter = stt.create("gemini-35-transcribe-live", {"eou_grace_ms": 0})
 
+        started = time.perf_counter()
         result = await adapter.transcribe_stream(make_clip(0.6), chunk_ms=20, realtime=True)
+        # The server sends nothing after the terminator once it has flushed
+        # the segment, so the adapter must close the session itself instead
+        # of waiting out the driver's finalize timeout.
+        assert time.perf_counter() - started < PROMPT_CLOSE_S
 
         eou_markers = [partial for partial in result.partials if partial.kind == EventKind.EOU]
         assert len(eou_markers) == 1
@@ -339,9 +350,11 @@ class TestLiveProtocol:
         assert bytes(gemini_ws.received_audio) == make_clip(0.6).pcm
 
     async def test_flush_after_audio_stream_end_is_plain_final(self, gemini_ws: FakeGeminiWs) -> None:
-        adapter = stt.create("gemini-35-transcribe-live", {"eou_grace_ms": 0})
+        adapter = stt.create("gemini-35-transcribe-live")
 
+        started = time.perf_counter()
         result = await adapter.transcribe_stream(make_clip(0.2), chunk_ms=20, realtime=False)
+        assert time.perf_counter() - started < PROMPT_CLOSE_S
 
         interim_texts = [partial.text for partial in result.partials if not partial.is_final]
         assert interim_texts == ["hello", "hello wonderful", "hello wonderful world"]
@@ -352,6 +365,7 @@ class TestLiveProtocol:
         assert finals[0].kind == EventKind.SEGMENT_FINAL
         assert not any(partial.kind == EventKind.EOU for partial in result.partials)
         assert "eou_source" not in result.raw
+        # No hold by default: the terminator follows the last audio byte.
         assert result.raw["endpoint_config"] == {"eou_grace_ms": 0}
         assert result.ttft_s is not None
         assert result.finalize_s is not None
@@ -369,6 +383,22 @@ class TestLiveProtocol:
         assert result.raw["endpoint_config"] == {"eou_grace_ms": 500}
         assert result.finalize_s is not None
         assert result.finalize_s < 0.5
+
+    async def test_silent_clip_closes_right_after_terminator(self, gemini_ws: FakeGeminiWs) -> None:
+        gemini_ws.silent = True
+        adapter = stt.create("gemini-35-transcribe-live", {"eou_grace_ms": 0})
+
+        started = time.perf_counter()
+        result = await adapter.transcribe_stream(make_clip(0.2), chunk_ms=20, realtime=False)
+
+        assert time.perf_counter() - started < PROMPT_CLOSE_S
+        assert result.error is None, result.error
+        assert result.text == ""
+        assert result.partials == []
+        assert result.ttft_s is None
+        assert result.finalize_s is None
+        assert gemini_ws.audio_stream_end is True
+        assert "eou_source" not in result.raw
 
     async def test_non_16khz_audio_is_resampled(self, gemini_ws: FakeGeminiWs) -> None:
         clip = make_clip(0.2, rate=8000)
@@ -453,9 +483,10 @@ def _spoken_wav_clip() -> AudioClip:
 class TestLiveSmoke:
     """Short opt-in calls against the real Gemini preview endpoints.
 
-    The silent-clip stream test is slow by design: the live endpoint sends
-    nothing after ``audio_stream_end`` when it detected no speech, so the
-    session runs until the driver's finalize timeout.
+    The silent-clip stream test also exercises the drain path: the live
+    endpoint sends nothing after ``audio_stream_end`` when it heard no
+    speech, and the adapter closes the session itself once ``DRAIN_WAIT_S``
+    passes.
     """
 
     @_needs("GEMINI_API_KEY")

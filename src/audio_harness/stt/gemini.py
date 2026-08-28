@@ -61,6 +61,17 @@ GEMINI_SAMPLE_RATE = 16000
 EOU_SOURCE = "speechState:NON_SPEECH"
 """The Live API frame recorded as the end-of-utterance decision."""
 
+DRAIN_WAIT_S = 0.5
+"""How long after ``audio_stream_end`` to wait for the server to open a segment.
+
+The endpoint answers the terminator only by flushing a segment it already
+holds open; with nothing open it sends no frame at all, so the adapter closes
+once this window passes without one. On the verification clip server VAD
+announced speech about 160 ms after onset plus one ~70 ms round trip, so
+half a second is several times that margin while a silent clip no longer
+sits out the driver's full finalize timeout.
+"""
+
 
 def _bcp47(language: str) -> str:
     """Expand the benchmark's bare English/Japanese tags to regional tags."""
@@ -199,15 +210,24 @@ class GeminiTranscribeLive(SttProvider):
     ``NON_SPEECH`` received before this adapter sends its ``audio_stream_end``
     terminator is a genuine voice-activity decision; one received after it is
     the server's answer to our own forced end and is not recorded.
-    ``eou_grace_ms`` defaults to 1000 ms (0 disables the hold) specifically
-    to give server VAD a fair window to fire before the terminator forces the
-    issue. On the 2.9 s verification clip, which ends with 0.7 s of silence,
-    VAD did *not* fire inside that window: the final, ``generationComplete``
-    and ``NON_SPEECH`` all arrived about 0.2 s after the terminator, so
-    ``finalize_s`` carried the full grace delay. A timestamp gate against
-    ``audio_end_s`` is biased because clips carry trailing silence that can
-    outlast or fall short of the server's VAD tail, so genuine VAD decisions
-    can land on either side of that timestamp.
+    ``eou_grace_ms`` (default 0) is an opt-in wall-clock hold between the
+    last audio byte and the terminator. No audio is sent during the hold, so
+    all it can do is let a VAD decision that is already pending arrive before
+    the terminator; it cannot make a frame-driven VAD fire, and the
+    2026-08-28 verification indicates this one is frame-driven: on a 2.9 s
+    clip ending in 0.7 s of silence a 1000 ms hold produced no EOU — the
+    final, ``generationComplete`` and ``NON_SPEECH`` all arrived about 0.2 s
+    after the terminator — and the same day's 30-clip English benchmark at
+    that hold saw in-window EOUs on 3 clips only, each with well over a
+    second of trailing silence, while every other run paid the full second
+    on ``finalize_s``. So an EOU depends on the clip's own trailing silence,
+    exactly as it does for Deepgram and Chirp 3. Measuring the native EOU
+    belongs to the endpointing config, with an explicit larger
+    ``eou_grace_ms`` and the ``trailing_silence`` synthetic condition; the
+    effective hold is always published through ``endpoint_config``. A
+    timestamp gate against ``audio_end_s`` is biased because clips carry
+    trailing silence that can outlast or fall short of the server's VAD
+    tail, so genuine VAD decisions can land on either side of that timestamp.
 
     The endpoint answers ``audio_stream_end`` only with the flush of a segment
     it still holds open (final, then ``generationComplete``); a silent clip,
@@ -215,16 +235,18 @@ class GeminiTranscribeLive(SttProvider):
     all — live-verified with a 0.8 s silent clip, which otherwise sat out the
     driver's full finalize timeout. So the session ends on the first
     ``generationComplete`` after the terminator when a segment is open, and
-    by closing the socket right after the terminator when none is; the
-    driver's finalize timeout remains the backstop.
+    by closing the socket once ``DRAIN_WAIT_S`` passes after the terminator
+    with none open; the driver's finalize timeout remains the backstop.
 
     Options:
         model: Model identifier; defaults to ``gemini-3.5-transcribe-live``.
         mode: Transcription formatting mode; defaults to ``VERBATIM``.
         language_codes: List of BCP-47 language codes; defaults to the clip's
             language after bare-tag expansion.
-        eou_grace_ms: Milliseconds to wait for server VAD before sending the
-            terminator; defaults to 1000. Set to 0 to disable the hold.
+        eou_grace_ms: Optional wall-clock hold before the terminator, in
+            milliseconds; defaults to 0 because a hold cannot make this
+            frame-driven VAD fire (see above). Endpointing configs set it
+            explicitly.
     """
 
     key = "gemini-35-transcribe-live"
@@ -239,17 +261,17 @@ class GeminiTranscribeLive(SttProvider):
     async def transcribe_stream(self, clip: AudioClip, *, chunk_ms: int, realtime: bool) -> SttResult:
         """Stream 16 kHz PCM to Gemini's Live API and assemble its transcript.
 
-        When VAD does not fire during ``eou_grace_ms``, the forced final's
-        ``finalize_s`` includes the full grace delay. This is a conservative
-        penalty against the lane, and the effective delay is published through
-        ``endpoint_config`` so rankings remain interpretable instead of being
-        silently distorted.
+        When a non-zero ``eou_grace_ms`` is configured and VAD does not fire
+        during it, the forced final's ``finalize_s`` includes the full hold.
+        This is a conservative penalty against the lane, and the effective
+        hold is published through ``endpoint_config`` so rankings remain
+        interpretable instead of being silently distorted.
         """
         result = self._result(clip, Mode.STREAM)
         timeline = StreamTimeline()
         wire_clip = clip if clip.sample_rate == GEMINI_SAMPLE_RATE else _resample_clip(clip, GEMINI_SAMPLE_RATE)
         handler = _TranscriptionHandler()
-        eou_grace_ms = int(self.options.get("eou_grace_ms", 1000))
+        eou_grace_ms = int(self.options.get("eou_grace_ms", 0))
 
         async def configure(socket: ClientConnection) -> None:
             setup = {
@@ -269,11 +291,7 @@ class GeminiTranscribeLive(SttProvider):
                 await asyncio.sleep(eou_grace_ms / 1000)
             await socket.send(orjson.dumps({"realtime_input": {"audio_stream_end": True}}).decode())
             handler.terminator_sent = True
-            if not handler.segment_open:
-                # The endpoint answers audio_stream_end with nothing at all
-                # once its last segment is already flushed, or when it heard
-                # no speech; closing here ends the session instead of sitting
-                # out the driver's finalize timeout.
+            if not await handler.segment_opens_within(DRAIN_WAIT_S):
                 await socket.close()
 
         await run_stream(
@@ -354,19 +372,27 @@ def _resample_clip(clip: AudioClip, target_rate: int) -> AudioClip:
 class _TranscriptionHandler:
     """Record Live API transcription frames and track what the server still owes.
 
+    A segment is open from the server's first ``speechState: SPEECH`` or
+    transcription frame until its ``generationComplete``; an open segment is
+    the only thing ``audio_stream_end`` is answered with.
+
     Attributes:
-        segment_open: Whether the server has started a segment (``speechState:
-            SPEECH`` or any transcription frame) that no ``generationComplete``
-            has closed yet — the only case in which ``audio_stream_end`` is
-            answered with more frames.
         terminator_sent: Whether the adapter has sent ``audio_stream_end``.
     """
 
-    __slots__ = ("segment_open", "terminator_sent")
+    __slots__ = ("_segment_open", "terminator_sent")
 
     def __init__(self) -> None:
-        self.segment_open = False
+        self._segment_open = asyncio.Event()
         self.terminator_sent = False
+
+    async def segment_opens_within(self, timeout_s: float) -> bool:
+        """Wait up to ``timeout_s`` for a segment to be open; ``True`` if one is."""
+        try:
+            await asyncio.wait_for(self._segment_open.wait(), timeout_s)
+        except TimeoutError:
+            return False
+        return True
 
     def __call__(self, payload: Any, timeline: StreamTimeline) -> bool:
         """Record one decoded Gemini frame and report whether the session ends."""
@@ -388,12 +414,12 @@ class _TranscriptionHandler:
         if final is not None:
             timeline.record(final, is_final=True)
         if server_content.get("speechState") == "SPEECH" or interim is not None or final is not None:
-            self.segment_open = True
+            self._segment_open.set()
         if server_content.get("speechState") == "NON_SPEECH" and not self.terminator_sent:
             timeline.record("", is_final=False, kind=EventKind.EOU)
         if server_content.get("generationComplete") is not True:
             return False
-        self.segment_open = False
+        self._segment_open.clear()
         return self.terminator_sent
 
 
