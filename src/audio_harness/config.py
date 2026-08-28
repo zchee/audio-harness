@@ -179,6 +179,19 @@ STT_PRICING: dict[str, SttPricing] = {
         "typical speech density (Realtime-session and REST transcription "
         "use the same model/rate); verified 2026-08-07",
     ),
+    "gemini-35-transcribe": SttPricing(
+        batch_per_hour=0.30,
+        note="token-billed; Google's blended ~$0.005/audio-min estimate "
+        "($2.50/1M audio-input tokens, $12/1M output at ~25 audio tok/s, "
+        "~175 output tok/min); public preview; announced rates 2026-08-28, "
+        "not yet re-verified against the live pricing page",
+    ),
+    "gemini-35-transcribe-live": SttPricing(
+        stream_per_hour=0.54,
+        note="token-billed; ~$0.009/audio-min blended ($3.50/1M audio-input, "
+        "$21/1M output); Live API public preview; announced rates 2026-08-28, "
+        "not yet re-verified against the live pricing page",
+    ),
     "apple-speech-stt": SttPricing(
         stream_per_hour=0.0,
         note="on-device local compute; bills no hosted vendor. Latency and "
