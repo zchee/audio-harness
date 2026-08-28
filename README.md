@@ -32,7 +32,7 @@ flowchart TB
     end
 
     subgraph ADAPT["Vendor adapters (registry)"]
-        STT["stt/ - 19 adapters<br/>direct WS/HTTP wire protocols;<br/>privacy controls built in<br/>(mip_opt_out, delete_after + evidence, region)"]
+        STT["stt/ - 33 adapters<br/>direct WS/HTTP wire protocols;<br/>privacy controls built in<br/>(mip_opt_out, delete_after + evidence, region)"]
         TTS["tts/ - 13 adapters"]
         WS["stt/ws.py<br/>shared streaming base"]
     end
@@ -85,7 +85,7 @@ isolation for judge-based lanes, and pricing treated as dated data that rots.
 
 ## Providers
 
-58 registered lanes (31 STT, 27 TTS). `uv run audio-harness providers`
+60 registered lanes (33 STT, 27 TTS). `uv run audio-harness providers`
 prints this matrix from the live registry.
 
 ### STT
@@ -99,6 +99,8 @@ prints this matrix from the live registry.
 | `standard` | Standard operating point | yes | yes |
 | `universal-3-5-pro` | Universal-3.5 pro | yes | yes |
 | `chirp_3` | Chirp 3 (STT v2, gRPC SDK) | yes | yes |
+| `gemini-3.5-transcribe` | Gemini 3.5 Transcribe (public preview) | yes | — |
+| `gemini-3.5-transcribe-live` | Gemini 3.5 Transcribe Live (public preview; Live API WebSocket) | — | yes |
 | `gpt-transcribe` | gpt-transcribe | yes | — |
 | `gpt-4o-transcribe` | gpt-4o-transcribe | yes | yes |
 | `gpt-4o-transcribe-diarize` | gpt-4o-transcribe-diarize | yes | — |
